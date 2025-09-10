@@ -9,8 +9,17 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-from scrapers.playwright_equibase_scraper import PlaywrightEquibaseScraper
-from scrapers.smartpick_scraper import SmartPickRaceScraper
+# Import scrapers with fallback handling
+try:
+    from scrapers.playwright_equibase_scraper import PlaywrightEquibaseScraper
+    from scrapers.smartpick_scraper import SmartPickRaceScraper
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"Playwright scrapers not available: {e}")
+    from scrapers.fallback_scraper import FallbackEquibaseScraper, FallbackSmartPickScraper
+    PlaywrightEquibaseScraper = FallbackEquibaseScraper
+    SmartPickRaceScraper = FallbackSmartPickScraper
+    PLAYWRIGHT_AVAILABLE = False
 from race_prediction_engine import RacePredictionEngine
 from services.session_manager import SessionManager
 from services.openrouter_client import OpenRouterClient
@@ -190,8 +199,13 @@ class OrchestrationService:
             if horses_to_scrape_fresh:
                 logger.info(f"Scraping {len(horses_to_scrape_fresh)} horses (cached: {cached_count})")
                 
-                async with PlaywrightEquibaseScraper() as scraper:
-                    scraped_data = await scraper.scrape_multiple_horses(horses_to_scrape_fresh)
+                if PLAYWRIGHT_AVAILABLE:
+                    async with PlaywrightEquibaseScraper() as scraper:
+                        scraped_data = await scraper.scrape_multiple_horses(horses_to_scrape_fresh)
+                else:
+                    # Use fallback scraper
+                    scraper = PlaywrightEquibaseScraper()  # Actually FallbackEquibaseScraper
+                    scraped_data = await scraper.scrape_horse_data(horses_to_scrape_fresh)
                     
                     # Cache and merge scraped data
                     for horse_name, horse_data in scraped_data.items():

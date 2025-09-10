@@ -316,12 +316,26 @@ if __name__ == "__main__":
 
     # Get port from environment (Render.com uses $PORT)
     port = int(os.environ.get("PORT", 8000))
+    environment = os.environ.get("ENVIRONMENT", "development")
 
     # Run development/production server
-    uvicorn.run(
-        "app:app",
-        host="0.0.0.0",
-        port=port,
-        reload=bool(os.environ.get("RELOAD", False)),
-        log_level=os.environ.get("LOG_LEVEL", "info").lower()
-    )
+    if environment == "production":
+        # For production, we'll use Gunicorn (started by start.sh)
+        # This is just a fallback
+        uvicorn.run(
+            "app:app",
+            host="0.0.0.0",
+            port=port,
+            reload=False,
+            log_level=os.environ.get("LOG_LEVEL", "info").lower(),
+            workers=1
+        )
+    else:
+        # Development mode
+        uvicorn.run(
+            "app:app",
+            host="0.0.0.0",
+            port=port,
+            reload=bool(os.environ.get("RELOAD", True)),
+            log_level=os.environ.get("LOG_LEVEL", "info").lower()
+        )
