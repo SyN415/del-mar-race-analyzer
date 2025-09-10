@@ -1,0 +1,5 @@
+
+# Large files tracked with Git LFS
+
+# Track the specific large file from Playwright
+venv/lib/python3.12/site-packages/playwright/driver/node filter=lfs diff=lfs merge=lfs -text
