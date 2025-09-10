@@ -1,9 +1,9 @@
 services:
   - type: web
-    name: del-mar-analyzer
-    runtime: python3
-    buildCommand: "pip install -r requirements.txt && python -m playwright install chromium --with-deps"
-    startCommand: "uvicorn app:app --host 0.0.0.0 --port $PORT"
+    name: del-mar-analyzer-docker
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: ../
     plan: standard
     healthCheckPath: /health
     autoDeploy: false
@@ -26,3 +26,11 @@ services:
         value: "INFO"
       - key: DEBUG
         value: "false"
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "/ms-playwright"
+      - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
+        value: "0"
+    disk:
+      name: del-mar-data
+      mountPath: /app/data
+      sizeGB: 1
