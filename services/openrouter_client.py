@@ -71,16 +71,14 @@ class OpenRouterClient:
     # Available models with configurations
     MODELS = {
         # Fast tier - Quick responses for simple tasks
-        "openai/gpt-3.5-turbo": ModelConfig("openai/gpt-3.5-turbo", ModelTier.FAST, 4096, 0.002, 1.5, 0.95),
-        "anthropic/claude-3-haiku": ModelConfig("anthropic/claude-3-haiku", ModelTier.FAST, 4096, 0.0025, 2.0, 0.93),
+        "x-ai/grok-code-fast-1": ModelConfig("x-ai/grok-code-fast-1", ModelTier.FAST, 8192, 0.003, 2.0, 0.94),
 
         # Balanced tier - Good performance for most tasks
-        "openai/gpt-4o-mini": ModelConfig("openai/gpt-4o-mini", ModelTier.BALANCED, 8192, 0.015, 3.0, 0.97),
-        "anthropic/claude-3-sonnet": ModelConfig("anthropic/claude-3-sonnet", ModelTier.BALANCED, 8192, 0.03, 4.0, 0.96),
+        "z-ai/glm-4.5": ModelConfig("z-ai/glm-4.5", ModelTier.BALANCED, 8192, 0.02, 3.5, 0.96),
 
         # Premium tier - Best quality for complex analysis
-        "openai/gpt-4o": ModelConfig("openai/gpt-4o", ModelTier.PREMIUM, 8192, 0.06, 5.0, 0.98),
-        "anthropic/claude-3-opus": ModelConfig("anthropic/claude-3-opus", ModelTier.PREMIUM, 8192, 0.075, 6.0, 0.97),
+        "moonshotai/kimi-k2-0905": ModelConfig("moonshotai/kimi-k2-0905", ModelTier.PREMIUM, 16384, 0.04, 4.0, 0.98),
+        "qwen/qwen3-coder": ModelConfig("qwen/qwen3-coder", ModelTier.PREMIUM, 12288, 0.035, 3.8, 0.97),
     }
 
     def __init__(self, config):
@@ -98,10 +96,10 @@ class OpenRouterClient:
 
         # Model selection preferences
         self.preferred_models = {
-            "scraping": "openai/gpt-4o-mini",  # Good balance for scraping tasks
-            "analysis": "anthropic/claude-3-sonnet",  # Excellent for analysis
-            "betting": "openai/gpt-4o",  # Premium for betting recommendations
-            "fallback": "openai/gpt-3.5-turbo"  # Fast fallback
+            "scraping": "z-ai/glm-4.5",  # Good balance for scraping tasks
+            "analysis": "qwen/qwen3-coder",  # Excellent for analysis and coding
+            "betting": "moonshotai/kimi-k2-0905",  # Premium for betting recommendations
+            "fallback": "x-ai/grok-code-fast-1"  # Fast fallback
         }
         
     def _get_api_key_from_env(self) -> Optional[str]:
@@ -128,8 +126,8 @@ class OpenRouterClient:
                 return max(tier_models, key=lambda m: self.MODELS[m].reliability_score)
 
         # Use task-specific preferences
-        preferred = self.preferred_models.get(task_type, "openai/gpt-4o-mini")
-        return preferred if preferred in self.MODELS else "openai/gpt-4o-mini"
+        preferred = self.preferred_models.get(task_type, "z-ai/glm-4.5")
+        return preferred if preferred in self.MODELS else "z-ai/glm-4.5"
 
     async def call_model(self, model: str = None, prompt: str = "", context: Dict = None,
                         max_tokens: int = None, temperature: float = 0.7,
@@ -677,9 +675,9 @@ class OpenRouterClient:
 
         # Test different model tiers
         test_models = [
-            ("openai/gpt-3.5-turbo", "fast"),
-            ("openai/gpt-4o-mini", "balanced"),
-            ("openai/gpt-4o", "premium")
+            ("x-ai/grok-code-fast-1", "fast"),
+            ("z-ai/glm-4.5", "balanced"),
+            ("moonshotai/kimi-k2-0905", "premium")
         ]
 
         for model, tier in test_models:
