@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: del-mar-analyzer
+    runtime: python3
+    buildCommand: "pip install -r requirements.txt && python -m playwright install chromium --with-deps"
+    startCommand: "uvicorn app:app --host 0.0.0.0 --port $PORT"
+    plan: standard
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: DATABASE_URL
+        value: sqlite:///./del_mar_analyzer.db
+      - key: OPENROUTER_API_KEY
+        fromSecret: openrouter-api-key
+      - key: SECRET_KEY
+        generateSecret: true
+      - key: SCRAPER_USER_AGENT
+        value: "Mozilla/5.0 (compatible; DelMar-Analyzer/1.0; +https://delmar-analyzer.onrender.com)"
+      - key: SCRAPER_HEADLESS
+        value: "true"
+      - key: SCRAPER_TIMEOUT
+        value: "45"
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: DEBUG
+        value: "false"

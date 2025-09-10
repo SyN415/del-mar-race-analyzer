@@ -1,0 +1,8 @@
+2025-09-04 23:57:16,106 | INFO | playwright_full_card | === Playwright-Based Full Card Analysis ===
+2025-09-04 23:57:16,106 | INFO | playwright_full_card | Date: 09/05/2025
+2025-09-04 23:57:16,111 | INFO | playwright_full_card | Total horses in card: 0
+2025-09-04 23:57:16,111 | INFO | playwright_full_card | Horses with profile URLs: 0
+2025-09-04 23:57:16,111 | INFO | playwright_full_card | === SmartPick Data Collection ===
+2025-09-04 23:57:16,111 | INFO | playwright_full_card | Scraping SmartPick data for 8 races
+2025-09-04 23:57:16,111 | INFO | playwright_full_card | 🎯 Scraping SmartPick data for 8 races on 09/05/2025
+2025-09-04 23:57:16,111 | ERROR | playwright_full_card | Pipeline failed: name 'EquibaseDataCollector' is not defined

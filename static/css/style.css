@@ -1,0 +1,390 @@
+/* Del Mar Race Analysis Application - Custom Styles */
+
+:root {
+    --primary-color: #0d6efd;
+    --secondary-color: #6c757d;
+    --success-color: #198754;
+    --warning-color: #ffc107;
+    --danger-color: #dc3545;
+    --info-color: #0dcaf0;
+    --light-color: #f8f9fa;
+    --dark-color: #212529;
+    --purple-color: #6f42c1;
+    --ai-gradient: linear-gradient(45deg, #007bff, #0056b3);
+}
+
+/* Global Styles */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8f9fa;
+}
+
+/* Navigation */
+.navbar-brand {
+    font-weight: 600;
+    font-size: 1.5rem;
+}
+
+.navbar-brand i {
+    color: #ffc107;
+}
+
+/* Cards */
+.card {
+    border: none;
+    border-radius: 12px;
+    transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 25px rgba(0,0,0,0.15) !important;
+}
+
+.card-header {
+    border-radius: 12px 12px 0 0 !important;
+    border-bottom: none;
+    padding: 1.5rem;
+}
+
+/* Buttons */
+.btn {
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s ease-in-out;
+}
+
+.btn-lg {
+    padding: 0.75rem 2rem;
+    font-size: 1.1rem;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+/* Progress Bar */
+.progress {
+    border-radius: 10px;
+    background-color: #e9ecef;
+}
+
+.progress-bar {
+    border-radius: 10px;
+    transition: width 0.6s ease;
+}
+
+/* Forms */
+.form-control, .form-select {
+    border-radius: 8px;
+    border: 2px solid #e9ecef;
+    transition: border-color 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+}
+
+.form-control:focus, .form-select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
+}
+
+.form-label {
+    font-weight: 600;
+    color: var(--dark-color);
+    margin-bottom: 0.5rem;
+}
+
+/* Icons */
+.fa-horse-head {
+    color: #8B4513;
+}
+
+.fa-spider {
+    color: var(--primary-color);
+}
+
+.fa-chart-line {
+    color: var(--success-color);
+}
+
+.fa-robot {
+    color: var(--warning-color);
+}
+
+/* Feature Cards */
+.feature-card {
+    transition: all 0.3s ease;
+    border: 2px solid transparent;
+}
+
+.feature-card:hover {
+    border-color: var(--primary-color);
+    transform: translateY(-5px);
+}
+
+/* Progress Steps */
+.list-group-item {
+    border: none;
+    padding: 0.75rem 0;
+    background: transparent;
+}
+
+.list-group-item i.fa-check {
+    animation: checkmark 0.5s ease-in-out;
+}
+
+@keyframes checkmark {
+    0% { transform: scale(0); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+}
+
+.list-group-item i.fa-spinner {
+    animation: spin 1s linear infinite;
+}
+
+/* Results Tables */
+.table {
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.table thead th {
+    background-color: var(--primary-color);
+    color: white;
+    border: none;
+    font-weight: 600;
+}
+
+.table tbody tr:hover {
+    background-color: rgba(13, 110, 253, 0.05);
+}
+
+/* Race Cards */
+.race-card {
+    border-left: 4px solid var(--primary-color);
+    margin-bottom: 2rem;
+}
+
+.race-card .card-header {
+    background: linear-gradient(135deg, var(--primary-color), #0056b3);
+}
+
+.horse-prediction {
+    border-left: 3px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.horse-prediction.top-pick {
+    border-left-color: var(--success-color);
+    background-color: rgba(25, 135, 84, 0.05);
+}
+
+.horse-prediction.second-pick {
+    border-left-color: var(--warning-color);
+    background-color: rgba(255, 193, 7, 0.05);
+}
+
+.horse-prediction.third-pick {
+    border-left-color: var(--info-color);
+    background-color: rgba(13, 202, 240, 0.05);
+}
+
+/* Badges */
+.badge {
+    font-size: 0.8em;
+    padding: 0.5em 0.75em;
+    border-radius: 6px;
+}
+
+/* Loading States */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.spinner-border-lg {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .container {
+        padding-left: 15px;
+        padding-right: 15px;
+    }
+    
+    .card-body {
+        padding: 1.5rem;
+    }
+    
+    .btn-lg {
+        padding: 0.6rem 1.5rem;
+        font-size: 1rem;
+    }
+    
+    .display-4 {
+        font-size: 2rem;
+    }
+}
+
+/* Dark Mode Support */
+@media (prefers-color-scheme: dark) {
+    body {
+        background-color: #1a1a1a;
+        color: #ffffff;
+    }
+    
+    .card {
+        background-color: #2d2d2d;
+        color: #ffffff;
+    }
+    
+    .bg-light {
+        background-color: #3d3d3d !important;
+    }
+    
+    .text-muted {
+        color: #adb5bd !important;
+    }
+}
+
+/* Animation Classes */
+.fade-in {
+    animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.slide-up {
+    animation: slideUp 0.6s ease-out;
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(30px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Utility Classes */
+.text-shadow {
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+}
+
+.box-shadow-lg {
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+}
+
+.border-radius-lg {
+    border-radius: 12px;
+}
+
+/* Footer */
+footer {
+    margin-top: auto;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--primary-color);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #0056b3;
+}
+
+/* AI Enhancement Styles */
+.bg-gradient-primary {
+    background: var(--ai-gradient) !important;
+}
+
+.text-purple {
+    color: var(--purple-color) !important;
+}
+
+.badge.bg-light.text-primary {
+    background-color: rgba(255, 255, 255, 0.9) !important;
+    color: var(--primary-color) !important;
+    font-weight: 500;
+}
+
+.alert-info {
+    background-color: rgba(13, 202, 240, 0.1);
+    border-color: rgba(13, 202, 240, 0.2);
+    color: #055160;
+    border-radius: 8px;
+}
+
+.border-primary {
+    border-color: var(--primary-color) !important;
+}
+
+.border-success {
+    border-color: var(--success-color) !important;
+}
+
+.border-info {
+    border-color: var(--info-color) !important;
+}
+
+/* AI Confidence Indicators */
+.badge.bg-secondary {
+    background-color: var(--secondary-color) !important;
+    font-size: 0.7em;
+}
+
+.text-info {
+    color: var(--info-color) !important;
+}
+
+/* Enhanced Card Styles for AI */
+.card.border-primary:hover {
+    box-shadow: 0 8px 25px rgba(13, 110, 253, 0.2) !important;
+}
+
+.card.border-success:hover {
+    box-shadow: 0 8px 25px rgba(25, 135, 84, 0.2) !important;
+}
+
+.card.border-info:hover {
+    box-shadow: 0 8px 25px rgba(13, 202, 240, 0.2) !important;
+}
+
+/* AI Strategy Cards */
+.card-body .h6.text-primary,
+.card-body .h6.text-success,
+.card-body .h6.text-info {
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+/* Value Score Styling */
+.text-warning.small {
+    font-weight: 500;
+}
+
+/* AI Enhancement Alert */
+.alert-info .fas.fa-robot {
+    color: var(--info-color);
+    font-size: 1.1em;
+}

@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Error - {{ title }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-8">
+        <div class="text-center mb-5">
+            <div class="display-1 text-danger mb-3">
+                <i class="fas fa-exclamation-triangle"></i>
+            </div>
+            <h1 class="display-4 text-danger mb-3">Oops! Something went wrong</h1>
+            <p class="lead text-muted">
+                We encountered an error while processing your request.
+            </p>
+        </div>
+
+        <div class="card shadow-lg">
+            <div class="card-header bg-danger text-white">
+                <h3 class="card-title mb-0">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    AI-Enhanced Analysis Error
+                    {% if error_type == 'ai_service' %}
+                    <span class="badge bg-warning text-dark ms-2">
+                        <i class="fas fa-robot me-1"></i>AI Service Issue
+                    </span>
+                    {% endif %}
+                </h3>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-danger" role="alert">
+                    <h5 class="alert-heading">Error Message:</h5>
+                    <p class="mb-0">{{ error or "An unknown error occurred" }}</p>
+                </div>
+                
+                <!-- AI Service Status Check -->
+                {% if error_type == 'ai_service' %}
+                <div class="alert alert-info mb-4">
+                    <h6 class="alert-heading">
+                        <i class="fas fa-robot me-1"></i>
+                        AI Service Status
+                    </h6>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="d-flex align-items-center mb-2">
+                                <span class="badge bg-secondary me-2">●</span>
+                                <small>OpenRouter Client</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="d-flex align-items-center mb-2">
+                                <span class="badge bg-secondary me-2">●</span>
+                                <small>Scraping Assistant</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="d-flex align-items-center mb-2">
+                                <span class="badge bg-secondary me-2">●</span>
+                                <small>Analysis Enhancer</small>
+                            </div>
+                        </div>
+                    </div>
+                    <hr>
+                    <div class="small">
+                        <strong>Note:</strong> The system can still perform basic analysis without AI enhancement.
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="mt-4">
+                    <h6>
+                        <i class="fas fa-lightbulb me-1"></i>
+                        Recovery Suggestions:
+                    </h6>
+                    <ul class="list-unstyled">
+                        {% if error_type == 'scraping' %}
+                        <li class="mb-2">
+                            <i class="fas fa-check-circle text-success me-2"></i>
+                            <span>Try again in a few minutes - the website may be temporarily unavailable</span>
+                        </li>
+                        <li class="mb-2">
+                            <i class="fas fa-check-circle text-success me-2"></i>
+                            <span>Check if the race date is valid and races are available</span>
+                        </li>
+                        <li class="mb-2">
+                            <i class="fas fa-check-circle text-success me-2"></i>
+                            <span>Consider using a different AI model for enhanced scraping assistance</span>
+                        </li>
+                        {% elif error_type == 'ai_service' %}
+                        <li class="mb-2">
+                            <i class="fas fa-check-circle text-success me-2"></i>
+                            <span>Try using a different AI model (GPT-3.5 Turbo for faster processing)</span>
+                        </li>
+                        <li class="mb-2">
+                            <i class="fas fa-check-circle text-success me-2"></i>
+                            <span>The system will fall back to algorithmic analysis without AI enhancement</span>
+                        </li>
+                        <li class="mb-2">
+                            <i class="fas fa-check-circle text-success me-2"></i>
+                            <span>Check your internet connection and try again</span>
+                        </li>
+                        {% else %}
+                        <li class="mb-2">
+                            <i class="fas fa-redo text-primary me-2"></i>
+                            <a href="javascript:history.back()" class="text-decoration-none">Go back and try again</a>
+                        </li>
+                        <li class="mb-2">
+                            <i class="fas fa-home text-success me-2"></i>
+                            <a href="/" class="text-decoration-none">Return to home page</a>
+                        </li>
+                        <li class="mb-2">
+                            <i class="fas fa-heartbeat text-info me-2"></i>
+                            <a href="/health" class="text-decoration-none">Check system status</a>
+                        </li>
+                        {% endif %}
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="text-center mt-4">
+            <a href="/" class="btn btn-primary btn-lg">
+                <i class="fas fa-home me-2"></i>
+                Back to Home
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

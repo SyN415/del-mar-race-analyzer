@@ -1,0 +1,91 @@
+{
+  "date": "09/05/2025",
+  "track": "DMR",
+  "races": [
+    {
+      "race_number": 1,
+      "post_time": "3:00 PM PT",
+      "race_type": "Maiden Claiming",
+      "purse": "$40,000",
+      "distance": "Five And One Half Furlongs",
+      "surface": "dirt",
+      "conditions": "For Maidens, Two Years Old. Claiming Price $50,000",
+      "horses": [
+        {
+          "name": "H Q Wilson",
+          "post_position": 1,
+          "program_number": 1,
+          "age_sex": "2/C",
+          "jockey": "E A Maldonado",
+          "trainer": "D F O'Neill",
+          "weight": 122,
+          "claim_price": "$50,000",
+          "morning_line": "4/1",
+          "profile_url": "https://www.equibase.com/profiles/Results.cfm?type=Horse&refno=PLACEHOLDER&registry=T"
+        },
+        {
+          "name": "Opus Uno",
+          "post_position": 2,
+          "program_number": 2,
+          "age_sex": "2/G",
+          "jockey": "R Silvera",
+          "trainer": "P Miller",
+          "weight": 122,
+          "claim_price": "$50,000",
+          "morning_line": "7/2",
+          "profile_url": "https://www.equibase.com/profiles/Results.cfm?type=Horse&refno=PLACEHOLDER&registry=T"
+        },
+        {
+          "name": "In the Mix",
+          "post_position": 3,
+          "program_number": 3,
+          "age_sex": "2/C",
+          "jockey": "A Fresu",
+          "trainer": "D F O'Neill",
+          "weight": 122,
+          "claim_price": "$50,000",
+          "morning_line": "3/1",
+          "profile_url": "https://www.equibase.com/profiles/Results.cfm?type=Horse&refno=PLACEHOLDER&registry=T"
+        },
+        {
+          "name": "Texas Wildcat",
+          "post_position": 4,
+          "program_number": 4,
+          "age_sex": "2/C",
+          "jockey": "K Frey",
+          "trainer": "P A Oviedo",
+          "weight": 122,
+          "claim_price": "$50,000",
+          "morning_line": "8/1",
+          "profile_url": "https://www.equibase.com/profiles/Results.cfm?type=Horse&refno=PLACEHOLDER&registry=T"
+        },
+        {
+          "name": "Another Juanito",
+          "post_position": 5,
+          "program_number": 5,
+          "age_sex": "2/G",
+          "jockey": "R Jaime",
+          "trainer": "V L Garcia",
+          "weight": 122,
+          "claim_price": "$50,000",
+          "morning_line": "8/1",
+          "profile_url": "https://www.equibase.com/profiles/Results.cfm?type=Horse&refno=PLACEHOLDER&registry=T"
+        },
+        {
+          "name": "Jewlz",
+          "post_position": 6,
+          "program_number": 6,
+          "age_sex": "2/F",
+          "jockey": "K Kimura",
+          "trainer": "P Miller",
+          "weight": 119,
+          "claim_price": "$50,000",
+          "morning_line": "2/1",
+          "profile_url": "https://www.equibase.com/profiles/Results.cfm?type=Horse&refno=PLACEHOLDER&registry=T"
+        }
+      ],
+      "horse_count": 6
+    }
+  ],
+  "total_races": 8
+}

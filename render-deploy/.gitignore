@@ -1,0 +1,31 @@
+# Production data
+*.db
+!templates/
+
+# API keys and secrets
+.env*
+
+# Logs and temporary files
+logs/
+*.log
+cache/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Browser data
+.playwright/

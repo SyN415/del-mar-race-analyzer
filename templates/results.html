@@ -1,0 +1,457 @@
+{% extends "base.html" %}
+
+{% block title %}Analysis Results - {{ session_id }}{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <!-- Header -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <div>
+                <h2 class="text-primary mb-1">
+                    <i class="fas fa-chart-bar me-2"></i>
+                    Race Analysis Results
+                </h2>
+                <p class="text-muted mb-0">Session: <code>{{ session_id }}</code></p>
+            </div>
+            <div>
+                <button class="btn btn-outline-primary me-2" onclick="window.print()">
+                    <i class="fas fa-print me-1"></i>
+                    Print
+                </button>
+                <a href="/" class="btn btn-primary">
+                    <i class="fas fa-plus me-1"></i>
+                    New Analysis
+                </a>
+            </div>
+        </div>
+
+        {% if results.error %}
+        <!-- Error Display -->
+        <div class="alert alert-danger" role="alert">
+            <h4 class="alert-heading">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                Analysis Error
+            </h4>
+            <p class="mb-0">{{ results.error }}</p>
+        </div>
+        {% else %}
+        
+        <!-- Enhanced Summary Card with AI Metrics -->
+        {% if results.summary %}
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-success text-white">
+                <h4 class="card-title mb-0">
+                    <i class="fas fa-trophy me-2"></i>
+                    Analysis Summary
+                    {% if results.ai_services_used and results.ai_services_used.openrouter_client %}
+                    <span class="badge bg-light text-dark ms-2">
+                        <i class="fas fa-robot me-1"></i>AI Enhanced
+                    </span>
+                    {% endif %}
+                </h4>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-2 text-center">
+                        <div class="h3 text-primary mb-1">{{ results.summary.total_races or 0 }}</div>
+                        <div class="text-muted">Total Races</div>
+                    </div>
+                    <div class="col-md-2 text-center">
+                        <div class="h3 text-success mb-1">{{ results.summary.total_horses or 0 }}</div>
+                        <div class="text-muted">Horses Analyzed</div>
+                    </div>
+                    <div class="col-md-2 text-center">
+                        <div class="h3 text-info mb-1">{{ "%.1f"|format(results.analysis_duration_seconds or 0) }}s</div>
+                        <div class="text-muted">Analysis Time</div>
+                    </div>
+                    <div class="col-md-2 text-center">
+                        <div class="h3 text-warning mb-1">{{ "%.0f"|format(results.summary.success_rate or 0) }}%</div>
+                        <div class="text-muted">Success Rate</div>
+                    </div>
+                    {% if results.summary.ai_enhanced_races is defined %}
+                    <div class="col-md-2 text-center">
+                        <div class="h3 text-purple mb-1">{{ results.summary.ai_enhanced_races or 0 }}</div>
+                        <div class="text-muted">AI Enhanced</div>
+                    </div>
+                    <div class="col-md-2 text-center">
+                        <div class="h3 text-secondary mb-1">{{ "%.0f"|format(results.summary.average_confidence * 100 or 0) }}%</div>
+                        <div class="text-muted">Avg Confidence</div>
+                    </div>
+                    {% else %}
+                    <div class="col-md-4 text-center">
+                        <div class="h3 text-secondary mb-1">{{ "%.0f"|format(results.summary.success_rate or 0) }}%</div>
+                        <div class="text-muted">Analysis Quality</div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- AI Betting Recommendations -->
+        {% if results.summary and results.summary.betting_recommendations and results.summary.betting_recommendations.betting_strategy %}
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-gradient-primary text-white">
+                <h4 class="card-title mb-0">
+                    <i class="fas fa-robot me-2"></i>
+                    AI Betting Strategy
+                    <span class="badge bg-light text-primary ms-2">Powered by AI</span>
+                </h4>
+            </div>
+            <div class="card-body">
+                {% set betting_strategy = results.summary.betting_recommendations.betting_strategy %}
+
+                {% if betting_strategy.primary_plays %}
+                <div class="mb-4">
+                    <h6 class="text-primary mb-3">
+                        <i class="fas fa-bullseye me-1"></i>
+                        Primary Plays (High Confidence)
+                    </h6>
+                    <div class="row">
+                        {% for play in betting_strategy.primary_plays[:3] %}
+                        <div class="col-md-4 mb-3">
+                            <div class="card border-primary">
+                                <div class="card-body">
+                                    <div class="h6 text-primary">{{ play.horse }}</div>
+                                    <div class="small text-muted mb-2">{{ play.reasoning }}</div>
+                                    <div class="d-flex justify-content-between">
+                                        <span class="badge bg-primary">{{ play.bet_types|join(', ') if play.bet_types else 'Win' }}</span>
+                                        <span class="text-success small">{{ "%.0f"|format(play.confidence * 100) }}% confidence</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if betting_strategy.value_plays %}
+                <div class="mb-4">
+                    <h6 class="text-success mb-3">
+                        <i class="fas fa-gem me-1"></i>
+                        Value Opportunities
+                    </h6>
+                    <div class="row">
+                        {% for play in betting_strategy.value_plays[:2] %}
+                        <div class="col-md-6 mb-3">
+                            <div class="card border-success">
+                                <div class="card-body">
+                                    <div class="h6 text-success">{{ play.horse }}</div>
+                                    <div class="small text-muted mb-2">{{ play.reasoning }}</div>
+                                    <div class="d-flex justify-content-between">
+                                        <span class="badge bg-success">{{ play.bet_types|join(', ') if play.bet_types else 'Value' }}</span>
+                                        <span class="text-warning small">Value Score: {{ "%.2f"|format(play.value_score) }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if betting_strategy.exotic_suggestions %}
+                <div class="mb-3">
+                    <h6 class="text-info mb-3">
+                        <i class="fas fa-dice me-1"></i>
+                        Exotic Betting Suggestions
+                    </h6>
+                    <div class="row">
+                        {% for exotic in betting_strategy.exotic_suggestions[:3] %}
+                        <div class="col-md-4 mb-2">
+                            <div class="card border-info">
+                                <div class="card-body py-2">
+                                    <div class="small">
+                                        <strong>{{ exotic.bet_type|title }}</strong>: {{ exotic.horses|join('-') if exotic.horses else 'Box' }}
+                                        <span class="badge bg-info ms-2">{{ exotic.cost|title }} Cost</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Display text-based strategy if structured data not available -->
+                {% if betting_strategy is string %}
+                <div class="alert alert-info">
+                    <h6 class="alert-heading">AI Betting Strategy:</h6>
+                    <div class="small">{{ betting_strategy|nl2br }}</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Best Bets (Fallback) -->
+        {% if results.summary and results.summary.best_bets and not (results.summary.betting_recommendations and results.summary.betting_recommendations.betting_strategy) %}
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-warning text-dark">
+                <h4 class="card-title mb-0">
+                    <i class="fas fa-star me-2"></i>
+                    Best Bets Across All Races
+                </h4>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for bet in results.summary.best_bets[:3] %}
+                    <div class="col-md-4 mb-3">
+                        <div class="card border-warning">
+                            <div class="card-body text-center">
+                                <div class="h5 text-warning mb-2">
+                                    {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% else %}🥉{% endif %}
+                                    {{ bet.horse_name or 'Unknown' }}
+                                </div>
+                                <div class="text-muted small">Race {{ bet.race_number or 'N/A' }}</div>
+                                <div class="badge bg-warning text-dark mt-2">
+                                    Rating: {{ "%.1f"|format(bet.composite_rating or 0) }}
+                                </div>
+                                <div class="small text-muted mt-1">
+                                    {{ "%.1f"|format(bet.win_probability or 0) }}% Win Probability
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Race Results -->
+        {% if results.race_analyses %}
+        <div class="row">
+            {% for race in results.race_analyses %}
+            <div class="col-12 mb-4">
+                <div class="card race-card shadow-sm">
+                    <div class="card-header">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <h4 class="card-title text-white mb-0">
+                                <i class="fas fa-flag-checkered me-2"></i>
+                                Race {{ race.race_number or 'N/A' }}
+                            </h4>
+                            <div class="text-white-50">
+                                {{ race.race_type or 'Unknown Type' }} | 
+                                {{ race.distance or 'Unknown Distance' }} | 
+                                {{ race.surface or 'Unknown Surface' }}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        {% if race.error %}
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            Error analyzing this race: {{ race.error }}
+                        </div>
+                        {% elif race.predictions %}
+                        
+                        <!-- AI Enhancement Display -->
+                        {% if race.ai_enhancement and race.enhanced %}
+                        <div class="alert alert-info mb-4">
+                            <div class="d-flex align-items-center mb-2">
+                                <i class="fas fa-robot me-2"></i>
+                                <strong>AI Analysis Enhancement</strong>
+                                <span class="badge bg-primary ms-2">Confidence: {{ "%.0f"|format(race.ai_enhancement.overall_confidence * 100) }}%</span>
+                            </div>
+
+                            {% if race.ai_enhancement.key_insights %}
+                            <div class="small">
+                                <strong>Key Insights:</strong>
+                                <ul class="mb-0 mt-1">
+                                    {% for insight in race.ai_enhancement.key_insights[:3] %}
+                                    <li>{{ insight }}</li>
+                                    {% endfor %}
+                                </ul>
+                            </div>
+                            {% endif %}
+
+                            {% if race.ai_enhancement.recommended_strategy %}
+                            <div class="small mt-2">
+                                <strong>AI Strategy:</strong> {{ race.ai_enhancement.recommended_strategy }}
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+
+                        <!-- Top 3 Predictions with AI Enhancement -->
+                        <div class="row mb-4">
+                            {% for prediction in race.predictions[:3] %}
+                            <div class="col-md-4 mb-3">
+                                <div class="horse-prediction {% if loop.index == 1 %}top-pick{% elif loop.index == 2 %}second-pick{% elif loop.index == 3 %}third-pick{% endif %} p-3 rounded">
+                                    <div class="d-flex justify-content-between align-items-start mb-2">
+                                        <div>
+                                            <div class="h5 mb-1">
+                                                {% if loop.index == 1 %}🥇{% elif loop.index == 2 %}🥈{% else %}🥉{% endif %}
+                                                {{ prediction.horse_name or 'Unknown' }}
+                                                {% if race.ai_enhancement and race.ai_enhancement.confidence_analysis and race.ai_enhancement.confidence_analysis[prediction.horse_name] %}
+                                                <span class="badge bg-secondary ms-1 small">
+                                                    AI: {{ race.ai_enhancement.confidence_analysis[prediction.horse_name].level|title }}
+                                                </span>
+                                                {% endif %}
+                                            </div>
+                                            <div class="text-muted small">
+                                                Post #{{ prediction.post_position or 'N/A' }}
+                                            </div>
+                                        </div>
+                                        <div class="text-end">
+                                            <div class="badge bg-primary mb-1">
+                                                {{ "%.1f"|format(prediction.composite_rating or 0) }}
+                                            </div>
+                                            <div class="small text-muted">
+                                                {{ "%.1f"|format(prediction.win_probability or 0) }}%
+                                            </div>
+                                            {% if race.ai_enhancement and race.ai_enhancement.confidence_analysis and race.ai_enhancement.confidence_analysis[prediction.horse_name] %}
+                                            <div class="small text-info">
+                                                AI: {{ "%.0f"|format(race.ai_enhancement.confidence_analysis[prediction.horse_name].score * 100) }}%
+                                            </div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+
+                                    <div class="small text-muted mb-2">
+                                        <strong>J:</strong> {{ prediction.jockey or 'N/A' }}<br>
+                                        <strong>T:</strong> {{ prediction.trainer or 'N/A' }}
+                                    </div>
+
+                                    <!-- AI Value Assessment -->
+                                    {% if race.ai_enhancement and race.ai_enhancement.value_opportunities %}
+                                        {% for value_opp in race.ai_enhancement.value_opportunities %}
+                                            {% if value_opp.horse == prediction.horse_name %}
+                                            <div class="small">
+                                                <span class="badge bg-success">Value Play</span>
+                                                <div class="text-success small mt-1">{{ value_opp.reasoning }}</div>
+                                            </div>
+                                            {% endif %}
+                                        {% endfor %}
+                                    {% endif %}
+                                    
+                                    {% if prediction.factors %}
+                                    <div class="small">
+                                        <div class="row">
+                                            <div class="col-6">
+                                                <div>Speed: {{ "%.1f"|format(prediction.factors.speed_rating or 0) }}</div>
+                                                <div>Form: {{ "%.1f"|format(prediction.factors.form_rating or 0) }}</div>
+                                            </div>
+                                            <div class="col-6">
+                                                <div>Class: {{ "%.1f"|format(prediction.factors.class_rating or 0) }}</div>
+                                                <div>Workout: {{ "%.1f"|format(prediction.factors.workout_rating or 0) }}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+
+                        <!-- Exotic Betting Suggestions -->
+                        {% if race.exotic_suggestions %}
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">
+                                    <i class="fas fa-coins me-1"></i>
+                                    Exotic Betting Suggestions
+                                </h6>
+                                <div class="row">
+                                    {% for bet_type, suggestion in race.exotic_suggestions.items() %}
+                                    <div class="col-md-6 mb-2">
+                                        <strong>{{ bet_type.title() }}:</strong> {{ suggestion }}
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <!-- All Predictions Table -->
+                        {% if race.predictions|length > 3 %}
+                        <div class="mt-4">
+                            <h6>
+                                <i class="fas fa-list me-1"></i>
+                                Complete Field Analysis
+                            </h6>
+                            <div class="table-responsive">
+                                <table class="table table-sm">
+                                    <thead>
+                                        <tr>
+                                            <th>Rank</th>
+                                            <th>Horse</th>
+                                            <th>Post</th>
+                                            <th>Jockey</th>
+                                            <th>Rating</th>
+                                            <th>Win %</th>
+                                            <th>Speed</th>
+                                            <th>Form</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for prediction in race.predictions %}
+                                        <tr>
+                                            <td>{{ loop.index }}</td>
+                                            <td><strong>{{ prediction.horse_name or 'Unknown' }}</strong></td>
+                                            <td>{{ prediction.post_position or 'N/A' }}</td>
+                                            <td>{{ prediction.jockey or 'N/A' }}</td>
+                                            <td>{{ "%.1f"|format(prediction.composite_rating or 0) }}</td>
+                                            <td>{{ "%.1f"|format(prediction.win_probability or 0) }}%</td>
+                                            <td>{{ "%.1f"|format(prediction.factors.speed_rating or 0) if prediction.factors else 'N/A' }}</td>
+                                            <td>{{ "%.1f"|format(prediction.factors.form_rating or 0) if prediction.factors else 'N/A' }}</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        {% else %}
+                        <div class="alert alert-info">
+                            <i class="fas fa-info-circle me-2"></i>
+                            No predictions available for this race.
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="alert alert-info">
+            <h4 class="alert-heading">
+                <i class="fas fa-info-circle me-2"></i>
+                No Results Available
+            </h4>
+            <p class="mb-0">No race analysis results found for this session.</p>
+        </div>
+        {% endif %}
+        
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+// Add any results-specific JavaScript here
+document.addEventListener('DOMContentLoaded', function() {
+    // Animate results cards
+    const raceCards = document.querySelectorAll('.race-card');
+    raceCards.forEach((card, index) => {
+        setTimeout(() => {
+            card.classList.add('fade-in');
+        }, index * 200);
+    });
+    
+    // Add click handlers for detailed views
+    const horsePredictions = document.querySelectorAll('.horse-prediction');
+    horsePredictions.forEach(prediction => {
+        prediction.addEventListener('click', function() {
+            // Could expand to show more details
+            this.classList.toggle('expanded');
+        });
+    });
+});
+</script>
+{% endblock %}

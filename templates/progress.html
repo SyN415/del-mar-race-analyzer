@@ -1,0 +1,290 @@
+{% extends "base.html" %}
+
+{% block title %}Analysis Progress - {{ session_id }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-10">
+        <!-- Header -->
+        <div class="text-center mb-4">
+            <h2 class="text-primary">
+                <i class="fas fa-cogs me-2"></i>
+                Analysis in Progress
+            </h2>
+            <p class="text-muted">Session ID: <code>{{ session_id }}</code></p>
+        </div>
+
+        <!-- Progress Card -->
+        <div class="card shadow-lg">
+            <div class="card-header bg-gradient-primary text-white">
+                <h4 class="card-title mb-0">
+                    <i class="fas fa-chart-line me-2"></i>
+                    AI-Enhanced Real-time Progress
+                    <span class="badge bg-light text-primary ms-2" id="ai-status-badge">
+                        <i class="fas fa-robot me-1"></i>AI Ready
+                    </span>
+                </h4>
+            </div>
+            <div class="card-body p-4">
+                <!-- Progress Bar -->
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="fw-bold">Overall Progress</span>
+                        <span id="progressPercent" class="badge bg-primary">0%</span>
+                    </div>
+                    <div class="progress" style="height: 20px;">
+                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated" 
+                             role="progressbar" style="width: 0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Current Status -->
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    Current Stage
+                                </h6>
+                                <p id="currentStage" class="card-text text-primary fw-bold">
+                                    Initializing...
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card bg-light">
+                            <div class="card-body">
+                                <h6 class="card-title">
+                                    <i class="fas fa-clock me-1"></i>
+                                    Status
+                                </h6>
+                                <p id="statusMessage" class="card-text">
+                                    Starting analysis pipeline...
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Progress Steps -->
+                <div class="mt-4">
+                    <h6 class="mb-3">
+                        <i class="fas fa-list-check me-1"></i>
+                        Analysis Steps
+                    </h6>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <ul class="list-group list-group-flush">
+                                <li class="list-group-item d-flex align-items-center" id="step-initializing">
+                                    <i class="fas fa-circle text-muted me-2"></i>
+                                    <span>Initializing scrapers</span>
+                                </li>
+                                <li class="list-group-item d-flex align-items-center" id="step-race-card">
+                                    <i class="fas fa-circle text-muted me-2"></i>
+                                    <span>Loading race card</span>
+                                </li>
+                                <li class="list-group-item d-flex align-items-center" id="step-horse-data">
+                                    <i class="fas fa-circle text-muted me-2"></i>
+                                    <span>Scraping horse data</span>
+                                </li>
+                            </ul>
+                        </div>
+                        <div class="col-md-6">
+                            <ul class="list-group list-group-flush">
+                                <li class="list-group-item d-flex align-items-center" id="step-smartpick">
+                                    <i class="fas fa-circle text-muted me-2"></i>
+                                    <span>SmartPick enhancement</span>
+                                </li>
+                                <li class="list-group-item d-flex align-items-center" id="step-predictions">
+                                    <i class="fas fa-circle text-muted me-2"></i>
+                                    <span>Generating predictions</span>
+                                </li>
+                                <li class="list-group-item d-flex align-items-center" id="step-complete">
+                                    <i class="fas fa-circle text-muted me-2"></i>
+                                    <span>Analysis complete</span>
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="mt-4 text-center">
+                    <button id="viewResultsBtn" class="btn btn-success btn-lg me-2" style="display: none;">
+                        <i class="fas fa-chart-bar me-2"></i>
+                        View Results
+                    </button>
+                    <button id="cancelBtn" class="btn btn-outline-secondary">
+                        <i class="fas fa-times me-2"></i>
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Live Log (Optional) -->
+        <div class="card mt-4" id="logCard" style="display: none;">
+            <div class="card-header">
+                <h6 class="card-title mb-0">
+                    <i class="fas fa-terminal me-1"></i>
+                    Live Log
+                    <button class="btn btn-sm btn-outline-secondary float-end" onclick="toggleLog()">
+                        <i class="fas fa-eye"></i>
+                    </button>
+                </h6>
+            </div>
+            <div class="card-body">
+                <pre id="liveLog" class="bg-dark text-light p-3 rounded" style="height: 200px; overflow-y: auto; font-size: 0.8em;"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let sessionId = '{{ session_id }}';
+let pollInterval;
+let isComplete = false;
+
+// Step mapping for progress visualization
+const stepMapping = {
+    'initializing': 'step-initializing',
+    'race_card_loaded': 'step-race-card', 
+    'horse_data_scraped': 'step-horse-data',
+    'smartpick_enhanced': 'step-smartpick',
+    'predictions_complete': 'step-predictions',
+    'analysis_complete': 'step-complete'
+};
+
+function updateProgress(status) {
+    // Update progress bar
+    const progressBar = document.getElementById('progressBar');
+    const progressPercent = document.getElementById('progressPercent');
+    
+    progressBar.style.width = status.progress + '%';
+    progressBar.setAttribute('aria-valuenow', status.progress);
+    progressPercent.textContent = status.progress + '%';
+    
+    // Update status text
+    document.getElementById('currentStage').textContent = status.current_stage || 'Processing...';
+    document.getElementById('statusMessage').textContent = status.message || 'Working...';
+    
+    // Update step indicators
+    updateStepIndicators(status.current_stage, status.progress);
+    
+    // Check if complete
+    if (status.status === 'completed') {
+        isComplete = true;
+        progressBar.classList.remove('progress-bar-animated');
+        progressBar.classList.add('bg-success');
+        
+        document.getElementById('viewResultsBtn').style.display = 'inline-block';
+        document.getElementById('cancelBtn').textContent = 'Close';
+        
+        clearInterval(pollInterval);
+    } else if (status.status === 'failed') {
+        isComplete = true;
+        progressBar.classList.remove('progress-bar-animated');
+        progressBar.classList.add('bg-danger');
+        
+        document.getElementById('currentStage').textContent = 'Failed';
+        document.getElementById('statusMessage').textContent = status.message || 'Analysis failed';
+        
+        clearInterval(pollInterval);
+    }
+}
+
+function updateStepIndicators(currentStage, progress) {
+    // Reset all steps
+    Object.values(stepMapping).forEach(stepId => {
+        const element = document.getElementById(stepId);
+        const icon = element.querySelector('i');
+        icon.className = 'fas fa-circle text-muted me-2';
+    });
+    
+    // Update based on progress
+    if (progress >= 5) updateStepIcon('step-initializing', 'check', 'success');
+    if (progress >= 15) updateStepIcon('step-race-card', 'check', 'success');
+    if (progress >= 60) updateStepIcon('step-horse-data', 'check', 'success');
+    if (progress >= 80) updateStepIcon('step-smartpick', 'check', 'success');
+    if (progress >= 95) updateStepIcon('step-predictions', 'check', 'success');
+    if (progress >= 100) updateStepIcon('step-complete', 'check', 'success');
+    
+    // Highlight current step
+    if (stepMapping[currentStage]) {
+        updateStepIcon(stepMapping[currentStage], 'spinner fa-spin', 'primary');
+    }
+}
+
+function updateStepIcon(stepId, iconClass, colorClass) {
+    const element = document.getElementById(stepId);
+    if (element) {
+        const icon = element.querySelector('i');
+        icon.className = `fas fa-${iconClass} text-${colorClass} me-2`;
+    }
+}
+
+async function pollStatus() {
+    try {
+        const response = await fetch(`/api/status/${sessionId}`);
+        if (response.ok) {
+            const status = await response.json();
+            updateProgress(status);
+        } else {
+            console.error('Failed to fetch status');
+        }
+    } catch (error) {
+        console.error('Error polling status:', error);
+    }
+}
+
+function toggleLog() {
+    const logCard = document.getElementById('logCard');
+    logCard.style.display = logCard.style.display === 'none' ? 'block' : 'none';
+}
+
+// Event listeners
+document.getElementById('viewResultsBtn').addEventListener('click', function() {
+    window.location.href = `/results/${sessionId}`;
+});
+
+document.getElementById('cancelBtn').addEventListener('click', function() {
+    if (isComplete) {
+        window.location.href = '/';
+    } else {
+        if (confirm('Are you sure you want to cancel the analysis?')) {
+            clearInterval(pollInterval);
+            window.location.href = '/';
+        }
+    }
+});
+
+// Start polling when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Initial status check
+    pollStatus();
+    
+    // Poll every 2 seconds
+    pollInterval = setInterval(pollStatus, 2000);
+    
+    // Stop polling after 10 minutes to prevent runaway requests
+    setTimeout(() => {
+        if (!isComplete) {
+            clearInterval(pollInterval);
+            console.log('Polling stopped after timeout');
+        }
+    }, 600000); // 10 minutes
+});
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', function() {
+    if (pollInterval) {
+        clearInterval(pollInterval);
+    }
+});
+</script>
+{% endblock %}
