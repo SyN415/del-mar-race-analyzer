@@ -1,0 +1,39 @@
+*.db
+!templates/
+
+# Large files
+*.tar.gz
+*.zip
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Browser data
+.playwright-driver/
+.playwright/
+
+# Logs
+logs/
+*.log
+
+# Secrets
+.env*
