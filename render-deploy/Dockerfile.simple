@@ -1,0 +1,45 @@
+# Simple Dockerfile for Render.com - Minimal Playwright Setup
+FROM python:3.11-slim
+
+# Environment variables
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install minimal system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    wget \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+
+# Create directories
+RUN mkdir -p /app/data /app/logs
+
+# Install Playwright browsers at runtime (fallback approach)
+# This moves browser installation to startup instead of build time
+RUN echo '#!/bin/bash\n\
+echo "Installing Playwright browsers..."\n\
+python -m playwright install-deps 2>/dev/null || echo "Warning: Some system deps failed"\n\
+python -m playwright install chromium 2>/dev/null || echo "Warning: Browser install failed"\n\
+echo "Starting application..."\n\
+exec uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}' > /app/start.sh && \
+    chmod +x /app/start.sh
+
+# Expose port
+EXPOSE 8000
+
+# Use startup script
+CMD ["/app/start.sh"]

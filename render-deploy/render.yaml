@@ -2,11 +2,17 @@ services:
   - type: web
     name: del-mar-analyzer-docker
     runtime: docker
-    dockerfilePath: ./Dockerfile
-    dockerContext: ../
+    dockerfilePath: render-deploy/Dockerfile
+    dockerContext: ./
     plan: standard
     healthCheckPath: /health
     autoDeploy: false
+    buildFilter:
+      paths:
+        - render-deploy/**
+        - requirements.txt
+        - app.py
+        - "**/*.py"
     envVars:
       - key: ENVIRONMENT
         value: production
