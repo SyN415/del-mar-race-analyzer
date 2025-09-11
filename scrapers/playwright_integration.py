@@ -17,7 +17,7 @@ from utils.equipment_normalizer import normalize_horse
 async def scrape_overview():
     """Scrape race card overview using RaceEntryScraper"""
     try:
-        date_str = os.environ.get('RACE_DATE_STR', '09/05/2025')
+        date_str = os.environ.get('RACE_DATE_STR', '09/07/2025')  # Updated to 09/07/2025
         scraper = RaceEntryScraper()
         result = await scraper.scrape_card_overview('DMR', date_str, 'USA')
         return result
@@ -94,12 +94,33 @@ def count_horses_with_profiles(card: Dict) -> int:
 
 def load_race_card() -> Dict:
     """Load or scrape the race card for the date specified by RACE_DATE_STR."""
-    date_str = os.environ.get('RACE_DATE_STR', '09/05/2025')
+    date_str = os.environ.get('RACE_DATE_STR', '09/07/2025')  # Updated to 09/07/2025
     card_path = os.environ.get("RACE_CARD_PATH", f"del_mar_{date_str.replace('/', '_')}_races.json")
+
+    # Force fresh scrape by checking if file has placeholder URLs
     if os.path.exists(card_path):
-        with open(card_path, 'r') as f:
-            return json.load(f)
-    # Not found → scrape via RaceEntryScraper
+        try:
+            with open(card_path, 'r') as f:
+                existing_data = json.load(f)
+            # Check if data has placeholder URLs - if so, re-scrape
+            has_placeholders = False
+            for race in existing_data.get('races', []):
+                for horse in race.get('horses', []):
+                    if 'PLACEHOLDER' in horse.get('profile_url', ''):
+                        has_placeholders = True
+                        break
+                if has_placeholders:
+                    break
+
+            if not has_placeholders:
+                print(f"Loading existing race card from {card_path}")
+                return existing_data
+            else:
+                print(f"Found placeholder URLs in {card_path}, forcing fresh scrape...")
+        except Exception as e:
+            print(f"Error reading existing race card: {e}")
+
+    # Not found or has placeholders → scrape via RaceEntryScraper
     try:
         import asyncio
         scraper = RaceEntryScraper()

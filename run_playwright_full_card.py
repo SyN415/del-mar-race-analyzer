@@ -221,7 +221,7 @@ def merge_smartpick_with_horse_data(horse_data: Dict, smartpick_data: Dict) -> D
 async def scrape_horses():
     """Scrape horse data using Playwright"""
     LOG.info("=== Playwright-Based Full Card Analysis ===")
-    date_str = os.environ.get('RACE_DATE_STR', '09/05/2025')
+    date_str = os.environ.get('RACE_DATE_STR', '09/07/2025')  # Updated to 09/07/2025
     LOG.info(f"Date: {date_str}")
 
     # Load or scrape race card to check profile URLs

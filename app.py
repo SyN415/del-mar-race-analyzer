@@ -8,6 +8,7 @@ with AI-powered enhancements and professional user interface.
 """
 
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -254,16 +255,45 @@ async def run_analysis_pipeline(session_id: str, date: str, llm_model: str, trac
         smartpick_scraper = None
         
         try:
+            # Get session details to set environment variables
+            session_details = None
+            if app_state.session_manager:
+                session_details = await app_state.session_manager.get_session_status(session_id)
+
+            # Set environment variables for the pipeline
+            if session_details and 'race_date' in session_details:
+                race_date = session_details['race_date']
+                os.environ['RACE_DATE_STR'] = race_date
+                logger.info(f"Set RACE_DATE_STR to {race_date}")
+
+                # Force fresh scrape by removing old race card file if it has placeholders
+                old_card_file = f"del_mar_{race_date.replace('-', '_').replace('/', '_')}_races.json"
+                if os.path.exists(old_card_file):
+                    try:
+                        with open(old_card_file, 'r') as f:
+                            existing_data = json.load(f)
+                        # Check for placeholder URLs
+                        has_placeholders = any(
+                            'PLACEHOLDER' in horse.get('profile_url', '')
+                            for race in existing_data.get('races', [])
+                            for horse in race.get('horses', [])
+                        )
+                        if has_placeholders:
+                            os.remove(old_card_file)
+                            logger.info(f"Removed race card file with placeholder URLs: {old_card_file}")
+                    except Exception as e:
+                        logger.warning(f"Error checking race card file: {e}")
+
             # This will be replaced with proper orchestration service
             # For now, use existing pipeline logic
             from run_playwright_full_card import main as run_existing_pipeline
-            
+
             # Update status
             if app_state.session_manager:
                 await app_state.session_manager.update_session_status(
                     session_id, "running", 50, "Running analysis", "Executing analysis pipeline..."
                 )
-            
+
             # Run existing pipeline (temporary integration)
             results = await run_existing_pipeline()
             
