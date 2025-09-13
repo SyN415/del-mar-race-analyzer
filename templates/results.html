@@ -49,6 +49,16 @@
                         <i class="fas fa-robot me-1"></i>AI Enhanced
                     </span>
                     {% endif %}
+                    {% if results.ml_enhanced %}
+                    <span class="badge bg-info text-white ms-2">
+                        <i class="fas fa-brain me-1"></i>ML Enhanced
+                    </span>
+                    {% endif %}
+                    {% if results.kelly_enhanced %}
+                    <span class="badge bg-warning text-dark ms-2">
+                        <i class="fas fa-calculator me-1"></i>Kelly Optimized
+                    </span>
+                    {% endif %}
                 </h4>
             </div>
             <div class="card-body">
@@ -308,6 +318,11 @@
                                                 AI: {{ "%.0f"|format(race.ai_enhancement.confidence_analysis[prediction.horse_name].score * 100) }}%
                                             </div>
                                             {% endif %}
+                                            {% if prediction.ml_prediction %}
+                                            <div class="small text-success">
+                                                ML: {{ "%.1f"|format(prediction.ml_prediction.finish_position) }} pos
+                                            </div>
+                                            {% endif %}
                                         </div>
                                     </div>
 
@@ -315,6 +330,17 @@
                                         <strong>J:</strong> {{ prediction.jockey or 'N/A' }}<br>
                                         <strong>T:</strong> {{ prediction.trainer or 'N/A' }}
                                     </div>
+
+                                    <!-- Kelly Criterion Betting Recommendation -->
+                                    {% if prediction.kelly_recommendation and prediction.kelly_recommendation.stake_size > 0 %}
+                                    <div class="small mb-2">
+                                        <span class="badge bg-warning text-dark">Kelly Bet</span>
+                                        <div class="text-warning small mt-1">
+                                            <strong>Stake:</strong> ${{ "%.2f"|format(prediction.kelly_recommendation.stake_size) }}<br>
+                                            <strong>Confidence:</strong> {{ "%.0f"|format(prediction.kelly_recommendation.confidence) }}%
+                                        </div>
+                                    </div>
+                                    {% endif %}
 
                                     <!-- AI Value Assessment -->
                                     {% if race.ai_enhancement and race.ai_enhancement.value_opportunities %}
@@ -340,6 +366,12 @@
                                                 <div>Workout: {{ "%.1f"|format(prediction.factors.workout_rating or 0) }}</div>
                                             </div>
                                         </div>
+                                    </div>
+                                    {% endif %}
+                                    {% if prediction.kelly %}
+                                    <div class="small mt-2 text-info">
+                                        <div><strong>Optimal Kelly Stake:</strong> {{ prediction.kelly.stake_size }}</div>
+                                        <div><strong>Confidence:</strong> {{ prediction.kelly.confidence }}</div>
                                     </div>
                                     {% endif %}
                                 </div>

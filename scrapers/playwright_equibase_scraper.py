@@ -192,9 +192,9 @@ class PlaywrightEquibaseScraper:
 
             page = await self.context.new_page()
 
-            # Navigate with human-like behavior
-            await page.goto("https://www.equibase.com", wait_until="domcontentloaded")
-            await self.human_like_delay(2000, 4000)
+            # Navigate with human-like behavior (faster timeout)
+            await page.goto("https://www.equibase.com", wait_until="domcontentloaded", timeout=10000)
+            await self.human_like_delay(1000, 2000)  # Reduced delay
 
             # Accept cookies if present
             try:
@@ -212,9 +212,9 @@ class PlaywrightEquibaseScraper:
             if tab_fragment:
                 clean_url = f"{clean_url}#{tab_fragment}"
 
-            # Navigate to profile page
-            await page.goto(clean_url, wait_until="domcontentloaded")
-            await self.human_like_delay(3000, 5000)
+            # Navigate to profile page (faster timeout)
+            await page.goto(clean_url, wait_until="domcontentloaded", timeout=15000)
+            await self.human_like_delay(2000, 3000)  # Reduced delay
             
             # Scroll to trigger content loading
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight / 3)")
@@ -512,9 +512,9 @@ class PlaywrightEquibaseScraper:
 
             page = await self.context.new_page()
 
-            # Navigate to SmartPick page
-            await page.goto(smartpick_url, wait_until="domcontentloaded")
-            await self.human_like_delay(3000, 5000)
+            # Navigate to SmartPick page (faster timeout)
+            await page.goto(smartpick_url, wait_until="domcontentloaded", timeout=10000)
+            await self.human_like_delay(2000, 3000)  # Reduced delay
 
             # Get page content
             content = await page.content()
@@ -689,22 +689,37 @@ class PlaywrightEquibaseScraper:
             return {}
 
     async def scrape_multiple_horses(self, horses_data: List[Tuple[str, str]]) -> Dict[str, Dict]:
-        """Scrape multiple horses with rate limiting"""
+        """Scrape multiple horses with rate limiting and error recovery"""
         results = {}
+        failed_count = 0
+        max_failures = 10  # Stop if too many consecutive failures
 
         for i, (horse_name, profile_url) in enumerate(horses_data):
             print(f"Scraping {horse_name} ({i+1}/{len(horses_data)})...")
 
-            result = await self.scrape_horse_profile(horse_name, profile_url)
-            if "error" not in result:
-                results[horse_name] = result
-            else:
-                print(f"Failed to scrape {horse_name}: {result['error']}")
+            try:
+                result = await self.scrape_horse_profile(horse_name, profile_url)
+                if "error" not in result:
+                    results[horse_name] = result
+                    failed_count = 0  # Reset failure count on success
+                    print(f"✅ Successfully scraped {horse_name}")
+                else:
+                    print(f"❌ Failed to scrape {horse_name}: {result['error']}")
+                    failed_count += 1
+            except Exception as e:
+                print(f"❌ Exception scraping {horse_name}: {e}")
+                failed_count += 1
 
-            # Rate limiting between requests
+            # Stop if too many consecutive failures (likely network/site issues)
+            if failed_count >= max_failures:
+                print(f"⚠️  Stopping after {max_failures} consecutive failures. Scraped {len(results)} horses successfully.")
+                break
+
+            # Faster rate limiting for production
             if i < len(horses_data) - 1:
-                await self.human_like_delay(3000, 8000)
+                await self.human_like_delay(1000, 2000)  # Reduced from 3-8 seconds to 1-2 seconds
 
+        print(f"🎯 Scraping complete: {len(results)} successful, {failed_count} failed")
         return results
 
 

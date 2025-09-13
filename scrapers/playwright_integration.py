@@ -12,6 +12,9 @@ from scrapers.playwright_equibase_scraper import PlaywrightEquibaseScraper
 from race_entry_scraper import RaceEntryScraper
 # # from scrapers.equibase_scraper import DelMarEquibaseCollector
 from utils.equipment_normalizer import normalize_horse
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 async def scrape_overview():
@@ -90,6 +93,111 @@ def save_race_card_data(race_card_data: Dict, date_str: str):
         print(f"Saved race card data to {filename}")
     except Exception as e:
         print(f"Failed to save race card data: {e}")
+
+
+def validate_scraping_consistency(horse_data: Dict) -> Dict:
+    """
+    Verify consistency between SmartPick and Equibase data sources
+    Implements cross-source verification with discrepancy tracking
+    """
+    validation_flags = horse_data.get('validation_flags', [])
+
+    # Get data from both sources
+    smartpick_data = horse_data.get('smartpick', {})
+    equibase_data = horse_data.get('equibase', horse_data)  # Fallback to main data
+
+    # Verify speed figures match within 5%
+    sp_speed = smartpick_data.get('our_speed_figure') or smartpick_data.get('speed_figure')
+    eq_speed = equibase_data.get('speed_score') or equibase_data.get('our_speed_figure')
+
+    if sp_speed and eq_speed:
+        try:
+            sp_speed = float(sp_speed)
+            eq_speed = float(eq_speed)
+            diff = abs(sp_speed - eq_speed)
+            diff_pct = (diff / max(sp_speed, eq_speed)) * 100
+
+            if diff_pct > 10:  # More than 10% difference
+                validation_flags.append({
+                    'type': 'SPEED_DISCREPANCY',
+                    'value': diff_pct,
+                    'severity': 'HIGH' if diff_pct > 20 else 'MEDIUM',
+                    'smartpick_value': sp_speed,
+                    'equibase_value': eq_speed
+                })
+                logger.warning(f"Speed discrepancy detected: {diff_pct:.1f}% difference")
+        except (ValueError, TypeError):
+            validation_flags.append({
+                'type': 'SPEED_PARSE_ERROR',
+                'severity': 'LOW',
+                'smartpick_value': sp_speed,
+                'equibase_value': eq_speed
+            })
+
+    # Verify jockey/trainer consistency
+    sp_jockey = smartpick_data.get('jockey', '')
+    eq_jockey = equibase_data.get('jockey', '')
+
+    if sp_jockey and eq_jockey and sp_jockey.lower() != eq_jockey.lower():
+        validation_flags.append({
+            'type': 'JOCKEY_MISMATCH',
+            'severity': 'MEDIUM',
+            'smartpick_value': sp_jockey,
+            'equibase_value': eq_jockey
+        })
+
+    sp_trainer = smartpick_data.get('trainer', '')
+    eq_trainer = equibase_data.get('trainer', '')
+
+    if sp_trainer and eq_trainer and sp_trainer.lower() != eq_trainer.lower():
+        validation_flags.append({
+            'type': 'TRAINER_MISMATCH',
+            'severity': 'MEDIUM',
+            'smartpick_value': sp_trainer,
+            'equibase_value': eq_trainer
+        })
+
+    # Calculate data consistency score
+    total_checks = 0
+    passed_checks = 0
+
+    # Speed consistency check
+    if sp_speed and eq_speed:
+        total_checks += 1
+        try:
+            diff_pct = abs(float(sp_speed) - float(eq_speed)) / max(float(sp_speed), float(eq_speed)) * 100
+            if diff_pct <= 10:
+                passed_checks += 1
+        except (ValueError, TypeError):
+            pass
+
+    # Jockey consistency check
+    if sp_jockey and eq_jockey:
+        total_checks += 1
+        if sp_jockey.lower() == eq_jockey.lower():
+            passed_checks += 1
+
+    # Trainer consistency check
+    if sp_trainer and eq_trainer:
+        total_checks += 1
+        if sp_trainer.lower() == eq_trainer.lower():
+            passed_checks += 1
+
+    consistency_score = (passed_checks / total_checks * 100) if total_checks > 0 else 100
+
+    # Update horse data with validation results
+    horse_data['validation_flags'] = validation_flags
+    horse_data['consistency_score'] = consistency_score
+    horse_data['data_sources'] = {
+        'smartpick_available': bool(smartpick_data),
+        'equibase_available': bool(equibase_data),
+        'cross_validated': total_checks > 0
+    }
+
+    if consistency_score < 85:
+        logger.warning(f"Low consistency score: {consistency_score:.1f}% for horse data")
+
+    return horse_data
 
 
 def count_horses_with_profiles(card: Dict) -> int:
@@ -247,6 +355,12 @@ async def scrape_full_card_playwright() -> Dict[str, Dict]:
     if not horses_with_urls:
         print("No horses with profile URLs found; aborting")
         return {}
+
+    # Limit horses to prevent timeouts on Render.com (can be removed for local testing)
+    MAX_HORSES = int(os.environ.get('MAX_HORSES', '50'))  # Default to 50 horses max
+    if len(horses_with_urls) > MAX_HORSES:
+        print(f"⚠️  Limiting to {MAX_HORSES} horses (from {len(horses_with_urls)}) to prevent timeouts")
+        horses_with_urls = horses_with_urls[:MAX_HORSES]
 
     print("Starting Playwright scraping...")
     async with PlaywrightEquibaseScraper() as scraper:

@@ -9,6 +9,8 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+logger = logging.getLogger(__name__)
+
 # Import scrapers with fallback handling
 try:
     from scrapers.playwright_equibase_scraper import PlaywrightEquibaseScraper
@@ -26,6 +28,21 @@ from services.openrouter_client import OpenRouterClient
 from services.ai_scraping_assistant import AIScrapingAssistant
 from services.ai_analysis_enhancer import AIAnalysisEnhancer
 
+# Import new ML services with fallback handling
+try:
+    from services.gradient_boosting_predictor import GradientBoostingPredictor
+    from services.kelly_optimizer import KellyCriterionOptimizer
+    from services.validation_framework import ValidationFramework
+    from scrapers.playwright_integration import validate_scraping_consistency
+    ML_SERVICES_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"ML services not available: {e}")
+    GradientBoostingPredictor = None
+    KellyCriterionOptimizer = None
+    ValidationFramework = None
+    validate_scraping_consistency = None
+    ML_SERVICES_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 class OrchestrationService:
@@ -41,6 +58,25 @@ class OrchestrationService:
         self.ai_client = OpenRouterClient(config_manager) if config_manager else None
         self.ai_scraping_assistant = AIScrapingAssistant(self.ai_client) if self.ai_client else None
         self.ai_analysis_enhancer = AIAnalysisEnhancer(self.ai_client) if self.ai_client else None
+
+        # Initialize ML services
+        self.gradient_boosting_predictor = None
+        self.kelly_optimizer = None
+        self.validation_framework = None
+
+        if ML_SERVICES_AVAILABLE:
+            try:
+                if GradientBoostingPredictor:
+                    self.gradient_boosting_predictor = GradientBoostingPredictor()
+                    logger.info("Gradient Boosting Predictor initialized in orchestration")
+                if KellyCriterionOptimizer:
+                    self.kelly_optimizer = KellyCriterionOptimizer()
+                    logger.info("Kelly Criterion Optimizer initialized in orchestration")
+                if ValidationFramework:
+                    self.validation_framework = ValidationFramework()
+                    logger.info("Validation Framework initialized in orchestration")
+            except Exception as e:
+                logger.warning(f"Failed to initialize ML services: {e}")
         
     async def analyze_race_card(self, session_id: str, race_date: str, track_id: str = "DMR") -> Dict:
         """
@@ -207,8 +243,12 @@ class OrchestrationService:
                     scraper = PlaywrightEquibaseScraper()  # Actually FallbackEquibaseScraper
                     scraped_data = await scraper.scrape_horse_data(horses_to_scrape_fresh)
                     
-                    # Cache and merge scraped data
+                    # Cache and merge scraped data with validation
                     for horse_name, horse_data in scraped_data.items():
+                        # Apply scraping consistency validation if available
+                        if validate_scraping_consistency:
+                            horse_data = validate_scraping_consistency(horse_data)
+
                         all_horse_data[horse_name] = horse_data
                         await self.session_manager.cache_horse_data(
                             session_id, race_date, horse_name, horse_data
@@ -289,6 +329,54 @@ class OrchestrationService:
                     # Run basic prediction analysis
                     predictions = self.prediction_engine.predict_race(race, horse_data)
 
+                    # Enhance with ML predictions if available
+                    if self.gradient_boosting_predictor and predictions.get('predictions'):
+                        try:
+                            for horse_pred in predictions['predictions']:
+                                horse_name = horse_pred.get('name', '')
+                                if horse_name in horse_data:
+                                    # Get ML prediction
+                                    ml_prediction = self.gradient_boosting_predictor.predict_finish_position(
+                                        horse_data[horse_name], race
+                                    )
+                                    ml_confidence = self.gradient_boosting_predictor.get_prediction_confidence(
+                                        horse_data[horse_name], race
+                                    )
+
+                                    horse_pred['ml_prediction'] = {
+                                        'finish_position': ml_prediction,
+                                        'confidence': ml_confidence
+                                    }
+
+                            predictions['ml_enhanced'] = True
+                            logger.info(f"Race {race_num}: ML predictions added")
+                        except Exception as e:
+                            logger.warning(f"ML prediction failed for race {race_num}: {e}")
+
+                    # Add Kelly Criterion betting recommendations if available
+                    if self.kelly_optimizer and predictions.get('predictions'):
+                        try:
+                            for horse_pred in predictions['predictions']:
+                                win_prob = horse_pred.get('win_probability', 0) / 100.0
+                                # Use morning line odds or default to 3.0
+                                odds_str = horse_pred.get('morning_line_odds', '3-1')
+                                decimal_odds = self._convert_odds_to_decimal(odds_str)
+
+                                # Calculate Kelly recommendation (using default bankroll values)
+                                kelly_result = self.kelly_optimizer.calculate_optimal_stake(
+                                    win_probability=win_prob,
+                                    decimal_odds=decimal_odds,
+                                    current_bankroll=1000.0,  # Default bankroll
+                                    initial_bankroll=1000.0
+                                )
+
+                                horse_pred['kelly_recommendation'] = kelly_result
+
+                            predictions['kelly_enhanced'] = True
+                            logger.info(f"Race {race_num}: Kelly Criterion recommendations added")
+                        except Exception as e:
+                            logger.warning(f"Kelly Criterion calculation failed for race {race_num}: {e}")
+
                     # Enhance with AI if available
                     if self.ai_analysis_enhancer and predictions.get('predictions'):
                         try:
@@ -332,6 +420,32 @@ class OrchestrationService:
         except Exception as e:
             logger.error(f"Failed to analyze races: {e}")
             raise
+
+    def _convert_odds_to_decimal(self, odds_str: str) -> float:
+        """Convert morning line odds to decimal format"""
+        try:
+            if '-' in odds_str:
+                # Handle fractional odds like "3-1", "5-2"
+                parts = odds_str.split('-')
+                if len(parts) == 2:
+                    numerator = float(parts[0])
+                    denominator = float(parts[1])
+                    return (numerator / denominator) + 1.0
+            elif '/' in odds_str:
+                # Handle fractional odds like "3/1", "5/2"
+                parts = odds_str.split('/')
+                if len(parts) == 2:
+                    numerator = float(parts[0])
+                    denominator = float(parts[1])
+                    return (numerator / denominator) + 1.0
+            else:
+                # Try to parse as decimal
+                return float(odds_str)
+        except (ValueError, TypeError):
+            pass
+
+        # Default to 3.0 (2-1 odds) if parsing fails
+        return 3.0
     
     async def _generate_analysis_summary(self, race_analyses: List[Dict], session_id: str = None) -> Dict:
         """Generate enhanced summary statistics with AI betting recommendations"""

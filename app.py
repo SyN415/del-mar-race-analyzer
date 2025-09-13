@@ -32,16 +32,20 @@ from scrapers.playwright_equibase_scraper import PlaywrightEquibaseScraper
 from scrapers.smartpick_scraper import SmartPickRaceScraper
 from config.config_manager import ConfigManager
 
-# Import new services (to be created)
+# Import new services
 try:
     from services.session_manager import SessionManager
     from services.orchestration_service import OrchestrationService
     from services.openrouter_client import OpenRouterClient
-except ImportError:
-    # Services not yet created - will be implemented
+    from services.gradient_boosting_predictor import GradientBoostingPredictor
+    from services.kelly_optimizer import KellyCriterionOptimizer
+except ImportError as e:
+    print(f"Some services not available: {e}")
     SessionManager = None
     OrchestrationService = None
     OpenRouterClient = None
+    GradientBoostingPredictor = None
+    KellyCriterionOptimizer = None
 
 # Configure logging
 logging.basicConfig(
@@ -77,6 +81,8 @@ class AppState:
         self.orchestration_service = None
         self.openrouter_client = None
         self.prediction_engine = RacePredictionEngine()
+        self.gradient_boosting_predictor = None
+        self.kelly_optimizer = None
         
     async def initialize(self):
         """Initialize services that require async setup"""
@@ -94,7 +100,19 @@ class AppState:
             
             if OpenRouterClient:
                 self.openrouter_client = OpenRouterClient(self.config)
-                
+
+            # Initialize ML services
+            if GradientBoostingPredictor:
+                try:
+                    self.gradient_boosting_predictor = GradientBoostingPredictor()
+                    logger.info("Gradient Boosting Predictor initialized")
+                except Exception as e:
+                    logger.warning(f"Failed to initialize Gradient Boosting Predictor: {e}")
+
+            if KellyCriterionOptimizer:
+                self.kelly_optimizer = KellyCriterionOptimizer()
+                logger.info("Kelly Criterion Optimizer initialized")
+
             logger.info("Application state initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize application state: {e}")
@@ -227,16 +245,45 @@ async def results_page(request: Request, session_id: str):
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return JSONResponse({
+    return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "services": {
             "session_manager": app_state.session_manager is not None,
             "orchestration_service": app_state.orchestration_service is not None,
             "openrouter_client": app_state.openrouter_client is not None,
-            "prediction_engine": app_state.prediction_engine is not None
+            "prediction_engine": app_state.prediction_engine is not None,
+            "gradient_boosting_predictor": app_state.gradient_boosting_predictor is not None,
+            "kelly_optimizer": app_state.kelly_optimizer is not None
         }
-    })
+    }
+
+@app.post("/api/validate")
+async def run_validation():
+    """Run validation framework to test prediction accuracy"""
+    try:
+        if not app_state.orchestration_service or not app_state.orchestration_service.validation_framework:
+            raise HTTPException(status_code=503, detail="Validation framework not available")
+
+        # Run backtest validation
+        validation_result = app_state.orchestration_service.validation_framework.run_backtest(
+            app_state.prediction_engine
+        )
+
+        # Generate comprehensive report
+        validation_report = app_state.orchestration_service.validation_framework.generate_validation_report(
+            validation_result
+        )
+
+        return {
+            "status": "success",
+            "validation_report": validation_report,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Validation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
 
 # Background task functions
 async def run_analysis_pipeline(session_id: str, date: str, llm_model: str, track_id: str):

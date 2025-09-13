@@ -31,7 +31,8 @@ class RacePredictionEngine:
     """Advanced prediction engine for horse racing"""
 
     def __init__(self):
-        self.weight_factors = {
+        # Base weight factors (will be dynamically adjusted)
+        self.base_weight_factors = {
             'speed': 0.25,      # Speed figures (E column)
             'class': 0.15,      # Class of competition
             'form': 0.20,       # Recent form/consistency
@@ -43,6 +44,9 @@ class RacePredictionEngine:
             'distance': 0.01,   # Distance suitability
             'surface': 0.01     # Surface preference
         }
+
+        # Current weight factors (dynamically adjusted)
+        self.weight_factors = self.base_weight_factors.copy()
 
         # Load realistic jockey and trainer data
         self.jockey_data = self.load_jockey_data()
@@ -87,6 +91,56 @@ class RacePredictionEngine:
             print(f"Warning: Could not load trainer data: {e}")
         # No generated fallbacks; return empty to avoid fabricated analytics
         return {}
+
+    def get_dynamic_weights(self, race_info: Dict) -> Dict[str, float]:
+        """Calculate context-aware weights based on race characteristics"""
+        base_weights = self.base_weight_factors.copy()
+
+        # Surface-specific adjustments
+        surface = race_info.get('surface', '').lower()
+        if 'turf' in surface:
+            base_weights['pace'] += 0.02
+            base_weights['distance'] += 0.02
+            base_weights['speed'] -= 0.02
+            base_weights['form'] -= 0.02
+
+        # Distance adjustments
+        distance = race_info.get('distance', '').lower()
+        if 'mile' in distance or '1m' in distance:
+            base_weights['class'] += 0.03
+            base_weights['form'] -= 0.02
+            base_weights['pace'] += 0.01
+        elif 'furlong' in distance or 'sprint' in distance:
+            base_weights['speed'] += 0.03
+            base_weights['workout'] += 0.02
+            base_weights['class'] -= 0.02
+            base_weights['form'] -= 0.03
+
+        # Race type adjustments
+        race_type = race_info.get('race_type', '').lower()
+        if 'maiden' in race_type:
+            base_weights['workout'] += 0.03
+            base_weights['trainer'] += 0.02
+            base_weights['form'] -= 0.03
+            base_weights['class'] -= 0.02
+        elif 'claiming' in race_type:
+            base_weights['form'] += 0.03
+            base_weights['class'] += 0.02
+            base_weights['speed'] -= 0.02
+            base_weights['workout'] -= 0.03
+        elif 'allowance' in race_type or 'stakes' in race_type:
+            base_weights['class'] += 0.04
+            base_weights['jockey'] += 0.02
+            base_weights['trainer'] += 0.02
+            base_weights['equipment'] -= 0.02
+            base_weights['workout'] -= 0.02
+            base_weights['pace'] -= 0.02
+
+        # Normalize to maintain 1.0 total weight
+        total = sum(base_weights.values())
+        normalized_weights = {k: v/total for k, v in base_weights.items()}
+
+        return normalized_weights
 
     def calculate_speed_rating(self, horse_data: Dict) -> float:
         """Calculate speed rating with SmartPick-aware OUR speed integration.
@@ -360,10 +414,90 @@ class RacePredictionEngine:
         return min(100, max(0, rating))
 
     def calculate_pace_rating(self, horse_data: Dict, race_info: Dict) -> float:
-        """Calculate pace rating based on running style and race shape"""
-        # Simplified pace analysis
-        # Would be enhanced with actual pace figures and race shape analysis
-        return 50.0
+        """Calculate pace rating using 1/4, 1/2, and 3/4 mile splits from Equibase data
+        
+        Extracts split times from horse's past performance data and analyzes:
+        - Segment timing (first, second, third quarter)
+        - Running style tendencies (front-runner, stalker, closer)
+        - Consistency across recent races
+        
+        Returns:
+            float: Pace rating on 0-100 scale (higher = better pace match for race conditions)
+        """
+        results = horse_data.get('results', [])
+        if not results:
+            return 50.0  # Neutral rating with no data
+        
+        pace_scores = []
+        for result in results[:3]:  # Analyze last 3 races
+            try:
+                # Extract split times (stored by playwright_equibase_scraper.py)
+                q1_str = result.get('quarter_mile', '')
+                q2_str = result.get('half_mile', '')
+                q3_str = result.get('three_quarter_mile', '')
+                
+                # Parse times to seconds
+                q1 = self._parse_time(q1_str)
+                q2 = self._parse_time(q2_str)
+                q3 = self._parse_time(q3_str)
+                
+                if None in (q1, q2, q3):
+                    continue
+                    
+                # Calculate segment times (each quarter-mile)
+                seg1 = q1
+                seg2 = q2 - q1
+                seg3 = q3 - q2
+                
+                # Standard quarter-mile time based on race distance
+                std_quarter = self._get_standard_quarter_time(race_info.get('distance', ''))
+                
+                # Calculate pace score based on segment deviations from standard
+                dev1 = std_quarter - seg1
+                dev2 = std_quarter - seg2
+                dev3 = std_quarter - seg3
+                
+                # Weighted sum (more recent segments weighted higher)
+                total_dev = dev1 * 0.5 + dev2 * 0.3 + dev3 * 0.2
+                
+                # Convert to 0-100 scale (50 is neutral)
+                score = 50 + total_dev * 5
+                pace_scores.append(max(0, min(100, score)))
+            except Exception as e:
+                continue
+        
+        if not pace_scores:
+            return 50.0
+        
+        # Weighted average (more recent races weighted higher)
+        weighted_sum = 0.0
+        weight_total = 0.0
+        for i, score in enumerate(pace_scores):
+            weight = 1.0 / (i + 1)
+            weighted_sum += score * weight
+            weight_total += weight
+        
+        return weighted_sum / weight_total if weight_total > 0 else 50.0
+
+    def _parse_time(self, time_str: str) -> Optional[float]:
+        """Convert time string to seconds"""
+        if not time_str:
+            return None
+        try:
+            if ':' in time_str:
+                minutes, seconds = time_str.split(':')
+                return float(minutes) * 60 + float(seconds)
+            return float(time_str)
+        except (ValueError, TypeError):
+            return None
+
+    def _get_standard_quarter_time(self, distance: str) -> float:
+        """Get standard quarter-mile time based on race distance"""
+        if '5f' in distance.lower() or '6f' in distance.lower():
+            return 22.5  # Sprints
+        elif '7f' in distance.lower():
+            return 23.0  # Intermediate
+        return 23.5  # Routes
 
     def calculate_distance_surface_ratings(self, horse_data: Dict, race_info: Dict) -> Tuple[float, float]:
         """Calculate distance and surface suitability ratings"""
@@ -515,7 +649,7 @@ class RacePredictionEngine:
         return min(100, max(0, composite))
 
     def predict_race(self, race_data: Dict, horse_data_collection: Dict) -> Dict:
-        """Generate comprehensive race predictions"""
+        """Generate comprehensive race predictions with dynamic weight adjustment"""
         horses = race_data.get('horses', [])
         race_info = {
             'race_type': race_data.get('race_type', ''),
@@ -523,6 +657,9 @@ class RacePredictionEngine:
             'surface': race_data.get('surface', ''),
             'conditions': race_data.get('conditions', ''),
         }
+
+        # Apply dynamic weight adjustment based on race characteristics
+        self.weight_factors = self.get_dynamic_weights(race_info)
 
         horse_predictions = []
         total_horses = len(horses)
