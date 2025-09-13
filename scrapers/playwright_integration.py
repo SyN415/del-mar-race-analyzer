@@ -162,27 +162,27 @@ def load_race_card() -> Dict:
             overview_result = None
         if overview_result and overview_result.get('races'):
             races_data = [{
-                'race_number': r.race_number,
-                'post_time': r.post_time,
-                'race_type': r.race_type,
-                'purse': r.purse,
-                'distance': r.distance,
-                'surface': r.surface,
-                'conditions': r.conditions,
+                'race_number': getattr(r, 'race_number', 0),
+                'post_time': getattr(r, 'post_time', ''),
+                'race_type': getattr(r, 'race_type', ''),
+                'purse': getattr(r, 'purse', ''),
+                'distance': getattr(r, 'distance', ''),
+                'surface': getattr(r, 'surface', ''),
+                'conditions': getattr(r, 'conditions', ''),
                 'horses': [normalize_horse({
-                    'name': h.name,
-                    'post_position': h.post_position,
-                    'jockey': h.jockey,
-                    'trainer': h.trainer,
-                    'weight': h.weight,
-                    'morning_line_odds': h.morning_line_odds,
-                    'age': h.age,
-                    'sex': h.sex,
-                    'equipment_changes': h.equipment_changes,
-                    'claiming_price': h.claiming_price,
+                    'name': getattr(h, 'name', ''),
+                    'post_position': getattr(h, 'post_position', 0),
+                    'jockey': getattr(h, 'jockey', ''),
+                    'trainer': getattr(h, 'trainer', ''),
+                    'weight': getattr(h, 'weight', 0),
+                    'morning_line_odds': getattr(h, 'morning_line_odds', ''),
+                    'age': getattr(h, 'age', 0),
+                    'sex': getattr(h, 'sex', ''),
+                    'equipment_changes': getattr(h, 'equipment_changes', ''),
+                    'claiming_price': getattr(h, 'claiming_price', ''),
                     'profile_url': getattr(h, 'profile_url', ''),
-                }) for h in r.horses]
-            } for r in race_card.races]
+                }) for h in getattr(r, 'horses', [])]
+            } for r in overview_result.get('races', [])]
             with open(card_path, 'w') as f:
                 json.dump({'date': date_str, 'races': races_data}, f, indent=2)
             return {'date': date_str, 'races': races_data}
