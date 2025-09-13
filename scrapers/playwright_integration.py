@@ -18,11 +18,21 @@ async def scrape_overview():
     """Scrape race card overview using RaceEntryScraper"""
     try:
         date_str = os.environ.get('RACE_DATE_STR', '09/07/2025')  # Updated to 09/07/2025
+
+        # Convert date format if needed (YYYY-MM-DD to MM/DD/YYYY)
+        if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
+            # Convert from YYYY-MM-DD to MM/DD/YYYY
+            year, month, day = date_str.split('-')
+            date_str = f"{month}/{day}/{year}"
+            print(f"Converted date format to: {date_str}")
+
         scraper = RaceEntryScraper()
         result = await scraper.scrape_card_overview('DMR', date_str, 'USA')
         return result
     except Exception as e:
         print(f"Failed to scrape overview: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -95,6 +105,14 @@ def count_horses_with_profiles(card: Dict) -> int:
 def load_race_card() -> Dict:
     """Load or scrape the race card for the date specified by RACE_DATE_STR."""
     date_str = os.environ.get('RACE_DATE_STR', '09/07/2025')  # Updated to 09/07/2025
+
+    # Convert date format if needed (YYYY-MM-DD to MM/DD/YYYY)
+    if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
+        # Convert from YYYY-MM-DD to MM/DD/YYYY
+        year, month, day = date_str.split('-')
+        date_str = f"{month}/{day}/{year}"
+        print(f"Converted date format to: {date_str}")
+
     card_path = os.environ.get("RACE_CARD_PATH", f"del_mar_{date_str.replace('/', '_')}_races.json")
 
     # Force fresh scrape by checking if file has placeholder URLs

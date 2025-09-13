@@ -222,6 +222,15 @@ async def scrape_horses():
     """Scrape horse data using Playwright"""
     LOG.info("=== Playwright-Based Full Card Analysis ===")
     date_str = os.environ.get('RACE_DATE_STR', '09/07/2025')  # Updated to 09/07/2025
+
+    # Convert date format if needed (YYYY-MM-DD to MM/DD/YYYY)
+    if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
+        # Convert from YYYY-MM-DD to MM/DD/YYYY
+        year, month, day = date_str.split('-')
+        date_str = f"{month}/{day}/{year}"
+        os.environ['RACE_DATE_STR'] = date_str  # Update environment variable
+        LOG.info(f"Converted date format to: {date_str}")
+
     LOG.info(f"Date: {date_str}")
 
     # Load or scrape race card to check profile URLs
@@ -247,17 +256,14 @@ async def scrape_horses():
     if horses_with_profiles == 0:
         LOG.info("No horses with profile URLs found in saved card; scraping card now.")
         # Proactively scrape card for the given date and retry
-        date_str = os.environ.get('RACE_DATE_STR', '09/05/2025')
-        print(f"Scraping race card from: https://www.equibase.com/static/entry/DMR{date_str.replace('/','')[0:4]}{date_str.replace('/','')[4:6]}USA-EQB.html")
+        # Use the already converted date_str from above
+        from race_entry_scraper import RaceEntryScraper
+        scraper = RaceEntryScraper()
+        url = scraper.build_card_overview_url('DMR', date_str, 'USA')
+        LOG.info(f"Scraping race card from: {url}")
         try:
-            import asyncio
-            from race_entry_scraper import RaceEntryScraper
-
-            async def scrape_overview():
-                scraper = RaceEntryScraper()
-                return await scraper.scrape_card_overview('DMR', date_str, 'USA')
-
-            overview_result = asyncio.run(scrape_overview())
+            # Use direct await since we're already in an async context
+            overview_result = await scraper.scrape_card_overview('DMR', date_str, 'USA')
             if overview_result and overview_result.get('races'):
                 # Convert overview to race card format and save
                 race_card_data = convert_overview_to_race_card(overview_result, date_str)
