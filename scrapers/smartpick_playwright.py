@@ -136,12 +136,42 @@ class PlaywrightSmartPickScraper:
             response = await page.goto(url, wait_until='domcontentloaded', timeout=30000)
             logger.info(f"📡 HTTP Status: {response.status}")
 
-            # Check for captcha on SmartPick page
-            if CAPTCHA_SOLVER_AVAILABLE and self.captcha_solver:
-                await page.wait_for_timeout(2000)
-                captcha_solved = await solve_equibase_captcha(page, self.captcha_solver)
-                if not captcha_solved:
-                    logger.warning("⚠️  Captcha present on SmartPick page but not solved")
+            # Wait a bit for page to load
+            await page.wait_for_timeout(3000)
+
+            # Check page content for Incapsula/captcha challenges
+            page_content = await page.content()
+            page_title = await page.title()
+
+            # Detect if we're on a challenge page
+            is_challenge_page = (
+                'incapsula' in page_content.lower() or
+                'imperva' in page_content.lower() or
+                'additional security check' in page_content.lower() or
+                page_title == '' or
+                'Request unsuccessful' in page_content
+            )
+
+            if is_challenge_page:
+                logger.warning("🛡️  Challenge page detected - attempting to solve...")
+
+                # Check for captcha on SmartPick page
+                if CAPTCHA_SOLVER_AVAILABLE and self.captcha_solver:
+                    await page.wait_for_timeout(2000)
+                    captcha_solved = await solve_equibase_captcha(page, self.captcha_solver)
+                    if not captcha_solved:
+                        logger.error("❌ Failed to solve captcha on SmartPick page")
+                        return {}
+
+                    # Wait for page to reload after captcha
+                    logger.info("⏳ Waiting for page to reload after captcha...")
+                    await page.wait_for_timeout(5000)
+                    await page.wait_for_load_state('domcontentloaded', timeout=30000)
+                else:
+                    logger.error("❌ Challenge page detected but no captcha solver available")
+                    return {}
+            else:
+                logger.info("✅ No challenge page detected, proceeding with scraping")
 
             # Wait for network to be idle after captcha solving
             try:
@@ -231,6 +261,25 @@ class PlaywrightSmartPickScraper:
             # Check if we were redirected
             if current_url != url:
                 logger.warning(f"⚠️  Page was redirected from {url} to {current_url}")
+
+            # Re-check for challenge page after potential reload
+            page_content = await page.content()
+            page_title = await page.title()
+
+            is_still_challenge = (
+                'incapsula' in page_content.lower() or
+                'imperva' in page_content.lower() or
+                'additional security check' in page_content.lower() or
+                page_title == '' or
+                'Request unsuccessful' in page_content
+            )
+
+            if is_still_challenge:
+                logger.error("❌ Still on challenge page after captcha attempt - scraping failed")
+                logger.info(f"📰 Page title: {page_title}")
+                logger.info(f"📝 First 500 chars: {page_content[:500]}")
+                await page.close()
+                return {}
 
             # Check for specific text that indicates the page loaded correctly
             page_text = await page.evaluate('() => document.body.innerText')

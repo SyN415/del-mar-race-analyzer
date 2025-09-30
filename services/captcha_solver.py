@@ -118,18 +118,42 @@ class CaptchaSolver:
 async def solve_equibase_captcha(page, captcha_solver: CaptchaSolver) -> bool:
     """
     Detect and solve hCaptcha on an Equibase page
-    
+
     Args:
         page: Playwright page object
         captcha_solver: CaptchaSolver instance
-        
+
     Returns:
         True if captcha was solved (or not present), False if solving failed
     """
     try:
-        # Check if hCaptcha is present
+        # First check if we're on an Incapsula challenge page
+        page_content = await page.content()
+
+        # Check for Incapsula challenge indicators
+        if 'incapsula' in page_content.lower() or 'imperva' in page_content.lower():
+            logger.warning("🛡️  Incapsula/Imperva challenge detected")
+
+            # Wait a bit for the challenge to fully load
+            await page.wait_for_timeout(2000)
+
+        # Check if hCaptcha is present (including nested iframes)
         captcha_frame = await page.query_selector('iframe[src*="hcaptcha"]')
-        
+
+        # Also check for hCaptcha in nested iframes (Incapsula wrapper)
+        if not captcha_frame:
+            # Try to find hCaptcha in all iframes
+            all_frames = page.frames
+            for frame in all_frames:
+                try:
+                    frame_url = frame.url
+                    if 'hcaptcha' in frame_url.lower():
+                        logger.info("🔍 Found hCaptcha in nested iframe")
+                        captcha_frame = True
+                        break
+                except:
+                    pass
+
         if not captcha_frame:
             logger.info("ℹ️  No hCaptcha detected on page")
             return True
