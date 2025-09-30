@@ -1,4 +1,4 @@
-# 🏇 Del Mar Race Analysis Application
+# 🏇 Horse Race Analysis Application
 
 [![Deploy to Render](https://img.shields.io/badge/Deploy-Render-4A90E2)](https://render.com)
 ![Python Version](https://img.shields.io/badge/python-3.11-blue.svg)
@@ -7,6 +7,8 @@
 **AI-Powered Horse Racing Scraper, Analyzer & Prediction Platform**
 
 Transform racing data into profitable insights with advanced machine learning algorithms, sophisticated web scraping, and professional betting recommendations.
+
+**Supported Tracks:** Del Mar (DMR) | Santa Anita (SA)
 
 ## 🚀 Features
 
@@ -18,8 +20,8 @@ Transform racing data into profitable insights with advanced machine learning al
 
 ### 📊 **Advanced Analytics**
 - **6-Factor Prediction Engine**: Speed (25%), Class (15%), Form (20%), Workout (15%), Jockey (8%), Trainer (7%)
-- **Track-Specific Heuristics**: Del Mar optimized with rail position analysis
-- **Real-time Data**: Live horse stats, odds, and performance metrics
+- **Multi-Track Support**: Del Mar (DMR) and Santa Anita (SA) with track-specific optimizations
+- **Real-time Data**: Live horse stats, odds, and performance metrics from Equibase
 - **Comprehensive Reports**: Professional-formatted analysis with betting recommendations
 
 ### 🦿 **Sophisticated Scraping**
@@ -31,12 +33,13 @@ Transform racing data into profitable insights with advanced machine learning al
 ## 🏗️ Architecture
 
 ```
-Del Mar Analyzer/
+Horse Race Analyzer/
 ├── FastAPI Web Framework
 ├── SQLite Database (Production Ready)
 ├── Playwright Browser Automation
-├── OpenRouter AI Integration
+├── OpenRouter AI Integration (Claude Sonnet 4.5)
 ├── Advanced Prediction Engine
+├── Multi-Track Support (DMR, SA)
 └── Professional Web Interface
 ```
 

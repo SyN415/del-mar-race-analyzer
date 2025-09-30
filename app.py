@@ -120,11 +120,17 @@ class AppState:
 # Global app state instance
 app_state = AppState()
 
+# Supported tracks
+SUPPORTED_TRACKS = {
+    "DMR": "Del Mar",
+    "SA": "Santa Anita"
+}
+
 # Pydantic models for API requests
 class AnalysisRequest(BaseModel):
     date: str  # Format: YYYY-MM-DD
     llm_model: str = "anthropic/claude-sonnet-4.5"
-    track_id: str = "DMR"
+    track_id: str = "DMR"  # DMR (Del Mar) or SA (Santa Anita)
 
 class AnalysisStatus(BaseModel):
     session_id: str
@@ -140,7 +146,7 @@ async def landing_page(request: Request):
     """Main landing page with date and model selection"""
     return templates.TemplateResponse("landing.html", {
         "request": request,
-        "title": "Del Mar Race Analysis",
+        "title": "Horse Race Analysis - Del Mar & Santa Anita",
         "available_models": [
             "anthropic/claude-sonnet-4.5",
             "anthropic/claude-3.5-haiku",
@@ -149,19 +155,30 @@ async def landing_page(request: Request):
             "z-ai/glm-4.5",
             "qwen/qwen3-coder"
         ],
+        "available_tracks": [
+            {"id": "DMR", "name": "Del Mar"},
+            {"id": "SA", "name": "Santa Anita"}
+        ],
         "default_date": datetime.now().strftime("%Y-%m-%d")
     })
 
 @app.post("/api/analyze")
 async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundTasks):
-    """Start race analysis for specified date"""
+    """Start race analysis for specified date and track"""
     try:
         # Validate date format
         try:
             analysis_date = datetime.strptime(request.date, "%Y-%m-%d")
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
-        
+
+        # Validate track ID
+        if request.track_id not in SUPPORTED_TRACKS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid track ID. Supported tracks: {', '.join(SUPPORTED_TRACKS.keys())}"
+            )
+
         # Create new analysis session
         if app_state.session_manager:
             session_id = await app_state.session_manager.create_session(
