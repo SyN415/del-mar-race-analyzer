@@ -6,14 +6,25 @@
 <div class="row justify-content-center">
     <div class="col-lg-8">
         <!-- Hero Section -->
-        <div class="text-center mb-5">
-            <h1 class="display-4 text-primary mb-3">
+        <div class="text-center mb-5 hero-section">
+            <h1 class="display-3 fw-bold mb-3" style="color: white; text-shadow: 0 4px 20px rgba(0,0,0,0.3);">
                 <i class="fas fa-horse-head me-3"></i>
-                Del Mar Race Analysis
+                Horse Race Analysis
             </h1>
-            <p class="lead text-muted">
-                AI-powered horse racing analysis with advanced scraping and prediction algorithms
+            <p class="lead mb-4" style="color: rgba(255,255,255,0.95); font-size: 1.3rem; font-weight: 500;">
+                AI-powered racing analysis with Claude Sonnet 4.5 • Del Mar & Santa Anita
             </p>
+            <div class="d-flex justify-content-center gap-3 flex-wrap">
+                <span class="badge bg-light text-dark px-4 py-2" style="font-size: 0.9rem;">
+                    <i class="fas fa-robot me-2"></i>AI Enhanced
+                </span>
+                <span class="badge bg-light text-dark px-4 py-2" style="font-size: 0.9rem;">
+                    <i class="fas fa-chart-line me-2"></i>6-Factor Analysis
+                </span>
+                <span class="badge bg-light text-dark px-4 py-2" style="font-size: 0.9rem;">
+                    <i class="fas fa-trophy me-2"></i>Premium Predictions
+                </span>
+            </div>
         </div>
 
         <!-- Analysis Form -->
@@ -44,18 +55,17 @@
                                 <span class="badge bg-success ms-2">AI Enhanced</span>
                             </label>
                             <select class="form-select" id="llmModel" name="llm_model" required>
-                                <optgroup label="🚀 Premium Models (Best Quality)">
-                                    <option value="moonshotai/kimi-k2-0905" selected>Kimi K2 0905 (Recommended)</option>
-                                    <option value="qwen/qwen3-coder">Qwen3 Coder</option>
+                                <optgroup label="🏆 Premium Models (Best Quality)">
+                                    <option value="anthropic/claude-sonnet-4.5" selected>Claude Sonnet 4.5 (Recommended)</option>
+                                    <option value="gpt-4o">GPT-4o</option>
+                                    <option value="gpt-4-turbo">GPT-4 Turbo</option>
                                 </optgroup>
                                 <optgroup label="⚡ Balanced Models (Good Performance)">
+                                    <option value="anthropic/claude-3.5-haiku">Claude 3.5 Haiku</option>
                                     <option value="z-ai/glm-4.5">GLM 4.5</option>
                                 </optgroup>
-                                <optgroup label="💨 Fast Models (Quick Results)">
-                                    <option value="x-ai/grok-code-fast-1">Grok Code Fast</option>
-                                </optgroup>
-                                <optgroup label="🎯 Auto Selection">
-                                    <option value="auto">Auto-Select Best Model</option>
+                                <optgroup label="💻 Code-Optimized Models">
+                                    <option value="qwen/qwen3-coder">Qwen3 Coder</option>
                                 </optgroup>
                             </select>
                             <div class="form-text">

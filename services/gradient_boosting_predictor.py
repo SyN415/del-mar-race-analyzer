@@ -89,19 +89,25 @@ class GradientBoostingPredictor:
         """Calculate 90-day win rates for jockeys and trainers"""
         current_date = datetime.now()
         ninety_days_ago = current_date - timedelta(days=90)
-        
+
         # Reset stats
         self.jockey_stats = {}
         self.trainer_stats = {}
-        
+
         # Process races in chronological order
-        for race in sorted(races, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d')):
+        # Filter out races without 'date' field first
+        valid_races = [r for r in races if 'date' in r]
+        if not valid_races:
+            logger.debug("No races with 'date' field found for jockey/trainer stats calculation")
+            return
+
+        for race in sorted(valid_races, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d')):
             race_date = datetime.strptime(race['date'], '%Y-%m-%d')
-            
+
             # Skip races older than 90 days from current processing point
             if race_date < ninety_days_ago:
                 continue
-                
+
             for horse in race.get('horses', []):
                 finish = horse.get('finish_position', 0)
                 jockey = horse.get('jockey', '')
