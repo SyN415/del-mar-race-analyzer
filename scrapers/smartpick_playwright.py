@@ -2,6 +2,7 @@
 """
 Playwright-based SmartPick scraper to bypass Incapsula WAF.
 Replaces the requests-based SmartPickRaceScraper with Playwright.
+Includes 2Captcha integration for solving hCaptcha challenges.
 """
 import asyncio
 import logging
@@ -12,14 +13,24 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
+# Import captcha solver
+try:
+    from services.captcha_solver import get_captcha_solver, solve_equibase_captcha
+    CAPTCHA_SOLVER_AVAILABLE = True
+except ImportError:
+    logger.warning("⚠️  Captcha solver not available - captcha challenges will fail")
+    CAPTCHA_SOLVER_AVAILABLE = False
+
 
 class PlaywrightSmartPickScraper:
-    """Playwright-based SmartPick scraper that bypasses WAF"""
-    
+    """Playwright-based SmartPick scraper that bypasses WAF and solves captchas"""
+
     def __init__(self):
         self.playwright = None
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
+        self.captcha_solver = get_captcha_solver() if CAPTCHA_SOLVER_AVAILABLE else None
+        self.session_established = False
     
     async def __aenter__(self):
         """Async context manager entry"""
@@ -70,28 +81,56 @@ class PlaywrightSmartPickScraper:
         try:
             page = await self.context.new_page()
 
-            # CRITICAL: Visit homepage first to establish session and accept cookies
-            logger.info("🏠 Visiting Equibase homepage to establish session...")
-            try:
-                await page.goto('https://www.equibase.com', wait_until='domcontentloaded', timeout=30000)
-                await page.wait_for_timeout(2000)
-
-                # Accept cookies
+            # CRITICAL: Visit homepage first to establish session and solve captcha
+            if not self.session_established:
+                logger.info("🏠 Visiting Equibase homepage to establish session...")
                 try:
-                    cookie_button = await page.query_selector('#onetrust-accept-btn-handler')
-                    if cookie_button:
-                        await cookie_button.click()
-                        logger.info("🍪 Accepted cookies")
-                        await page.wait_for_timeout(1000)
+                    await page.goto('https://www.equibase.com', wait_until='domcontentloaded', timeout=30000)
+                    await page.wait_for_timeout(2000)
+
+                    # Solve captcha if present
+                    if CAPTCHA_SOLVER_AVAILABLE and self.captcha_solver:
+                        captcha_solved = await solve_equibase_captcha(page, self.captcha_solver)
+                        if captcha_solved:
+                            logger.info("✅ Session established with captcha solved")
+                            self.session_established = True
+                        else:
+                            logger.error("❌ Failed to solve captcha on homepage")
+                            return {}
+                    else:
+                        logger.warning("⚠️  No captcha solver available - proceeding without solving")
+
+                    # Accept cookies
+                    try:
+                        cookie_button = await page.query_selector('#onetrust-accept-btn-handler')
+                        if cookie_button:
+                            await cookie_button.click()
+                            logger.info("🍪 Accepted cookies")
+                            await page.wait_for_timeout(1000)
+                    except Exception as e:
+                        logger.info(f"ℹ️  No cookie banner or already accepted: {e}")
                 except Exception as e:
-                    logger.info(f"ℹ️  No cookie banner or already accepted: {e}")
-            except Exception as e:
-                logger.warning(f"⚠️  Could not visit homepage: {e}")
+                    logger.warning(f"⚠️  Could not visit homepage: {e}")
+            else:
+                logger.info("ℹ️  Session already established, skipping homepage visit")
 
             # Now navigate to SmartPick page
             logger.info(f"🎯 Navigating to SmartPick page...")
-            response = await page.goto(url, wait_until='networkidle', timeout=30000)
+            response = await page.goto(url, wait_until='domcontentloaded', timeout=30000)
             logger.info(f"📡 HTTP Status: {response.status}")
+
+            # Check for captcha on SmartPick page
+            if CAPTCHA_SOLVER_AVAILABLE and self.captcha_solver:
+                await page.wait_for_timeout(2000)
+                captcha_solved = await solve_equibase_captcha(page, self.captcha_solver)
+                if not captcha_solved:
+                    logger.warning("⚠️  Captcha present on SmartPick page but not solved")
+
+            # Wait for network to be idle after captcha solving
+            try:
+                await page.wait_for_load_state('networkidle', timeout=10000)
+            except Exception as e:
+                logger.warning(f"⚠️  Network did not reach idle state: {e}")
 
             # Wait for Angular/React to render - much longer timeout
             logger.info("⏳ Waiting for JavaScript to render horse data...")

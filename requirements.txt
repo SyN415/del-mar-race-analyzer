@@ -9,6 +9,7 @@ python-dotenv>=1.0.1
 
 # Web scraping (Playwright for production deployment)
 playwright>=1.40.0
+2captcha-python>=1.2.0
 
 # Web application framework
 fastapi>=0.104.0
