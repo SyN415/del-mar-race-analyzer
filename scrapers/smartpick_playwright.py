@@ -69,8 +69,27 @@ class PlaywrightSmartPickScraper:
         
         try:
             page = await self.context.new_page()
-            
-            # Navigate to page
+
+            # CRITICAL: Visit homepage first to establish session and accept cookies
+            logger.info("🏠 Visiting Equibase homepage to establish session...")
+            try:
+                await page.goto('https://www.equibase.com', wait_until='domcontentloaded', timeout=30000)
+                await page.wait_for_timeout(2000)
+
+                # Accept cookies
+                try:
+                    cookie_button = await page.query_selector('#onetrust-accept-btn-handler')
+                    if cookie_button:
+                        await cookie_button.click()
+                        logger.info("🍪 Accepted cookies")
+                        await page.wait_for_timeout(1000)
+                except Exception as e:
+                    logger.info(f"ℹ️  No cookie banner or already accepted: {e}")
+            except Exception as e:
+                logger.warning(f"⚠️  Could not visit homepage: {e}")
+
+            # Now navigate to SmartPick page
+            logger.info(f"🎯 Navigating to SmartPick page...")
             response = await page.goto(url, wait_until='networkidle', timeout=30000)
             logger.info(f"📡 HTTP Status: {response.status}")
 
