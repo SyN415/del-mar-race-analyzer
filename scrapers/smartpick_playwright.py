@@ -71,15 +71,34 @@ class PlaywrightSmartPickScraper:
             page = await self.context.new_page()
             
             # Navigate to page
-            response = await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            response = await page.goto(url, wait_until='networkidle', timeout=30000)
             logger.info(f"📡 HTTP Status: {response.status}")
-            
-            # Wait for content to load
-            await page.wait_for_timeout(3000)
+
+            # Wait for content to load (increased for JavaScript rendering)
+            await page.wait_for_timeout(5000)
+
+            # Try to wait for specific content
+            try:
+                await page.wait_for_selector('a[href*="Results.cfm"]', timeout=5000)
+                logger.info("✅ Found Results.cfm links on page")
+            except Exception as e:
+                logger.warning(f"⚠️  No Results.cfm links found after waiting: {e}")
             
             # Get HTML content
             html = await page.content()
             logger.info(f"📄 Response length: {len(html)} bytes")
+
+            # Get page title for debugging
+            title = await page.title()
+            logger.info(f"📰 Page title: {title}")
+
+            # Check for specific text that indicates the page loaded correctly
+            page_text = await page.evaluate('() => document.body.innerText')
+            if 'SmartPick' in page_text or 'smartpick' in page_text.lower():
+                logger.info("✅ SmartPick content detected in page")
+            else:
+                logger.warning("⚠️  No SmartPick content detected - page may not have loaded correctly")
+                logger.info(f"📝 First 500 chars of page text: {page_text[:500]}")
             
             # Save HTML for debugging
             try:
@@ -130,9 +149,22 @@ class PlaywrightSmartPickScraper:
         # Find all horse profile links
         horse_links = soup.find_all('a', href=True)
         logger.info(f"🔍 Found {len(horse_links)} total links")
-        
+
+        # Debug: Show sample of link hrefs to understand structure
+        sample_hrefs = [a.get('href', '')[:100] for a in horse_links[:20]]
+        logger.info(f"📋 Sample hrefs: {sample_hrefs}")
+
+        # Look for Results.cfm links
+        results_links = [a for a in horse_links if 'Results.cfm' in a.get('href', '')]
+        logger.info(f"🔗 Found {len(results_links)} Results.cfm links")
+
+        # Look for type=Horse links
+        horse_type_links = [a for a in horse_links if 'type=Horse' in a.get('href', '')]
+        logger.info(f"🐴 Found {len(horse_type_links)} type=Horse links")
+
+        # Combined filter
         results_links = [a for a in horse_links if 'Results.cfm' in a.get('href', '') and 'type=Horse' in a.get('href', '')]
-        logger.info(f"🐎 Found {len(results_links)} horse profile links")
+        logger.info(f"🐎 Found {len(results_links)} horse profile links (Results.cfm + type=Horse)")
         
         for link in results_links:
             try:
