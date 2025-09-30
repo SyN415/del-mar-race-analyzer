@@ -58,13 +58,32 @@ class GradientBoostingPredictor:
         """Load and parse historical race data"""
         try:
             with open(self.historical_data_path, 'r') as f:
-                return json.load(f)
+                data = json.load(f)
+
+            # Handle different JSON structures
+            if isinstance(data, dict):
+                # If it's a dictionary, try to extract races list
+                if 'races' in data:
+                    return data['races']
+                else:
+                    logger.warning(f"JSON structure doesn't contain 'races' key, returning empty list")
+                    return []
+            elif isinstance(data, list):
+                # If it's already a list, return it
+                return data
+            else:
+                logger.warning(f"Unexpected JSON structure type: {type(data)}, returning empty list")
+                return []
+
         except FileNotFoundError:
-            logger.error(f"Historical data file not found: {self.historical_data_path}")
-            raise
-        except json.JSONDecodeError:
-            logger.error(f"Invalid JSON in historical data file: {self.historical_data_path}")
-            raise
+            logger.warning(f"Historical data file not found: {self.historical_data_path}, will use empty training data")
+            return []
+        except json.JSONDecodeError as e:
+            logger.warning(f"Invalid JSON in historical data file: {self.historical_data_path}, error: {e}")
+            return []
+        except Exception as e:
+            logger.warning(f"Error loading historical data: {e}")
+            return []
 
     def _calculate_jockey_trainer_stats(self, races: List[Dict]):
         """Calculate 90-day win rates for jockeys and trainers"""
@@ -200,33 +219,63 @@ class GradientBoostingPredictor:
 
     def train_model(self):
         """Train the XGBoost model with 5-fold cross-validation"""
-        X, y = self._prepare_training_data()
-        
-        # Initialize model with racing-specific hyperparameters
-        self.model = XGBRegressor(
-            n_estimators=150,
-            max_depth=7,
-            learning_rate=0.05,
-            subsample=0.8,
-            colsample_bytree=0.9,
-            random_state=42,
-            eval_metric='mae'
-        )
-        
-        # Perform 5-fold cross-validation
-        kf = KFold(n_splits=5, shuffle=True, random_state=42)
-        cv_scores = cross_val_score(self.model, X, y, cv=kf, scoring='neg_mean_absolute_error')
-        mae_scores = -cv_scores
-        
-        logger.info(f"Cross-validation MAE: {mae_scores.mean():.2f} ± {mae_scores.std():.2f}")
-        
-        # Train on full dataset
-        self.model.fit(X, y)
-        
-        # Log feature importances
-        importances = self.model.feature_importances_
-        for feature, importance in zip(self.feature_names, importances):
-            logger.debug(f"Feature '{feature}': {importance:.4f}")
+        try:
+            X, y = self._prepare_training_data()
+
+            # Check if we have enough training data
+            if len(X) == 0 or len(y) == 0:
+                logger.warning("No training data available, initializing untrained model")
+                self.model = XGBRegressor(
+                    n_estimators=150,
+                    max_depth=7,
+                    learning_rate=0.05,
+                    subsample=0.8,
+                    colsample_bytree=0.9,
+                    random_state=42,
+                    eval_metric='mae'
+                )
+                return
+
+            # Initialize model with racing-specific hyperparameters
+            self.model = XGBRegressor(
+                n_estimators=150,
+                max_depth=7,
+                learning_rate=0.05,
+                subsample=0.8,
+                colsample_bytree=0.9,
+                random_state=42,
+                eval_metric='mae'
+            )
+
+            # Only perform cross-validation if we have enough samples
+            if len(X) >= 5:
+                # Perform 5-fold cross-validation
+                kf = KFold(n_splits=min(5, len(X)), shuffle=True, random_state=42)
+                cv_scores = cross_val_score(self.model, X, y, cv=kf, scoring='neg_mean_absolute_error')
+                mae_scores = -cv_scores
+                logger.info(f"Cross-validation MAE: {mae_scores.mean():.2f} ± {mae_scores.std():.2f}")
+            else:
+                logger.warning(f"Only {len(X)} samples available, skipping cross-validation")
+
+            # Train on full dataset
+            self.model.fit(X, y)
+
+            # Log feature importances
+            importances = self.model.feature_importances_
+            for feature, importance in zip(self.feature_names, importances):
+                logger.debug(f"Feature '{feature}': {importance:.4f}")
+
+        except Exception as e:
+            logger.warning(f"Error training model: {e}, initializing untrained model")
+            self.model = XGBRegressor(
+                n_estimators=150,
+                max_depth=7,
+                learning_rate=0.05,
+                subsample=0.8,
+                colsample_bytree=0.9,
+                random_state=42,
+                eval_metric='mae'
+            )
 
     def predict_finish_position(self, horse_data: Dict, race_info: Dict) -> float:
         """
