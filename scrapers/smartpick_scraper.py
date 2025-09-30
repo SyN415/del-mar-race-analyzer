@@ -93,25 +93,37 @@ class SmartPickRaceScraper:
             pass
 
     def fetch_html(self, url: str) -> Optional[str]:
+        print(f"🌐 Fetching URL: {url}")
         # First try requests
         try:
             r = self.session.get(url, timeout=25)
-            if r.status_code == 200 and not is_block_page(r.text):
+            print(f"📡 HTTP Status: {r.status_code}")
+            if r.status_code == 200:
                 txt = r.text
-                # Only accept requests path if we see actual horse profile links
-                if ('Results.cfm' in txt and 'type=Horse' in txt):
-                    try:
-                        import os
-                        os.makedirs('logs/html', exist_ok=True)
-                        with open('logs/html/smartpick_debug_requests.html', 'w') as f:
-                            f.write(txt)
-                    except Exception:
-                        pass
-                    return txt
+                print(f"📄 Response length: {len(txt)} bytes")
+
+                if is_block_page(txt):
+                    print("🚫 Response appears to be blocked (Incapsula/error page)")
+                else:
+                    # Only accept requests path if we see actual horse profile links
+                    if ('Results.cfm' in txt and 'type=Horse' in txt):
+                        print("✅ Found horse profile links in response")
+                        try:
+                            import os
+                            os.makedirs('logs/html', exist_ok=True)
+                            with open('logs/html/smartpick_debug_requests.html', 'w', encoding='utf-8') as f:
+                                f.write(txt)
+                            print("📝 Saved HTML to logs/html/smartpick_debug_requests.html")
+                        except Exception as e:
+                            print(f"⚠️  Could not save HTML: {e}")
+                        return txt
+                    else:
+                        print("⚠️  No horse profile links found in response, trying UC fallback")
                 # Otherwise, fall through to UC to render dynamic content / pass WAF
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"❌ Request failed: {e}")
         # Fallback to UC to get page source
+        print("🔄 Trying undetected_chromedriver fallback...")
         try:
             import undetected_chromedriver as uc
             from selenium.webdriver.common.by import By
@@ -124,33 +136,41 @@ class SmartPickRaceScraper:
                 options.page_load_strategy = 'eager'
             except Exception:
                 pass
+            print("🚗 Starting Chrome driver...")
             driver = uc.Chrome(options=options, headless=self.headless)
             try:
                 # Visit home to accept cookies first
+                print("🏠 Visiting homepage to accept cookies...")
                 driver.get(BASE)
                 time.sleep(2)
                 try:
                     btns = driver.find_elements(By.ID, 'onetrust-accept-btn-handler')
                     if btns:
+                        print("🍪 Accepting cookies...")
                         btns[0].click(); time.sleep(1)
                 except Exception:
                     pass
                 # Now open target SmartPick URL
+                print(f"🎯 Loading SmartPick page...")
                 driver.get(url)
                 time.sleep(6)
                 html = driver.page_source
+                print(f"📄 Got page source: {len(html)} bytes")
                 # Save debug snapshot
                 try:
                     import os
                     os.makedirs('logs/html', exist_ok=True)
-                    with open('logs/html/smartpick_debug_uc.html', 'w') as f:
+                    with open('logs/html/smartpick_debug_uc.html', 'w', encoding='utf-8') as f:
                         f.write(html)
-                except Exception:
-                    pass
+                    print("📝 Saved HTML to logs/html/smartpick_debug_uc.html")
+                except Exception as e:
+                    print(f"⚠️  Could not save HTML: {e}")
                 return html
             finally:
                 driver.quit()
-        except Exception:
+                print("🛑 Chrome driver closed")
+        except Exception as e:
+            print(f"❌ UC fallback failed: {e}")
             return None
 
     def _load_cookies_txt(self, path: str):
@@ -207,36 +227,67 @@ class SmartPickRaceScraper:
     def parse_smartpick(self, html: str) -> List[SmartPickHorse]:
         horses: List[SmartPickHorse] = []
         if not html:
+            print("⚠️  No HTML content to parse")
             return horses
+
+        # Save HTML for debugging
+        try:
+            import os
+            os.makedirs('logs/html', exist_ok=True)
+            with open('logs/html/smartpick_last_parse.html', 'w', encoding='utf-8') as f:
+                f.write(html)
+            print(f"📝 Saved HTML to logs/html/smartpick_last_parse.html ({len(html)} bytes)")
+        except Exception as e:
+            print(f"⚠️  Could not save HTML: {e}")
+
         soup = BeautifulSoup(html, "html.parser")
+
+        # Check if page is blocked or has error
+        page_text = soup.get_text().lower()
+        if 'incapsula' in page_text or 'access denied' in page_text:
+            print("🚫 Page appears to be blocked by WAF")
+            return horses
+        if 'no entries' in page_text or 'not available' in page_text:
+            print("ℹ️  Page indicates no entries available")
+            return horses
+
         # Strategy:
         # - Look for all Results.cfm horse profile links; around each link, extract name and combo win %
-        for a in soup.find_all("a", href=True):
+        results_links = soup.find_all("a", href=True)
+        print(f"🔍 Found {len(results_links)} total links in HTML")
+
+        horse_links = [a for a in results_links if "Results.cfm" in a.get("href", "") and "type=Horse" in a.get("href", "")]
+        print(f"🐎 Found {len(horse_links)} horse profile links")
+
+        for a in horse_links:
             href = a["href"]
-            if "Results.cfm" in href and "type=Horse" in href:
-                name = a.get_text(strip=True)
-                if not name:
-                    continue
-                full = href if href.startswith("http") else f"{BASE}{href if href.startswith('/') else '/' + href}"
-                # Climb up a couple of parents to capture surrounding text for combo %
-                combo = None
-                node = a
-                for _ in range(3):
-                    node = node.parent if node and node.parent else node
-                    if not node:
-                        break
-                    txt = node.get_text(" ", strip=True)
-                    m = re.search(r"Jockey\s*\/\s*Trainer\s*Win\s*%\s*(\d{1,3})%", txt, re.I)
-                    if m:
-                        combo = int(m.group(1))
-                        break
-                refno, reg = parse_refno_registry(full)
-                horses.append(SmartPickHorse(name=name, combo_win_pct=combo, profile_url=full, refno=refno, registry=reg))
+            name = a.get_text(strip=True)
+            if not name:
+                continue
+            full = href if href.startswith("http") else f"{BASE}{href if href.startswith('/') else '/' + href}"
+            # Climb up a couple of parents to capture surrounding text for combo %
+            combo = None
+            node = a
+            for _ in range(3):
+                node = node.parent if node and node.parent else node
+                if not node:
+                    break
+                txt = node.get_text(" ", strip=True)
+                m = re.search(r"Jockey\s*\/\s*Trainer\s*Win\s*%\s*(\d{1,3})%", txt, re.I)
+                if m:
+                    combo = int(m.group(1))
+                    break
+            refno, reg = parse_refno_registry(full)
+            horses.append(SmartPickHorse(name=name, combo_win_pct=combo, profile_url=full, refno=refno, registry=reg))
+            print(f"  ✅ Parsed horse: {name} (combo: {combo}%)")
+
         # Deduplicate by name, prefer entries with combo %
         dedup: Dict[str, SmartPickHorse] = {}
         for h in horses:
             if h.name not in dedup or (h.combo_win_pct is not None and dedup[h.name].combo_win_pct is None):
                 dedup[h.name] = h
+
+        print(f"📊 Total unique horses after dedup: {len(dedup)}")
         return list(dedup.values())
 
     def fetch_results_http(self, results_url: str) -> Optional[BeautifulSoup]:

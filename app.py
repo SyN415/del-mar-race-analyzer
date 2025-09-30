@@ -332,6 +332,11 @@ async def run_analysis_pipeline(session_id: str, date: str, llm_model: str, trac
                 os.environ['RACE_DATE_STR'] = race_date
                 logger.info(f"Set RACE_DATE_STR to {race_date}")
 
+            # Set track ID environment variable
+            if track_id:
+                os.environ['TRACK_ID'] = track_id
+                logger.info(f"Set TRACK_ID to {track_id}")
+
                 # Force fresh scrape by removing old race card file if it has placeholders
                 old_card_file = f"del_mar_{race_date.replace('-', '_').replace('/', '_')}_races.json"
                 if os.path.exists(old_card_file):

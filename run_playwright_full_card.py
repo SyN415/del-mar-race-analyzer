@@ -129,6 +129,10 @@ def scrape_smartpick_data_for_card(date_str: str, num_races: int) -> Dict:
     """Scrape SmartPick data for all races on the card"""
     LOG.info(f"🎯 Scraping SmartPick data for {num_races} races on {date_str}")
 
+    # Get track ID from environment variable
+    track_id = os.environ.get('TRACK_ID', 'DMR')
+    LOG.info(f"Using track ID: {track_id}")
+
     smartpick_scraper = SmartPickRaceScraper()
     all_smartpick_data = {}
 
@@ -142,10 +146,10 @@ def scrape_smartpick_data_for_card(date_str: str, num_races: int) -> Dict:
 
             # Build URL for debugging
             from scrapers.smartpick_scraper import smartpick_url
-            url = smartpick_url("DMR", smartpick_date, race_num, "D")
+            url = smartpick_url(track_id, smartpick_date, race_num, "D")
             LOG.info(f"    🌐 URL: {url}")
 
-            race_data = smartpick_scraper.scrape_race("DMR", smartpick_date, race_num, "D")
+            race_data = smartpick_scraper.scrape_race(track_id, smartpick_date, race_num, "D")
 
             if race_data:
                 all_smartpick_data[race_num] = race_data
@@ -282,13 +286,15 @@ async def scrape_horses():
         LOG.info("No horses with profile URLs found in saved card; scraping card now.")
         # Proactively scrape card for the given date and retry
         # Use the already converted date_str from above
+        # Get track ID from environment variable
+        track_id = os.environ.get('TRACK_ID', 'DMR')
         from race_entry_scraper import RaceEntryScraper
         scraper = RaceEntryScraper()
-        url = scraper.build_card_overview_url('DMR', date_str, 'USA')
+        url = scraper.build_card_overview_url(track_id, date_str, 'USA')
         LOG.info(f"Scraping race card from: {url}")
         try:
             # Use direct await since we're already in an async context
-            overview_result = await scraper.scrape_card_overview('DMR', date_str, 'USA')
+            overview_result = await scraper.scrape_card_overview(track_id, date_str, 'USA')
             if overview_result and overview_result.get('races'):
                 # Convert overview to race card format and save
                 race_card_data = convert_overview_to_race_card(overview_result, date_str)
