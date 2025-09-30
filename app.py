@@ -63,8 +63,8 @@ os.makedirs('logs', exist_ok=True)
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="Del Mar Race Analysis Application",
-    description="AI-Powered Horse Racing Scraper, Analyzer & Prediction Platform",
+    title="Equibase Scraper & Analyzer",
+    description="AI-Powered Multi-Track Horse Racing Scraper, Analyzer & Prediction Platform",
     version="1.0.0"
 )
 
@@ -146,14 +146,10 @@ async def landing_page(request: Request):
     """Main landing page with date and model selection"""
     return templates.TemplateResponse("landing.html", {
         "request": request,
-        "title": "Horse Race Analysis - Del Mar & Santa Anita",
+        "title": "Equibase Scraper & Analyzer - Multi-Track Support",
         "available_models": [
-            "anthropic/claude-sonnet-4.5",
-            "anthropic/claude-3.5-haiku",
-            "gpt-4o",
-            "gpt-4-turbo",
-            "z-ai/glm-4.5",
-            "qwen/qwen3-coder"
+            "zhipu-ai/glm-4-plus",
+            "anthropic/claude-sonnet-4.5"
         ],
         "available_tracks": [
             {"id": "DMR", "name": "Del Mar"},
