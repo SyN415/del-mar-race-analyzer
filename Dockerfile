@@ -51,6 +51,9 @@ COPY . .
 # Create data directory
 RUN mkdir -p /app/data
 
+# Force rebuild timestamp to bust cache
+RUN echo "Build timestamp: $(date)" > /app/build_info.txt
+
 # Expose port
 EXPOSE 8000
 

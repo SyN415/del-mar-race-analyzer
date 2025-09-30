@@ -64,18 +64,31 @@ class PlaywrightSmartPickScraper:
     async def scrape_race(self, track_id: str, race_date: str, race_number: int, day: str = "D") -> Dict[str, Dict]:
         """
         Scrape SmartPick data for a single race using Playwright
-        
+
         Args:
             track_id: Track code (e.g., 'DMR', 'SA')
             race_date: Date in MM/DD/YYYY format
             race_number: Race number (1-12)
             day: 'D' for day or 'E' for evening
-            
+
         Returns:
             Dict mapping horse names to their data
         """
+        # Validate date format and check if it's not too far in the future
+        from datetime import datetime, timedelta
+        try:
+            race_dt = datetime.strptime(race_date, '%m/%d/%Y')
+            today = datetime.now()
+            if race_dt > today + timedelta(days=30):
+                logger.warning(f"⚠️  Race date {race_date} is more than 30 days in the future - data may not be available")
+            elif race_dt < today - timedelta(days=365):
+                logger.warning(f"⚠️  Race date {race_date} is more than 1 year in the past - data may not be available")
+        except ValueError:
+            logger.error(f"❌ Invalid date format: {race_date} (expected MM/DD/YYYY)")
+            return {}
+
         url = f"https://www.equibase.com/smartPick/smartPick.cfm/?trackId={track_id}&raceDate={race_date}&country=USA&dayEvening={day}&raceNumber={race_number}"
-        
+
         logger.info(f"🌐 Fetching SmartPick URL: {url}")
         
         try:
@@ -219,9 +232,22 @@ class PlaywrightSmartPickScraper:
 
             # Check for "no data" messages
             page_text_lower = page_text.lower()
-            if any(msg in page_text_lower for msg in ['no entries', 'no races', 'not available', 'no data', 'no results']):
-                logger.warning("⚠️  Page indicates no race data available")
+            no_data_messages = [
+                'no entries', 'no races', 'not available', 'no data', 'no results',
+                'no race card', 'no racing', 'not found', 'does not exist',
+                'no information available', 'no smartpick data'
+            ]
+            if any(msg in page_text_lower for msg in no_data_messages):
+                logger.warning(f"⚠️  Page indicates no race data available for {track_id} on {race_date}")
                 logger.info(f"📝 Page text snippet: {page_text[:1000]}")
+                await page.close()
+                return {}
+
+            # Check if the page shows a different date or track
+            if race_date.replace('/', '') not in page_text.replace('/', ''):
+                logger.warning(f"⚠️  Expected date {race_date} not found in page content")
+            if track_id not in page_text:
+                logger.warning(f"⚠️  Expected track {track_id} not found in page content")
 
             # Try scrolling to trigger lazy loading
             try:
@@ -287,8 +313,15 @@ class PlaywrightSmartPickScraper:
         if 'incapsula' in page_text or 'access denied' in page_text:
             logger.error("🚫 Page appears to be blocked by WAF")
             return horses
-        if 'no entries' in page_text or 'not available' in page_text:
-            logger.info("ℹ️  Page indicates no entries available")
+
+        # Check for various "no data" messages
+        no_data_indicators = [
+            'no entries', 'not available', 'no data', 'no results',
+            'no race card', 'no racing', 'not found', 'does not exist',
+            'no information available', 'no smartpick data', 'no races scheduled'
+        ]
+        if any(indicator in page_text for indicator in no_data_indicators):
+            logger.info(f"ℹ️  Page indicates no race data available (found: {[i for i in no_data_indicators if i in page_text]})")
             return horses
         
         # Find all horse profile links

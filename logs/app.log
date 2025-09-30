@@ -79,3 +79,83 @@
 2025-09-09 18:57:35,086 - watchfiles.main - INFO - 1 change detected
 2025-09-09 18:57:35,437 - watchfiles.main - INFO - 1 change detected
 2025-09-09 18:57:35,787 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:09,059 - app - INFO - Starting Del Mar Race Analysis Application
+2025-09-30 13:51:09,060 - services.session_manager - INFO - Database initialized successfully
+2025-09-30 13:51:09,065 - services.gradient_boosting_predictor - WARNING - No training data available, initializing untrained model
+2025-09-30 13:51:09,065 - services.gradient_boosting_predictor - INFO - Gradient Boosting model trained successfully
+2025-09-30 13:51:09,065 - services.orchestration_service - INFO - Gradient Boosting Predictor initialized in orchestration
+2025-09-30 13:51:09,065 - services.kelly_optimizer - INFO - Kelly Criterion optimizer initialized with 5% max allocation and 20% drawdown threshold
+2025-09-30 13:51:09,065 - services.orchestration_service - INFO - Kelly Criterion Optimizer initialized in orchestration
+2025-09-30 13:51:09,065 - services.orchestration_service - INFO - Validation Framework initialized in orchestration
+2025-09-30 13:51:09,065 - services.gradient_boosting_predictor - WARNING - No training data available, initializing untrained model
+2025-09-30 13:51:09,065 - services.gradient_boosting_predictor - INFO - Gradient Boosting model trained successfully
+2025-09-30 13:51:09,065 - app - INFO - Gradient Boosting Predictor initialized
+2025-09-30 13:51:09,065 - services.kelly_optimizer - INFO - Kelly Criterion optimizer initialized with 5% max allocation and 20% drawdown threshold
+2025-09-30 13:51:09,066 - app - INFO - Kelly Criterion Optimizer initialized
+2025-09-30 13:51:09,066 - app - INFO - Application state initialized successfully
+2025-09-30 13:51:09,066 - app - INFO - Application startup complete
+2025-09-30 13:51:09,140 - watchfiles.main - INFO - 4 changes detected
+2025-09-30 13:51:09,492 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:09,842 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:10,193 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:10,543 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:10,894 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:11,244 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:11,595 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:11,945 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:12,296 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:12,646 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:12,996 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:13,347 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:13,697 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:14,048 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:14,398 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:14,749 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:15,099 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:15,449 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:15,800 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:16,151 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:16,501 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:16,851 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:17,202 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:17,552 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:17,903 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:18,253 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:18,604 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:18,954 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:19,304 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:19,655 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:20,005 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:20,356 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:20,706 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:21,056 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:21,407 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:21,757 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:22,108 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:22,458 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:22,809 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:23,159 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:23,509 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:23,860 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:24,210 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:24,561 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:24,911 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:25,262 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:25,612 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:25,963 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:26,313 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:26,664 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:27,014 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:27,365 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:27,715 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:28,066 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:28,417 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:28,768 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:29,118 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:29,469 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:29,819 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:30,170 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:30,520 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:30,871 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:31,221 - watchfiles.main - INFO - 1 change detected
+2025-09-30 13:51:31,572 - watchfiles.main - INFO - 1 change detected
