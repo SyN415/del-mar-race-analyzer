@@ -87,9 +87,13 @@ class PlaywrightSmartPickScraper:
             logger.error(f"❌ Invalid date format: {race_date} (expected MM/DD/YYYY)")
             return {}
 
-        url = f"https://www.equibase.com/smartPick/smartPick.cfm/?trackId={track_id}&raceDate={race_date}&country=USA&dayEvening={day}&raceNumber={race_number}"
+        # URL encode the date properly
+        import urllib.parse
+        encoded_date = urllib.parse.quote(race_date)
+        url = f"https://www.equibase.com/smartPick/smartPick.cfm/?trackId={track_id}&raceDate={encoded_date}&country=USA&dayEvening={day}&raceNumber={race_number}"
 
         logger.info(f"🌐 Fetching SmartPick URL: {url}")
+        logger.info(f"📅 Race date: {race_date} (encoded: {encoded_date})")
         
         try:
             page = await self.context.new_page()
@@ -218,9 +222,15 @@ class PlaywrightSmartPickScraper:
             html = await page.content()
             logger.info(f"📄 Response length: {len(html)} bytes")
 
-            # Get page title for debugging
+            # Get page title and URL for debugging
             title = await page.title()
+            current_url = page.url
             logger.info(f"📰 Page title: {title}")
+            logger.info(f"🔗 Current URL: {current_url}")
+
+            # Check if we were redirected
+            if current_url != url:
+                logger.warning(f"⚠️  Page was redirected from {url} to {current_url}")
 
             # Check for specific text that indicates the page loaded correctly
             page_text = await page.evaluate('() => document.body.innerText')
@@ -244,10 +254,28 @@ class PlaywrightSmartPickScraper:
                 return {}
 
             # Check if the page shows a different date or track
-            if race_date.replace('/', '') not in page_text.replace('/', ''):
+            date_variations = [
+                race_date,  # 09/28/2025
+                race_date.replace('/', ''),  # 09282025
+                race_date.replace('/', '-'),  # 09-28-2025
+            ]
+            date_found = any(d in page_text for d in date_variations)
+
+            if not date_found:
                 logger.warning(f"⚠️  Expected date {race_date} not found in page content")
+                # Look for any dates in the page
+                import re
+                dates_in_page = re.findall(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', page_text[:2000])
+                if dates_in_page:
+                    logger.info(f"📅 Dates found in page: {dates_in_page[:5]}")
+                else:
+                    logger.warning("📅 No dates found in page content")
+
             if track_id not in page_text:
                 logger.warning(f"⚠️  Expected track {track_id} not found in page content")
+                # Look for track codes in the page
+                track_codes = re.findall(r'\b[A-Z]{2,3}\b', page_text[:2000])
+                logger.info(f"🏇 Track codes found in page: {list(set(track_codes))[:10]}")
 
             # Try scrolling to trigger lazy loading
             try:

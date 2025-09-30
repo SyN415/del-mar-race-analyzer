@@ -1,6 +1,9 @@
 # Use Python 3.11 slim image
 FROM python:3.11-slim
 
+# Build argument for cache busting
+ARG CACHEBUST=1
+
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
@@ -45,14 +48,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -m playwright install chromium
 RUN python -m playwright install-deps
 
-# Copy application code
+# Copy application code (cache busted by CACHEBUST arg)
 COPY . .
 
 # Create data directory
 RUN mkdir -p /app/data
-
-# Force rebuild timestamp to bust cache
-RUN echo "Build timestamp: $(date)" > /app/build_info.txt
 
 # Expose port
 EXPOSE 8000
