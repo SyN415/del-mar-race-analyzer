@@ -125,8 +125,36 @@ def save_race_card_data(race_card_data: Dict, date_str: str):
     print(f"Race card saved to {filename}")
 
 
-def scrape_smartpick_data_for_card(date_str: str, num_races: int) -> Dict:
-    """Scrape SmartPick data for all races on the card"""
+async def scrape_smartpick_data_for_card(date_str: str, num_races: int) -> Dict:
+    """Scrape SmartPick data for all races on the card using Playwright"""
+    LOG.info(f"🎯 Scraping SmartPick data for {num_races} races on {date_str}")
+
+    # Get track ID from environment variable
+    track_id = os.environ.get('TRACK_ID', 'DMR')
+    LOG.info(f"Using track ID: {track_id}")
+
+    # Use Playwright-based scraper to bypass WAF
+    from scrapers.smartpick_playwright import scrape_multiple_races_playwright
+
+    try:
+        # Scrape all races with a single browser instance
+        all_races_data = await scrape_multiple_races_playwright(track_id, date_str, num_races, "D")
+
+        # Convert to the expected format
+        all_smartpick_data = {}
+        for race_num, horses in all_races_data.items():
+            all_smartpick_data[race_num] = horses
+            LOG.info(f"  ✅ Race {race_num}: {len(horses)} horses")
+
+        return all_smartpick_data
+
+    except Exception as e:
+        LOG.error(f"❌ Error scraping SmartPick data: {e}")
+        return {}
+
+
+def scrape_smartpick_data_for_card_OLD_REQUESTS_VERSION(date_str: str, num_races: int) -> Dict:
+    """OLD VERSION - Scrape SmartPick data for all races on the card (BLOCKED BY WAF)"""
     LOG.info(f"🎯 Scraping SmartPick data for {num_races} races on {date_str}")
 
     # Get track ID from environment variable
@@ -280,7 +308,7 @@ async def scrape_horses():
 
     num_races = len(unique_race_numbers) if unique_race_numbers else 8
     LOG.info(f"Scraping SmartPick data for {num_races} races")
-    smartpick_data = scrape_smartpick_data_for_card(date_str, num_races)
+    smartpick_data = await scrape_smartpick_data_for_card(date_str, num_races)
 
     if horses_with_profiles == 0:
         LOG.info("No horses with profile URLs found in saved card; scraping card now.")
