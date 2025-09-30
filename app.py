@@ -123,7 +123,7 @@ app_state = AppState()
 # Pydantic models for API requests
 class AnalysisRequest(BaseModel):
     date: str  # Format: YYYY-MM-DD
-    llm_model: str = "gpt-4o"
+    llm_model: str = "anthropic/claude-sonnet-4.5"
     track_id: str = "DMR"
 
 class AnalysisStatus(BaseModel):
@@ -142,10 +142,12 @@ async def landing_page(request: Request):
         "request": request,
         "title": "Del Mar Race Analysis",
         "available_models": [
+            "anthropic/claude-sonnet-4.5",
+            "anthropic/claude-3.5-haiku",
             "gpt-4o",
-            "gpt-4-turbo", 
-            "claude-3-sonnet",
-            "claude-3-haiku"
+            "gpt-4-turbo",
+            "z-ai/glm-4.5",
+            "qwen/qwen3-coder"
         ],
         "default_date": datetime.now().strftime("%Y-%m-%d")
     })

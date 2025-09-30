@@ -43,6 +43,7 @@ class ConfigManager:
                 'equibase_key': os.getenv('EQUIBASE_API_KEY'),
                 'drf_key': os.getenv('DRF_API_KEY'),
             },
+            'openrouter_api_key': os.getenv('OPENROUTER_API_KEY'),
             'database': {
                 'host': os.getenv('DB_HOST') or 'localhost',
                 'port': int(os.getenv('DB_PORT', 5432)),

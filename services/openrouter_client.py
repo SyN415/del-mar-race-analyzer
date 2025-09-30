@@ -75,8 +75,10 @@ class OpenRouterClient:
 
         # Balanced tier - Good performance for most tasks
         "z-ai/glm-4.5": ModelConfig("z-ai/glm-4.5", ModelTier.BALANCED, 8192, 0.02, 3.5, 0.96),
+        "anthropic/claude-3.5-haiku": ModelConfig("anthropic/claude-3.5-haiku", ModelTier.BALANCED, 8192, 0.001, 2.5, 0.97),
 
         # Premium tier - Best quality for complex analysis
+        "anthropic/claude-sonnet-4.5": ModelConfig("anthropic/claude-sonnet-4.5", ModelTier.PREMIUM, 200000, 0.003, 3.5, 0.99),
         "moonshotai/kimi-k2-0905": ModelConfig("moonshotai/kimi-k2-0905", ModelTier.PREMIUM, 16384, 0.04, 4.0, 0.98),
         "qwen/qwen3-coder": ModelConfig("qwen/qwen3-coder", ModelTier.PREMIUM, 12288, 0.035, 3.8, 0.97),
     }
@@ -94,12 +96,13 @@ class OpenRouterClient:
             "backoff_factor": 2.0
         }
 
-        # Model selection preferences
+        # Model selection preferences - Claude Sonnet 4.5 as primary
         self.preferred_models = {
-            "scraping": "z-ai/glm-4.5",  # Good balance for scraping tasks
-            "analysis": "qwen/qwen3-coder",  # Excellent for analysis and coding
-            "betting": "moonshotai/kimi-k2-0905",  # Premium for betting recommendations
-            "fallback": "x-ai/grok-code-fast-1"  # Fast fallback
+            "scraping": "anthropic/claude-sonnet-4.5",  # Best reasoning for scraping strategies
+            "analysis": "anthropic/claude-sonnet-4.5",  # Excellent for complex analysis
+            "betting": "anthropic/claude-sonnet-4.5",  # Premium reasoning for betting recommendations
+            "general": "anthropic/claude-sonnet-4.5",  # Default for all tasks
+            "fallback": "anthropic/claude-3.5-haiku"  # Fast Claude fallback
         }
         
     def _get_api_key_from_env(self) -> Optional[str]:
@@ -126,8 +129,8 @@ class OpenRouterClient:
                 return max(tier_models, key=lambda m: self.MODELS[m].reliability_score)
 
         # Use task-specific preferences
-        preferred = self.preferred_models.get(task_type, "z-ai/glm-4.5")
-        return preferred if preferred in self.MODELS else "z-ai/glm-4.5"
+        preferred = self.preferred_models.get(task_type, "anthropic/claude-sonnet-4.5")
+        return preferred if preferred in self.MODELS else "anthropic/claude-sonnet-4.5"
 
     async def call_model(self, model: str = None, prompt: str = "", context: Dict = None,
                         max_tokens: int = None, temperature: float = 0.7,
@@ -676,8 +679,8 @@ class OpenRouterClient:
         # Test different model tiers
         test_models = [
             ("x-ai/grok-code-fast-1", "fast"),
-            ("z-ai/glm-4.5", "balanced"),
-            ("moonshotai/kimi-k2-0905", "premium")
+            ("anthropic/claude-3.5-haiku", "balanced"),
+            ("anthropic/claude-sonnet-4.5", "premium")
         ]
 
         for model, tier in test_models:

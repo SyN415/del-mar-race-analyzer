@@ -41,12 +41,14 @@ class WebConfig(BaseModel):
 
 class AIConfig(BaseModel):
     """AI/LLM configuration settings"""
-    default_model: str = "gpt-4o"
+    default_model: str = "anthropic/claude-sonnet-4.5"
     available_models: list = Field(default_factory=lambda: [
+        "anthropic/claude-sonnet-4.5",
+        "anthropic/claude-3.5-haiku",
         "gpt-4o",
         "gpt-4-turbo",
-        "claude-3-sonnet",
-        "claude-3-haiku"
+        "z-ai/glm-4.5",
+        "qwen/qwen3-coder"
     ])
     max_tokens: int = 1000
     temperature: float = 0.7
@@ -62,13 +64,14 @@ class ApplicationConfig(BaseModel):
     """Complete application configuration"""
     environment: str = "development"
     debug: bool = False
+    openrouter_api_key: Optional[str] = None  # Top-level for easy access
     api: APIConfig = Field(default_factory=APIConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     scraping: ScrapingConfig = Field(default_factory=ScrapingConfig)
     web: WebConfig = Field(default_factory=WebConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
-    
+
     class Config:
         env_prefix = "DELMAR_"
         case_sensitive = False
