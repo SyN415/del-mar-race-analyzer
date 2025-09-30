@@ -74,16 +74,75 @@ class PlaywrightSmartPickScraper:
             response = await page.goto(url, wait_until='networkidle', timeout=30000)
             logger.info(f"📡 HTTP Status: {response.status}")
 
-            # Wait for content to load (increased for JavaScript rendering)
-            await page.wait_for_timeout(5000)
+            # Wait for Angular/React to render - much longer timeout
+            logger.info("⏳ Waiting for JavaScript to render horse data...")
+            await page.wait_for_timeout(8000)
 
-            # Try to wait for specific content
-            try:
-                await page.wait_for_selector('a[href*="Results.cfm"]', timeout=5000)
-                logger.info("✅ Found Results.cfm links on page")
-            except Exception as e:
-                logger.warning(f"⚠️  No Results.cfm links found after waiting: {e}")
+            # Try multiple selectors that might contain horse data
+            horse_data_loaded = False
+            selectors_to_try = [
+                'a[href*="Results.cfm"]',
+                'a[href*="type=Horse"]',
+                'table tr:nth-child(2)',  # Wait for data rows in tables
+                '[ng-repeat]',  # Angular
+                '[data-horse]',  # Common data attribute
+                '.horse-name',
+                '.runner'
+            ]
+
+            for selector in selectors_to_try:
+                try:
+                    await page.wait_for_selector(selector, timeout=3000)
+                    logger.info(f"✅ Found content with selector: {selector}")
+                    horse_data_loaded = True
+                    break
+                except Exception:
+                    continue
+
+            if not horse_data_loaded:
+                logger.warning("⚠️  No horse data selectors found - trying longer wait")
+                # Wait even longer for AJAX to complete
+                await page.wait_for_timeout(10000)
+
+                # Check network activity
+                logger.info("🌐 Checking for AJAX requests...")
+                await page.wait_for_load_state('networkidle', timeout=10000)
             
+            # Try to extract data via JavaScript before getting HTML
+            logger.info("🔍 Attempting to extract data via JavaScript...")
+            try:
+                # Check if Angular is present
+                angular_data = await page.evaluate('''
+                    () => {
+                        // Try to find Angular scope
+                        const angularElement = document.querySelector('[ng-controller], [ng-app]');
+                        if (angularElement && window.angular) {
+                            const scope = window.angular.element(angularElement).scope();
+                            if (scope && scope.horses) {
+                                return { source: 'angular', horses: scope.horses };
+                            }
+                        }
+
+                        // Try to find horse links in DOM
+                        const horseLinks = Array.from(document.querySelectorAll('a[href*="Results.cfm"]'));
+                        if (horseLinks.length > 0) {
+                            return {
+                                source: 'dom',
+                                count: horseLinks.length,
+                                samples: horseLinks.slice(0, 5).map(a => ({
+                                    text: a.textContent.trim(),
+                                    href: a.href
+                                }))
+                            };
+                        }
+
+                        return { source: 'none', message: 'No horse data found' };
+                    }
+                ''')
+                logger.info(f"📊 JavaScript extraction result: {angular_data}")
+            except Exception as e:
+                logger.warning(f"⚠️  JavaScript extraction failed: {e}")
+
             # Get HTML content
             html = await page.content()
             logger.info(f"📄 Response length: {len(html)} bytes")
@@ -124,15 +183,19 @@ class PlaywrightSmartPickScraper:
             except Exception as e:
                 logger.warning(f"⚠️  Error looking for SmartPick container: {e}")
             
-            # Save HTML for debugging
+            # Save HTML and screenshot for debugging
             try:
                 import os
                 os.makedirs('logs/html', exist_ok=True)
                 with open(f'logs/html/smartpick_playwright_{track_id}_r{race_number}.html', 'w', encoding='utf-8') as f:
                     f.write(html)
                 logger.info(f"📝 Saved HTML to logs/html/smartpick_playwright_{track_id}_r{race_number}.html")
+
+                # Take screenshot
+                await page.screenshot(path=f'logs/html/smartpick_playwright_{track_id}_r{race_number}.png', full_page=True)
+                logger.info(f"📸 Saved screenshot to logs/html/smartpick_playwright_{track_id}_r{race_number}.png")
             except Exception as e:
-                logger.warning(f"⚠️  Could not save HTML: {e}")
+                logger.warning(f"⚠️  Could not save HTML/screenshot: {e}")
             
             await page.close()
             
