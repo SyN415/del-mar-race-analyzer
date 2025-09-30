@@ -99,6 +99,30 @@ class PlaywrightSmartPickScraper:
             else:
                 logger.warning("⚠️  No SmartPick content detected - page may not have loaded correctly")
                 logger.info(f"📝 First 500 chars of page text: {page_text[:500]}")
+
+            # Check for "no data" messages
+            page_text_lower = page_text.lower()
+            if any(msg in page_text_lower for msg in ['no entries', 'no races', 'not available', 'no data', 'no results']):
+                logger.warning("⚠️  Page indicates no race data available")
+                logger.info(f"📝 Page text snippet: {page_text[:1000]}")
+
+            # Try scrolling to trigger lazy loading
+            try:
+                await page.evaluate('window.scrollTo(0, document.body.scrollHeight)')
+                await page.wait_for_timeout(2000)
+                logger.info("📜 Scrolled page to trigger lazy loading")
+            except Exception as e:
+                logger.warning(f"⚠️  Could not scroll page: {e}")
+
+            # Look for specific SmartPick table or container
+            try:
+                smartpick_container = await page.query_selector('.smartpick-container, #smartpick, [class*="smartpick"], [id*="smartpick"]')
+                if smartpick_container:
+                    logger.info("✅ Found SmartPick container element")
+                else:
+                    logger.warning("⚠️  No SmartPick container element found")
+            except Exception as e:
+                logger.warning(f"⚠️  Error looking for SmartPick container: {e}")
             
             # Save HTML for debugging
             try:
@@ -162,9 +186,27 @@ class PlaywrightSmartPickScraper:
         horse_type_links = [a for a in horse_links if 'type=Horse' in a.get('href', '')]
         logger.info(f"🐴 Found {len(horse_type_links)} type=Horse links")
 
+        # Look for any horse-related patterns
+        horse_patterns = ['horse', 'Horse', 'HORSE', 'refno=', 'registry=']
+        pattern_links = [a for a in horse_links if any(p in a.get('href', '') for p in horse_patterns)]
+        logger.info(f"🔍 Found {len(pattern_links)} links with horse-related patterns")
+        if pattern_links:
+            logger.info(f"📋 Sample horse-pattern hrefs: {[a.get('href', '')[:100] for a in pattern_links[:5]]}")
+
         # Combined filter
         results_links = [a for a in horse_links if 'Results.cfm' in a.get('href', '') and 'type=Horse' in a.get('href', '')]
         logger.info(f"🐎 Found {len(results_links)} horse profile links (Results.cfm + type=Horse)")
+
+        # Check for tables with horse data
+        tables = soup.find_all('table')
+        logger.info(f"📊 Found {len(tables)} tables on page")
+        if tables:
+            for i, table in enumerate(tables[:3]):  # Check first 3 tables
+                rows = table.find_all('tr')
+                logger.info(f"  Table {i+1}: {len(rows)} rows")
+                if rows:
+                    first_row_text = rows[0].get_text(strip=True)[:100]
+                    logger.info(f"    First row: {first_row_text}")
         
         for link in results_links:
             try:
