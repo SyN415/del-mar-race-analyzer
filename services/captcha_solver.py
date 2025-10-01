@@ -131,121 +131,287 @@ async def solve_equibase_captcha(page, captcha_solver: CaptchaSolver) -> bool:
         page_content = await page.content()
 
         # Check for Incapsula challenge indicators
-        if 'incapsula' in page_content.lower() or 'imperva' in page_content.lower():
+        is_incapsula_challenge = 'incapsula' in page_content.lower() or 'imperva' in page_content.lower()
+
+        if is_incapsula_challenge:
             logger.warning("🛡️  Incapsula/Imperva challenge detected")
 
             # Wait a bit for the challenge to fully load
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(3000)
 
         # Check if hCaptcha is present (including nested iframes)
-        captcha_frame = await page.query_selector('iframe[src*="hcaptcha"]')
+        captcha_frame = None
+        hcaptcha_iframe = None
 
-        # Also check for hCaptcha in nested iframes (Incapsula wrapper)
+        # First try direct detection
+        captcha_frame = await page.query_selector('iframe[src*="hcaptcha"]')
+        if captcha_frame:
+            logger.info("🔍 Found hCaptcha iframe directly")
+            hcaptcha_iframe = captcha_frame
+
+        # If not found, search recursively in all frames
         if not captcha_frame:
-            # Try to find hCaptcha in all iframes
+            logger.info("🔍 Searching for hCaptcha in nested iframes...")
             all_frames = page.frames
+
             for frame in all_frames:
                 try:
+                    # Check frame URL
                     frame_url = frame.url
                     if 'hcaptcha' in frame_url.lower():
-                        logger.info("🔍 Found hCaptcha in nested iframe")
+                        logger.info(f"🔍 Found hCaptcha in frame by URL: {frame_url[:100]}")
                         captcha_frame = True
+                        hcaptcha_iframe = frame
                         break
-                except:
+
+                    # Check frame content for hCaptcha elements
+                    try:
+                        # Look for hCaptcha checkbox or iframe inside this frame
+                        has_hcaptcha = await frame.evaluate('''
+                            () => {
+                                // Check for hCaptcha checkbox
+                                const checkbox = document.querySelector('[data-hcaptcha-widget-id]') ||
+                                               document.querySelector('.h-captcha') ||
+                                               document.querySelector('iframe[src*="hcaptcha"]');
+                                return checkbox !== null;
+                            }
+                        ''')
+
+                        if has_hcaptcha:
+                            logger.info(f"🔍 Found hCaptcha elements in frame: {frame.name or 'unnamed'}")
+                            captcha_frame = True
+                            hcaptcha_iframe = frame
+                            break
+                    except Exception as e:
+                        # Frame might not be accessible, skip it
+                        pass
+
+                except Exception as e:
+                    # Frame might be detached or inaccessible
                     pass
 
         if not captcha_frame:
-            logger.info("ℹ️  No hCaptcha detected on page")
-            return True
-        
+            # If we detected Incapsula but no hCaptcha, this is suspicious
+            if is_incapsula_challenge:
+                logger.warning("⚠️  Incapsula challenge detected but no hCaptcha found - page may still be loading")
+                # Wait a bit more and try again
+                await page.wait_for_timeout(3000)
+
+                # Try one more time
+                all_frames = page.frames
+                for frame in all_frames:
+                    try:
+                        frame_url = frame.url
+                        if 'hcaptcha' in frame_url.lower():
+                            logger.info(f"🔍 Found hCaptcha on retry: {frame_url[:100]}")
+                            captcha_frame = True
+                            hcaptcha_iframe = frame
+                            break
+                    except:
+                        pass
+
+                if not captcha_frame:
+                    logger.error("❌ Incapsula challenge present but hCaptcha not found - cannot proceed")
+                    return False
+            else:
+                logger.info("ℹ️  No hCaptcha detected on page")
+                return True
+
         logger.info("🔍 hCaptcha detected, attempting to solve...")
-        
-        # Get the hCaptcha sitekey from the page
-        sitekey = await page.evaluate('''
-            () => {
-                const hcaptchaDiv = document.querySelector('[data-sitekey]');
-                if (hcaptchaDiv) {
-                    return hcaptchaDiv.getAttribute('data-sitekey');
-                }
-                
-                // Try to find it in iframe src
-                const iframe = document.querySelector('iframe[src*="hcaptcha"]');
-                if (iframe) {
-                    const src = iframe.src;
-                    const match = src.match(/sitekey=([^&]+)/);
-                    if (match) {
-                        return match[1];
+
+        # Get the hCaptcha sitekey from the page or frames
+        sitekey = None
+
+        # Try to get sitekey from main page first
+        try:
+            sitekey = await page.evaluate('''
+                () => {
+                    const hcaptchaDiv = document.querySelector('[data-sitekey]');
+                    if (hcaptchaDiv) {
+                        return hcaptchaDiv.getAttribute('data-sitekey');
                     }
+
+                    // Try to find it in iframe src
+                    const iframe = document.querySelector('iframe[src*="hcaptcha"]');
+                    if (iframe) {
+                        const src = iframe.src;
+                        const match = src.match(/sitekey=([^&]+)/);
+                        if (match) {
+                            return match[1];
+                        }
+                    }
+
+                    return null;
                 }
-                
-                return null;
-            }
-        ''')
-        
+            ''')
+        except Exception as e:
+            logger.warning(f"⚠️  Could not extract sitekey from main page: {e}")
+
+        # If not found in main page, search in all frames
         if not sitekey:
-            logger.error("❌ Could not find hCaptcha sitekey on page")
+            logger.info("🔍 Searching for sitekey in frames...")
+            all_frames = page.frames
+
+            for frame in all_frames:
+                try:
+                    frame_sitekey = await frame.evaluate('''
+                        () => {
+                            const hcaptchaDiv = document.querySelector('[data-sitekey]');
+                            if (hcaptchaDiv) {
+                                return hcaptchaDiv.getAttribute('data-sitekey');
+                            }
+
+                            const iframe = document.querySelector('iframe[src*="hcaptcha"]');
+                            if (iframe) {
+                                const src = iframe.src;
+                                const match = src.match(/sitekey=([^&]+)/);
+                                if (match) {
+                                    return match[1];
+                                }
+                            }
+
+                            return null;
+                        }
+                    ''')
+
+                    if frame_sitekey:
+                        sitekey = frame_sitekey
+                        logger.info(f"✅ Found sitekey in frame: {frame.name or 'unnamed'}")
+                        break
+                except Exception as e:
+                    # Frame might not be accessible
+                    pass
+
+        if not sitekey:
+            logger.error("❌ Could not find hCaptcha sitekey on page or in any frame")
             return False
-        
+
         logger.info(f"✅ Found sitekey: {sitekey[:20]}...")
-        
+
         # Solve the captcha
         url = page.url
         token = captcha_solver.solve_hcaptcha(sitekey, url)
-        
+
         if not token:
             logger.error("❌ Failed to solve captcha")
             return False
-        
+
         # Inject the captcha solution into the page
         logger.info("💉 Injecting captcha solution into page...")
-        
-        success = await page.evaluate(f'''
-            (token) => {{
-                // Try to find the hCaptcha response textarea
-                const responseArea = document.querySelector('[name="h-captcha-response"]') ||
-                                   document.querySelector('[name="g-recaptcha-response"]');
-                
-                if (responseArea) {{
-                    responseArea.value = token;
-                    responseArea.innerHTML = token;
-                    
-                    // Trigger change event
-                    const event = new Event('change', {{ bubbles: true }});
-                    responseArea.dispatchEvent(event);
-                    
-                    // Try to submit the form
-                    const form = responseArea.closest('form');
-                    if (form) {{
-                        form.submit();
+
+        # Try to inject in main page first
+        success = False
+        try:
+            success = await page.evaluate(f'''
+                (token) => {{
+                    // Try to find the hCaptcha response textarea
+                    const responseArea = document.querySelector('[name="h-captcha-response"]') ||
+                                       document.querySelector('[name="g-recaptcha-response"]');
+
+                    if (responseArea) {{
+                        responseArea.value = token;
+                        responseArea.innerHTML = token;
+
+                        // Trigger change event
+                        const event = new Event('change', {{ bubbles: true }});
+                        responseArea.dispatchEvent(event);
+
                         return true;
                     }}
-                    
-                    // Try to find and click submit button
-                    const submitBtn = document.querySelector('button[type="submit"]') ||
-                                     document.querySelector('input[type="submit"]');
-                    if (submitBtn) {{
-                        submitBtn.click();
-                        return true;
-                    }}
-                    
-                    return true;
+
+                    return false;
                 }}
-                
-                return false;
-            }}
-        ''', token)
-        
+            ''', token)
+        except Exception as e:
+            logger.warning(f"⚠️  Could not inject in main page: {e}")
+
+        # If injection in main page failed, try all frames
+        if not success:
+            logger.info("🔍 Trying to inject solution in frames...")
+            all_frames = page.frames
+
+            for frame in all_frames:
+                try:
+                    frame_success = await frame.evaluate(f'''
+                        (token) => {{
+                            const responseArea = document.querySelector('[name="h-captcha-response"]') ||
+                                               document.querySelector('[name="g-recaptcha-response"]');
+
+                            if (responseArea) {{
+                                responseArea.value = token;
+                                responseArea.innerHTML = token;
+
+                                const event = new Event('change', {{ bubbles: true }});
+                                responseArea.dispatchEvent(event);
+
+                                return true;
+                            }}
+
+                            return false;
+                        }}
+                    ''', token)
+
+                    if frame_success:
+                        logger.info(f"✅ Injected solution in frame: {frame.name or 'unnamed'}")
+                        success = True
+                        break
+                except Exception as e:
+                    # Frame might not be accessible
+                    pass
+
         if success:
             logger.info("✅ Captcha solution injected successfully")
+
+            # Try to submit the form or click the checkbox
+            try:
+                # Look for submit button in all frames
+                for frame in page.frames:
+                    try:
+                        submit_clicked = await frame.evaluate('''
+                            () => {
+                                const submitBtn = document.querySelector('button[type="submit"]') ||
+                                                 document.querySelector('input[type="submit"]') ||
+                                                 document.querySelector('[id*="submit"]');
+                                if (submitBtn) {
+                                    submitBtn.click();
+                                    return true;
+                                }
+
+                                // Try to submit form
+                                const form = document.querySelector('form');
+                                if (form) {
+                                    form.submit();
+                                    return true;
+                                }
+
+                                return false;
+                            }
+                        ''')
+
+                        if submit_clicked:
+                            logger.info("✅ Clicked submit button")
+                            break
+                    except:
+                        pass
+            except Exception as e:
+                logger.warning(f"⚠️  Could not click submit: {e}")
+
             # Wait for page to process the solution
-            await page.wait_for_timeout(3000)
-            
+            logger.info("⏳ Waiting for captcha to be processed...")
+            await page.wait_for_timeout(5000)
+
             # Check if we're still on the captcha page
-            still_captcha = await page.query_selector('iframe[src*="hcaptcha"]')
+            still_captcha = False
+            try:
+                page_content_after = await page.content()
+                still_captcha = 'incapsula' in page_content_after.lower() or 'hcaptcha' in page_content_after.lower()
+            except:
+                pass
+
             if still_captcha:
                 logger.warning("⚠️  Still on captcha page after solving - may need manual intervention")
                 return False
-            
+
             logger.info("🎉 Successfully bypassed captcha!")
             return True
         else:
