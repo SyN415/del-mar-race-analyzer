@@ -97,6 +97,11 @@ class FixedPlaywrightSmartPickScraper:
         try:
             page = await self.context.new_page()
 
+            # Capture console messages and errors
+            console_messages = []
+            page.on('console', lambda msg: console_messages.append(f"[{msg.type}] {msg.text}"))
+            page.on('pageerror', lambda exc: logger.error(f"🔴 JavaScript error: {exc}"))
+
             # CRITICAL: Visit homepage first to establish session
             if not self.session_established:
                 logger.info("🏠 Visiting Equibase homepage to establish session...")
@@ -147,24 +152,57 @@ class FixedPlaywrightSmartPickScraper:
 
             # CRITICAL FIX: Wait for Angular app to render the horse data
             logger.info("⏳ Waiting for Angular app to render horse data...")
-            
-            # Wait for the app-root element to be present and populated
+
+            # Wait for the app-root element to be present (don't require visible)
             try:
-                await page.wait_for_selector('app-root', timeout=10000)
-                logger.info("✅ Found app-root element")
+                await page.wait_for_selector('app-root', state='attached', timeout=10000)
+                logger.info("✅ Found app-root element in DOM")
+
+                # Check if it's hidden
+                is_hidden = await page.evaluate('''
+                    () => {
+                        const appRoot = document.querySelector('app-root');
+                        if (!appRoot) return true;
+                        const style = window.getComputedStyle(appRoot);
+                        return style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0';
+                    }
+                ''')
+                if is_hidden:
+                    logger.warning("⚠️  app-root element is hidden - Angular may not have rendered")
+                else:
+                    logger.info("✅ app-root element is visible")
             except Exception as e:
                 logger.warning(f"⚠️  Could not find app-root: {e}")
-            
+
             # Wait for Angular to finish rendering - this is the key fix
-            await page.wait_for_load_state('networkidle', timeout=15000)
+            try:
+                await page.wait_for_load_state('networkidle', timeout=15000)
+                logger.info("✅ Network idle state reached")
+            except Exception as e:
+                logger.warning(f"⚠️  Network idle timeout: {e}")
             
             # Additional wait for dynamic content
             await page.wait_for_timeout(8000)
-            
+
+            # Log console messages to help debug
+            if console_messages:
+                logger.info(f"📝 Console messages ({len(console_messages)} total):")
+                for msg in console_messages[:10]:  # Show first 10
+                    logger.info(f"  {msg}")
+
+            # Check what's actually in the page
+            page_title = await page.title()
+            logger.info(f"📄 Page title: {page_title}")
+
+            # Check for error messages in the page
+            page_text = await page.evaluate('() => document.body.innerText')
+            if 'no entries' in page_text.lower() or 'not available' in page_text.lower():
+                logger.warning(f"⚠️  Page indicates no data available")
+
             # Try to extract data directly from Angular using JavaScript
             logger.info("🔍 Attempting to extract data from Angular app...")
             horse_data = None
-            
+
             try:
                 # Execute JavaScript to extract data from the Angular app
                 horse_data = await page.evaluate('''
