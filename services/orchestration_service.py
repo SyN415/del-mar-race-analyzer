@@ -14,7 +14,13 @@ logger = logging.getLogger(__name__)
 # Import scrapers with fallback handling
 try:
     from scrapers.playwright_equibase_scraper import PlaywrightEquibaseScraper
-    from scrapers.smartpick_scraper import SmartPickRaceScraper
+    # Use the fixed Playwright-based SmartPick scraper that handles Angular/JavaScript rendering
+    try:
+        from scrapers.smartpick_playwright import FixedPlaywrightSmartPickScraper as SmartPickRaceScraper
+        logger.info("✅ Using fixed Playwright SmartPick scraper with Angular support")
+    except ImportError:
+        from scrapers.smartpick_scraper import SmartPickRaceScraper
+        logger.warning("⚠️  Using fallback SmartPick scraper (may not work with Angular pages)")
     PLAYWRIGHT_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Playwright scrapers not available: {e}")

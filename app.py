@@ -29,7 +29,6 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # Import existing components
 from race_prediction_engine import RacePredictionEngine
 from scrapers.playwright_equibase_scraper import PlaywrightEquibaseScraper
-from scrapers.smartpick_scraper import SmartPickRaceScraper
 from config.config_manager import ConfigManager
 
 # Import new services
@@ -61,15 +60,24 @@ logger = logging.getLogger(__name__)
 # Create logs directory if it doesn't exist
 os.makedirs('logs', exist_ok=True)
 
+# Import SmartPick scraper after logger is configured
+# Use the fixed Playwright-based SmartPick scraper that handles Angular/JavaScript rendering
+try:
+    from scrapers.smartpick_playwright import FixedPlaywrightSmartPickScraper as SmartPickRaceScraper
+    logger.info("✅ Using fixed Playwright SmartPick scraper with Angular support")
+except ImportError as e:
+    from scrapers.smartpick_scraper import SmartPickRaceScraper
+    logger.warning(f"⚠️  Using fallback SmartPick scraper (may not work with Angular pages): {e}")
+
 # Initialize FastAPI app
 app = FastAPI(
-    title="Equibase Scraper & Analyzer",
+    title="Del Mar Race Analyzer",
     description="AI-Powered Multi-Track Horse Racing Scraper, Analyzer & Prediction Platform",
     version="1.0.0"
 )
 
 # Mount static files and templates
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 templates = Jinja2Templates(directory="templates")
 
 # Global application state
@@ -146,7 +154,7 @@ async def landing_page(request: Request):
     """Main landing page with date and model selection"""
     return templates.TemplateResponse("landing.html", {
         "request": request,
-        "title": "Equibase Scraper & Analyzer - Multi-Track Support",
+        "title": "Del Mar Race Analyzer - Multi-Track Support",
         "available_models": [
             "zhipu-ai/glm-4-plus",
             "anthropic/claude-sonnet-4.5"

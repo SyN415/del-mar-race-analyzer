@@ -1,14 +1,17 @@
-# 🏇 Horse Race Analysis Application
+# 🏇 Del Mar Race Analyzer - Production Ready
 
 [![Deploy to Render](https://img.shields.io/badge/Deploy-Render-4A90E2)](https://render.com)
 ![Python Version](https://img.shields.io/badge/python-3.11-blue.svg)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+![Status](https://img.shields.io/badge/status-Production%20Ready-brightgreen)
 
 **AI-Powered Horse Racing Scraper, Analyzer & Prediction Platform**
 
 Transform racing data into profitable insights with advanced machine learning algorithms, sophisticated web scraping, and professional betting recommendations.
 
 **Supported Tracks:** Del Mar (DMR) | Santa Anita (SA)
+
+**🔧 Recent Updates:** SmartPick scraper fixed with Angular/JavaScript rendering support • Frontend CSS issues resolved • Enhanced debugging tools added
 
 ## 🚀 Features
 
@@ -29,6 +32,8 @@ Transform racing data into profitable insights with advanced machine learning al
 - **Reliability**: Multi-layered fallback strategies for maximum uptime
 - **Compliance**: Respectful rate limiting and user-agent rotation
 - **Scale**: Handle complete race cards with parallel processing
+- **Angular Support**: Fixed SmartPick scraper to handle JavaScript-rendered content
+- **Enhanced Debugging**: Comprehensive debugging tools for troubleshooting
 
 ## 🏗️ Architecture
 
@@ -50,23 +55,33 @@ del-mar-race-analyzer/
 ├── race_prediction_engine.py          # Advanced prediction algorithms
 ├── scrapers/                          # Web scraping infrastructure
 │   ├── playwright_equibase_scraper.py
-│   └── smartpick_scraper.py
+│   ├── smartpick_playwright.py        # Fixed SmartPick scraper (Angular support)
+│   └── fallback_scraper.py            # Backup scraper
 ├── services/                          # Business logic layer
 │   ├── orchestration_service.py
 │   ├── openrouter_client.py
-│   └── session_manager.py
+│   ├── session_manager.py
+│   └── captcha_solver.py              # 2Captcha integration
 ├── core/                              # Data models and utilities
 │   └── horse_data.py
 ├── templates/                         # Jinja2 web templates
+│   ├── base.html                      # Fixed with cache-busting
 │   ├── landing.html
 │   ├── progress.html
 │   ├── results.html
 │   └── error.html
 ├── static/                            # CSS, JS, images
+│   ├── css/style.css                  # Fixed dark theme
+│   └── js/app.js
 ├── config/                            # Configuration management
+├── debug_output/                      # Debugging HTML files
 ├── render-deploy/                     # Production deployment
 │   ├── render.yaml
 │   └── Dockerfile
+├── debug_smartpick_url.py             # SmartPick debugging tool
+├── test_smartpick_urls_simple.py      # URL testing tool
+├── smartpick_fix.py                   # SmartPick fix implementation
+├── smartpick_scraper_patch.py         # Patch application tool
 └── requirements.txt                   # Python dependencies
 ```
 
@@ -103,6 +118,7 @@ python app.py
 ```bash
 # Required
 OPENROUTER_API_KEY=your_openrouter_api_key_here
+TWOCAPTCHA_API_KEY=your_2captcha_api_key_here  # Required for SmartPick scraping
 
 # Optional
 ENVIRONMENT=production          # development/production
@@ -111,6 +127,7 @@ DATABASE_URL=sqlite:///./del_mar_analyzer.db
 SCRAPER_HEADLESS=true           # false for debugging
 SCRAPER_TIMEOUT=30              # scraping timeout in seconds
 SECRET_KEY=your_secret_key      # for secure sessions
+USE_FALLBACK_SCRAPER=false      # Use fallback if Playwright fails
 ```
 
 ### **Available AI Models**
@@ -196,8 +213,26 @@ Response: Service health and component status
 - Input escaping and SQL injection prevention
 - Secure environment variable management
 
-## 🧪 Testing
+### **Captcha Handling**
+- **2Captcha Integration**: Automatic hCaptcha solving for SmartPick pages
+- **Incapsula/Imperva Detection**: Handles WAF challenges gracefully
+- **Fallback Strategies**: Multiple extraction methods for reliability
 
+## 🧪 Testing & Debugging
+
+### **SmartPick Scraper Testing**
+```bash
+# Test SmartPick URL construction and content
+python debug_smartpick_url.py SA 09/28/2024 1
+
+# Simple URL testing without Playwright
+python test_smartpick_urls_simple.py SA 09/28/2024 1
+
+# Apply SmartPick fixes if needed
+python smartpick_scraper_patch.py
+```
+
+### **Unit Testing**
 ```bash
 # Install test dependencies
 pip install -r requirements-dev.txt
@@ -208,6 +243,12 @@ pytest tests/ -v
 # Run coverage report
 pytest --cov=del_mar_analyzer tests/
 ```
+
+### **Debugging Tools**
+- **HTML Output**: Debug files saved to `debug_output/` directory
+- **Enhanced Logging**: Detailed scraping progress and error reporting
+- **Screenshot Capture**: Visual debugging for SmartPick pages
+- **URL Testing**: Multiple URL format validation
 
 ## 📈 Future Roadmap
 
@@ -245,12 +286,61 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **Equibase**: Source of horse racing data
 - **FastAPI**: Modern Python web framework
 
+## 🛠️ Troubleshooting
+
+### **Common Issues & Solutions**
+
+#### SmartPick Scraper Not Working
+1. **Check 2Captcha API Key**: Ensure `TWOCAPTCHA_API_KEY` is set and has balance
+2. **Use Past Dates**: Equibase doesn't have data for future dates
+3. **Check Logs**: Look for "Incapsula/Imperva challenge detected" messages
+4. **Run Debug Tools**: Use `debug_smartpick_url.py` for detailed analysis
+
+#### Frontend CSS Issues
+1. **Hard Refresh**: Use Ctrl+Shift+R (Cmd+Shift+R on Mac)
+2. **Clear Cache**: Browser cache may need clearing
+3. **Check Version**: Ensure CSS files have `?v=2.0.1` query parameters
+
+#### Deployment Issues
+1. **Playwright Installation**: May fail on some platforms - fallback scraper available
+2. **Memory Limits**: Reduce concurrent scraping if memory issues occur
+3. **Timeout Issues**: Increase `SCRAPER_TIMEOUT` environment variable
+
+### **Debugging Resources**
+- **SmartPick Debugging Guide**: See `DEBUGGING_SMARTPICK.md`
+- **Deployment Guide**: See `DEPLOYMENT_GUIDE.md`
+- **2Captcha Setup**: See `docs/2CAPTCHA_SETUP.md`
+
 ## 📞 Support
 
 - 📧 **Email**: support@delmar-analyzer.com
 - 🐛 **Issues**: [GitHub Issues](https://github.com/your-username/del-mar-analyzer/issues)
 - 📖 **Documentation**: [Wiki](https://github.com/your-username/del-mar-analyzer/wiki)
 - 💬 **Discussions**: [GitHub Discussions](https://github.com/your-username/del-mar-analyzer/discussions)
+
+---
+
+## 🎯 **Recent Fixes & Improvements**
+
+### **✅ SmartPick Scraper Fix (October 2025)**
+- **Root Cause**: Equibase SmartPick pages use Angular/JavaScript for dynamic rendering
+- **Solution**: Implemented multiple JavaScript extraction methods
+- **Features**:
+  - Angular app detection and waiting
+  - 5 different data extraction methods
+  - Enhanced Incapsula/Imperva challenge handling
+  - Improved error handling and logging
+
+### **✅ Frontend CSS Fix (October 2025)**
+- **Issue**: Dark theme not loading, JavaScript errors
+- **Solution**: Added cache-busting query parameters
+- **Result**: Proper styling and theme functionality
+
+### **✅ Enhanced Debugging Tools**
+- **debug_smartpick_url.py**: Comprehensive URL and content testing
+- **test_smartpick_urls_simple.py**: Quick URL validation
+- **smartpick_fix.py**: Complete fix implementation
+- **smartpick_scraper_patch.py**: Easy patch application
 
 ---
 
