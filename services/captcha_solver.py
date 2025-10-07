@@ -211,8 +211,33 @@ async def solve_equibase_captcha(page, captcha_solver: CaptchaSolver) -> bool:
                         pass
 
                 if not captcha_frame:
-                    logger.error("❌ Incapsula challenge present but hCaptcha not found - cannot proceed")
-                    return False
+                    logger.warning("⚠️  Incapsula challenge present but hCaptcha not found")
+                    logger.info("🔄 Attempting to bypass by waiting and checking page state...")
+
+                    # Sometimes Incapsula just needs time to verify the browser
+                    await page.wait_for_timeout(5000)
+
+                    # Check if page has loaded content now
+                    page_content_after = await page.content()
+
+                    # Check if we're still on challenge page
+                    still_blocked = 'incapsula' in page_content_after.lower() or 'imperva' in page_content_after.lower()
+
+                    if not still_blocked:
+                        logger.info("✅ Incapsula challenge passed automatically")
+                        return True
+                    else:
+                        logger.error("❌ Still blocked by Incapsula - cannot proceed")
+                        # Save page content for debugging
+                        try:
+                            import os
+                            os.makedirs('debug_output', exist_ok=True)
+                            with open('debug_output/incapsula_block.html', 'w', encoding='utf-8') as f:
+                                f.write(page_content_after)
+                            logger.info("💾 Saved blocked page to debug_output/incapsula_block.html")
+                        except:
+                            pass
+                        return False
             else:
                 logger.info("ℹ️  No hCaptcha detected on page")
                 return True

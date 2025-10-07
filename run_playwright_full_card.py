@@ -125,6 +125,106 @@ def save_race_card_data(race_card_data: Dict, date_str: str):
     print(f"Race card saved to {filename}")
 
 
+async def get_race_count_from_card_page(track_id: str, date_str: str) -> int:
+    """
+    Scrape the race card overview page to get the actual number of races
+
+    Args:
+        track_id: Track code (e.g., 'SA', 'DMR')
+        date_str: Date in MM/DD/YYYY format
+
+    Returns:
+        Number of races on the card
+    """
+    from playwright.async_api import async_playwright
+
+    # Convert date to MMDDYY format for URL
+    # date_str is in MM/DD/YYYY format
+    month, day, year = date_str.split('/')
+    date_code = f"{month}{day}{year[2:]}"  # MMDDYY
+
+    # Build URL: https://www.equibase.com/static/entry/SA100525USA-EQB.html
+    url = f"https://www.equibase.com/static/entry/{track_id}{date_code}USA-EQB.html"
+    LOG.info(f"🔍 Fetching race count from: {url}")
+
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            )
+            page = await context.new_page()
+
+            # Navigate to race card page
+            response = await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+
+            if response.status != 200:
+                LOG.warning(f"⚠️  Race card page returned status {response.status}")
+                await browser.close()
+                return 8  # Default fallback
+
+            # Wait a bit for content to load
+            await page.wait_for_timeout(2000)
+
+            # Count race sections - look for race headers
+            race_count = await page.evaluate('''
+                () => {
+                    // Method 1: Look for race number headers
+                    const raceHeaders = document.querySelectorAll('[class*="race"], [id*="race"], h2, h3');
+                    const raceNumbers = new Set();
+
+                    raceHeaders.forEach(el => {
+                        const text = el.textContent || '';
+                        // Look for "Race 1", "Race 2", etc.
+                        const match = text.match(/Race\\s+(\\d+)/i);
+                        if (match) {
+                            raceNumbers.add(parseInt(match[1]));
+                        }
+                    });
+
+                    if (raceNumbers.size > 0) {
+                        return Math.max(...raceNumbers);
+                    }
+
+                    // Method 2: Count tables (each race usually has a table)
+                    const tables = document.querySelectorAll('table');
+                    if (tables.length > 0) {
+                        return tables.length;
+                    }
+
+                    // Method 3: Look for race links
+                    const links = document.querySelectorAll('a[href*="raceNumber"]');
+                    const linkRaceNumbers = new Set();
+                    links.forEach(link => {
+                        const href = link.getAttribute('href') || '';
+                        const match = href.match(/raceNumber=(\\d+)/);
+                        if (match) {
+                            linkRaceNumbers.add(parseInt(match[1]));
+                        }
+                    });
+
+                    if (linkRaceNumbers.size > 0) {
+                        return Math.max(...linkRaceNumbers);
+                    }
+
+                    return 0;
+                }
+            ''')
+
+            await browser.close()
+
+            if race_count > 0:
+                LOG.info(f"✅ Found {race_count} races on card")
+                return race_count
+            else:
+                LOG.warning(f"⚠️  Could not determine race count, using default of 8")
+                return 8
+
+    except Exception as e:
+        LOG.error(f"❌ Error fetching race count: {e}")
+        return 8  # Default fallback
+
+
 async def scrape_smartpick_data_for_card(date_str: str, num_races: int) -> Dict:
     """Scrape SmartPick data for all races on the card using Playwright"""
     LOG.info(f"🎯 Scraping SmartPick data for {num_races} races on {date_str}")
@@ -300,13 +400,22 @@ async def scrape_horses():
 
     # Scrape SmartPick data for all races
     LOG.info("=== SmartPick Data Collection ===")
+
+    # First, try to get race count from the saved card
     unique_race_numbers = set()
     for race in card.get('races', []):
         race_num = race.get('race_number')
         if race_num:
             unique_race_numbers.add(race_num)
 
-    num_races = len(unique_race_numbers) if unique_race_numbers else 8
+    # If no races in saved card, fetch from race card page
+    if not unique_race_numbers:
+        track_id = os.environ.get('TRACK_ID', 'DMR')
+        LOG.info(f"No races in saved card, fetching race count from Equibase for {track_id} on {date_str}")
+        num_races = await get_race_count_from_card_page(track_id, date_str)
+    else:
+        num_races = len(unique_race_numbers)
+
     LOG.info(f"Scraping SmartPick data for {num_races} races")
     smartpick_data = await scrape_smartpick_data_for_card(date_str, num_races)
 
