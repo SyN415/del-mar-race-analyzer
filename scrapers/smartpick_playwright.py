@@ -407,18 +407,52 @@ class FixedPlaywrightSmartPickScraper:
 async def scrape_smartpick_with_fixed_playwright(track_id: str, race_date: str, race_number: int, day: str = "D") -> Dict[str, Dict]:
     """
     Convenience function to scrape a single race with the fixed Playwright scraper
-    
+
     Args:
         track_id: Track code (e.g., 'DMR', 'SA')
         race_date: Date in MM/DD/YYYY format
         race_number: Race number
         day: 'D' for day or 'E' for evening
-        
+
     Returns:
         Dict mapping horse names to their data
     """
     async with FixedPlaywrightSmartPickScraper() as scraper:
         return await scraper.scrape_race(track_id, race_date, race_number, day)
+
+
+async def scrape_multiple_races_playwright(track_id: str, race_date: str, num_races: int, day: str = "D") -> Dict[int, Dict[str, Dict]]:
+    """
+    Scrape SmartPick data for multiple races using a single browser instance
+
+    Args:
+        track_id: Track code (e.g., 'DMR', 'SA')
+        race_date: Date in MM/DD/YYYY format
+        num_races: Number of races to scrape
+        day: 'D' for day or 'E' for evening
+
+    Returns:
+        Dict mapping race numbers to horse data
+        {
+            1: {'Horse Name': {'smartpick': {...}, 'profile_url': '...', ...}},
+            2: {'Horse Name': {'smartpick': {...}, 'profile_url': '...', ...}},
+            ...
+        }
+    """
+    all_races_data = {}
+
+    async with FixedPlaywrightSmartPickScraper() as scraper:
+        for race_num in range(1, num_races + 1):
+            logger.info(f"📊 Scraping race {race_num}/{num_races}")
+            try:
+                race_data = await scraper.scrape_race(track_id, race_date, race_num, day)
+                all_races_data[race_num] = race_data
+                logger.info(f"✅ Race {race_num}: Found {len(race_data)} horses")
+            except Exception as e:
+                logger.error(f"❌ Error scraping race {race_num}: {e}")
+                all_races_data[race_num] = {}
+
+    return all_races_data
 
 
 if __name__ == "__main__":
@@ -428,5 +462,5 @@ if __name__ == "__main__":
         print(f"Found {len(result)} horses")
         for name, data in result.items():
             print(f"  {name}: {data}")
-    
+
     asyncio.run(test())
