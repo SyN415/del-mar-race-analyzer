@@ -41,27 +41,42 @@ class CaptchaSolver:
     def solve_hcaptcha(self, sitekey: str, url: str) -> Optional[str]:
         """
         Solve an hCaptcha challenge
-        
+
         Args:
             sitekey: The hCaptcha site key from the page
             url: The URL where the captcha appears
-            
+
         Returns:
             The captcha solution token, or None if solving failed
         """
         if not self.solver:
             logger.error("❌ Cannot solve captcha: No API key configured")
             return None
-        
+
         try:
             logger.info(f"🔐 Solving hCaptcha for {url}")
             logger.info(f"   Site key: {sitekey[:20]}...")
 
-            # The 2captcha library expects positional arguments, not keyword arguments
-            # Method signature: hcaptcha(sitekey, url)
-            result = self.solver.hcaptcha(sitekey, url)
+            # IMPORTANT: The 2captcha-python library does NOT have an hcaptcha() method!
+            # We must use the generic send() method with method='hcaptcha' parameter
+            # See: https://2captcha.com/2captcha-api (search for hCaptcha in the API docs)
 
-            token = result.get('code')
+            # Submit the captcha using the generic send() method
+            captcha_id = self.solver.send(
+                method='hcaptcha',
+                sitekey=sitekey,
+                pageurl=url
+            )
+
+            logger.info(f"📤 Captcha submitted, ID: {captcha_id}")
+            logger.info(f"⏳ Waiting for solution...")
+
+            # Wait for the solution (2Captcha recommends 15-20 seconds for hCaptcha)
+            import time
+            time.sleep(20)
+
+            # Get the result
+            token = self.solver.get_result(captcha_id)
 
             if token:
                 self.captchas_solved += 1
