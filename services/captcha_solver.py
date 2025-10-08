@@ -38,13 +38,23 @@ class CaptchaSolver:
         self.captchas_solved = 0
         self.total_cost = 0.0
     
-    def solve_hcaptcha(self, sitekey: str, url: str) -> Optional[str]:
+    def solve_hcaptcha(
+        self,
+        sitekey: str,
+        url: str,
+        rqdata: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        enterprise: Optional[bool] = None,
+    ) -> Optional[str]:
         """
         Solve an hCaptcha challenge
 
         Args:
             sitekey: The hCaptcha site key from the page
             url: The URL where the captcha appears
+            rqdata: Optional hCaptcha Enterprise rqdata value (if present in iframe src)
+            user_agent: Optional user agent string to forward to solver
+            enterprise: If True, explicitly mark as enterprise challenge
 
         Returns:
             The captcha solution token, or None if solving failed
@@ -53,42 +63,73 @@ class CaptchaSolver:
             logger.error("❌ Cannot solve captcha: No API key configured")
             return None
 
+        # Build extra kwargs supported by 2captcha for hCaptcha
+        extra_kwargs = {}
+        if rqdata:
+            extra_kwargs['rqdata'] = rqdata
+        if user_agent:
+            # API expects 'userAgent'
+            extra_kwargs['userAgent'] = user_agent
+        if enterprise:
+            extra_kwargs['enterprise'] = 1
+
         try:
             logger.info(f"🔐 Solving hCaptcha for {url}")
             logger.info(f"   Site key: {sitekey[:20]}...")
+            if rqdata:
+                logger.info("   Using rqdata param (enterprise)")
 
-            # The 2captcha-python library DOES have an hcaptcha() method!
-            # Source: https://github.com/2captcha/2captcha-python/blob/master/twocaptcha/solver.py#L558
-            # It internally calls solve(sitekey=sitekey, url=url, method='hcaptcha')
-            # The solve() method then renames 'url' to 'pageurl' automatically
-
+            # Primary attempt: use library wrapper (renames url->pageurl internally)
             result = self.solver.hcaptcha(
                 sitekey=sitekey,
-                url=url
+                url=url,
+                **extra_kwargs,
             )
 
-            # The result is a dict with 'captchaId' and 'code' keys
-            token = result.get('code')
-
+            token = result.get('code') if isinstance(result, dict) else None
             if token:
                 self.captchas_solved += 1
-                # 2Captcha hCaptcha cost is ~$2.99 per 1000 solves
                 cost = 0.00299
                 self.total_cost += cost
-
                 logger.info(f"✅ Captcha solved! (#{self.captchas_solved}, cost: ${cost:.4f}, total: ${self.total_cost:.4f})")
                 logger.info(f"   Token: {token[:50]}...")
-
                 return token
-            else:
-                logger.error("❌ Captcha solving failed: No token returned")
-                return None
+
+            logger.error("❌ Captcha solving failed: No token returned")
+            return None
 
         except Exception as e:
-            logger.error(f"❌ Error solving captcha: {e}")
+            # If method/params rejected, try explicit fallback with pageurl
+            err_text = str(e)
+            logger.error(f"❌ Error solving captcha via wrapper: {e}")
             logger.error(f"   Error type: {type(e).__name__}")
-            logger.error(f"   Error details: {str(e)}")
-            return None
+            logger.error(f"   Error details: {err_text}")
+
+            try:
+                logger.info("🔁 Retrying with explicit solve(method='hcaptcha', pageurl=...) and enterprise flags")
+                fallback_kwargs = {**extra_kwargs}
+                # Library expects 'pageurl' explicitly here; don't rely on rename
+                result = self.solver.solve(
+                    sitekey=sitekey,
+                    pageurl=url,
+                    method='hcaptcha',
+                    **fallback_kwargs,
+                )
+                token = result.get('code') if isinstance(result, dict) else None
+                if token:
+                    self.captchas_solved += 1
+                    cost = 0.00299
+                    self.total_cost += cost
+                    logger.info(f"✅ Captcha solved (fallback)! (#{self.captchas_solved}, cost: ${cost:.4f}, total: ${self.total_cost:.4f})")
+                    logger.info(f"   Token: {token[:50]}...")
+                    return token
+                logger.error("❌ Fallback solve returned no token")
+                return None
+            except Exception as e2:
+                logger.error(f"❌ Fallback error solving captcha: {e2}")
+                logger.error(f"   Error type: {type(e2).__name__}")
+                logger.error(f"   Error details: {str(e2)}")
+                return None
     
     def get_balance(self) -> Optional[float]:
         """
@@ -321,9 +362,59 @@ async def solve_equibase_captcha(page, captcha_solver: CaptchaSolver) -> bool:
 
         logger.info(f"✅ Found sitekey: {sitekey[:20]}...")
 
+        # Try to extract rqdata (hCaptcha Enterprise) from iframe src or attributes
+        rqdata = None
+        try:
+            rqdata = await page.evaluate('''
+                () => {
+                    const iframe = document.querySelector('iframe[src*="hcaptcha"]');
+                    if (iframe && iframe.src) {
+                        try {
+                            const u = new URL(iframe.src);
+                            return u.searchParams.get('rqdata');
+                        } catch (e) {}
+                    }
+                    const el = document.querySelector('[data-rqdata]');
+                    if (el) return el.getAttribute('data-rqdata');
+                    return null;
+                }
+            ''')
+        except Exception:
+            pass
+
+        if not rqdata:
+            for frame in page.frames:
+                try:
+                    frame_rq = await frame.evaluate('''
+                        () => {
+                            const iframe = document.querySelector('iframe[src*="hcaptcha"]');
+                            if (iframe && iframe.src) {
+                                try {
+                                    const u = new URL(iframe.src);
+                                    return u.searchParams.get('rqdata');
+                                } catch (e) {}
+                            }
+                            const el = document.querySelector('[data-rqdata]');
+                            if (el) return el.getAttribute('data-rqdata');
+                            return null;
+                        }
+                    ''')
+                    if frame_rq:
+                        rqdata = frame_rq
+                        break
+                except Exception:
+                    continue
+
+        # Get user agent for solver context
+        user_agent = None
+        try:
+            user_agent = await page.evaluate('() => navigator.userAgent')
+        except Exception:
+            pass
+
         # Solve the captcha
         url = page.url
-        token = captcha_solver.solve_hcaptcha(sitekey, url)
+        token = captcha_solver.solve_hcaptcha(sitekey, url, rqdata=rqdata, user_agent=user_agent, enterprise=True)
 
         if not token:
             logger.error("❌ Failed to solve captcha")
