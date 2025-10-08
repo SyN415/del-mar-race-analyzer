@@ -57,26 +57,18 @@ class CaptchaSolver:
             logger.info(f"🔐 Solving hCaptcha for {url}")
             logger.info(f"   Site key: {sitekey[:20]}...")
 
-            # IMPORTANT: The 2captcha-python library does NOT have an hcaptcha() method!
-            # We must use the generic send() method with method='hcaptcha' parameter
-            # See: https://2captcha.com/2captcha-api (search for hCaptcha in the API docs)
+            # The 2captcha-python library DOES have an hcaptcha() method!
+            # Source: https://github.com/2captcha/2captcha-python/blob/master/twocaptcha/solver.py#L558
+            # It internally calls solve(sitekey=sitekey, url=url, method='hcaptcha')
+            # The solve() method then renames 'url' to 'pageurl' automatically
 
-            # Submit the captcha using the generic send() method
-            captcha_id = self.solver.send(
-                method='hcaptcha',
+            result = self.solver.hcaptcha(
                 sitekey=sitekey,
-                pageurl=url
+                url=url
             )
 
-            logger.info(f"📤 Captcha submitted, ID: {captcha_id}")
-            logger.info(f"⏳ Waiting for solution...")
-
-            # Wait for the solution (2Captcha recommends 15-20 seconds for hCaptcha)
-            import time
-            time.sleep(20)
-
-            # Get the result
-            token = self.solver.get_result(captcha_id)
+            # The result is a dict with 'captchaId' and 'code' keys
+            token = result.get('code')
 
             if token:
                 self.captchas_solved += 1
