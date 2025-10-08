@@ -41,15 +41,70 @@ class FixedPlaywrightSmartPickScraper:
                 '--disable-dev-shm-usage',
                 '--disable-blink-features=AutomationControlled',
                 '--disable-web-security',
-                '--disable-features=VizDisplayCompositor'
+                '--disable-features=VizDisplayCompositor',
+                '--disable-infobars',
+                '--window-size=1920,1080',
+                '--start-maximized',
+                '--disable-extensions',
+                '--no-first-run',
+                '--no-default-browser-check',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding'
             ]
         )
         self.context = await self.browser.new_context(
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
             viewport={'width': 1920, 'height': 1080},
             locale='en-US',
-            timezone_id='America/Los_Angeles'
+            timezone_id='America/Los_Angeles',
+            # Add more realistic browser context
+            extra_http_headers={
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Cache-Control': 'max-age=0'
+            }
         )
+
+        # Add stealth scripts to hide automation
+        await self.context.add_init_script("""
+            // Overwrite the `navigator.webdriver` property
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            });
+
+            // Overwrite the `plugins` property to use a custom getter
+            Object.defineProperty(navigator, 'plugins', {
+                get: () => [1, 2, 3, 4, 5]
+            });
+
+            // Overwrite the `languages` property to use a custom getter
+            Object.defineProperty(navigator, 'languages', {
+                get: () => ['en-US', 'en']
+            });
+
+            // Overwrite the `chrome` property
+            window.chrome = {
+                runtime: {}
+            };
+
+            // Add realistic permissions
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) => (
+                parameters.name === 'notifications' ?
+                    Promise.resolve({ state: Notification.permission }) :
+                    originalQuery(parameters)
+            );
+        """)
+
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -107,7 +162,13 @@ class FixedPlaywrightSmartPickScraper:
                 logger.info("🏠 Visiting Equibase homepage to establish session...")
                 try:
                     await page.goto('https://www.equibase.com', wait_until='domcontentloaded', timeout=30000)
-                    await page.wait_for_timeout(2000)
+                    await page.wait_for_timeout(3000)  # Increased wait time
+
+                    # Simulate human behavior - scroll a bit
+                    await page.evaluate('window.scrollTo(0, 300)')
+                    await page.wait_for_timeout(500)
+                    await page.evaluate('window.scrollTo(0, 0)')
+                    await page.wait_for_timeout(500)
 
                     # Accept cookies
                     try:
@@ -115,9 +176,12 @@ class FixedPlaywrightSmartPickScraper:
                         if cookie_button:
                             await cookie_button.click()
                             logger.info("🍪 Accepted cookies")
-                            await page.wait_for_timeout(1000)
+                            await page.wait_for_timeout(1500)
                     except Exception as e:
                         logger.info(f"ℹ️  No cookie banner or already accepted: {e}")
+
+                    # Wait a bit more to seem more human
+                    await page.wait_for_timeout(2000)
                 except Exception as e:
                     logger.warning(f"⚠️  Could not visit homepage: {e}")
                 else:
@@ -125,8 +189,15 @@ class FixedPlaywrightSmartPickScraper:
 
             # Now navigate to SmartPick page
             logger.info(f"🎯 Navigating to SmartPick page...")
+
+            # Add a small delay before navigation to seem more human
+            await page.wait_for_timeout(1000)
+
             response = await page.goto(url, wait_until='domcontentloaded', timeout=30000)
             logger.info(f"📡 HTTP Status: {response.status}")
+
+            # Wait a bit after page load
+            await page.wait_for_timeout(2000)
 
             # Wait for Angular app to initialize and load data
             logger.info("⏳ Waiting for Angular app to initialize...")
