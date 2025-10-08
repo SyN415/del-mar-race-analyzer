@@ -29,7 +29,7 @@ class FixedPlaywrightSmartPickScraper:
         self.context: Optional[BrowserContext] = None
         self.captcha_solver = get_captcha_solver() if CAPTCHA_SOLVER_AVAILABLE else None
         self.session_established = False
-    
+
     async def __aenter__(self):
         """Async context manager entry"""
         self.playwright = await async_playwright().start()
@@ -74,6 +74,22 @@ class FixedPlaywrightSmartPickScraper:
             }
         )
 
+        # Reduce memory: block heavy resources (images, media, fonts)
+        async def _route_handler(route, request):
+            try:
+                if request.resource_type in {"image", "media", "font"}:
+                    await route.abort()
+                else:
+                    await route.continue_()
+            except Exception:
+                # Fail-open on routing errors
+                try:
+                    await route.continue_()
+                except Exception:
+                    pass
+        await self.context.route("**/*", _route_handler)
+
+
         # Add stealth scripts to hide automation
         await self.context.add_init_script("""
             // Overwrite the `navigator.webdriver` property
@@ -106,7 +122,7 @@ class FixedPlaywrightSmartPickScraper:
         """)
 
         return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit"""
         if self.context:
@@ -115,17 +131,17 @@ class FixedPlaywrightSmartPickScraper:
             await self.browser.close()
         if self.playwright:
             await self.playwright.stop()
-    
+
     async def scrape_race(self, track_id: str, race_date: str, race_number: int, day: str = "D") -> Dict[str, Dict]:
         """
         Scrape SmartPick data for a single race using Playwright with proper Angular handling
-        
+
         Args:
             track_id: Track code (e.g., 'DMR', 'SA')
             race_date: Date in MM/DD/YYYY format
             race_number: Race number (1-12)
             day: 'D' for day or 'E' for evening
-        
+
         Returns:
             Dict mapping horse names to their data
         """
@@ -148,7 +164,7 @@ class FixedPlaywrightSmartPickScraper:
         url = f"https://www.equibase.com/smartPick/smartPick.cfm/?trackId={track_id}&raceDate={encoded_date}&country=USA&dayEvening={day}&raceNumber={race_number}"
 
         logger.info(f"🌐 Fetching SmartPick URL: {url}")
-        
+
         try:
             page = await self.context.new_page()
 
@@ -202,16 +218,20 @@ class FixedPlaywrightSmartPickScraper:
             # Wait for Angular app to initialize and load data
             logger.info("⏳ Waiting for Angular app to initialize...")
             await page.wait_for_timeout(5000)
-            
+
             # Check if we're on an Incapsula challenge page
             page_content = await page.content()
             if 'incapsula' in page_content.lower() or 'imperva' in page_content.lower():
                 logger.warning("🛡️  Challenge page detected - attempting to solve...")
-                
+
                 if CAPTCHA_SOLVER_AVAILABLE and self.captcha_solver:
                     captcha_solved = await solve_equibase_captcha(page, self.captcha_solver)
                     if not captcha_solved:
                         logger.error("❌ Failed to solve captcha")
+                        try:
+                            await page.close()
+                        except Exception:
+                            pass
                         return {}
 
                     # Wait for page to reload after captcha
@@ -230,6 +250,10 @@ class FixedPlaywrightSmartPickScraper:
                     await page.wait_for_timeout(10000)  # Increased from 5s to 10s
                 else:
                     logger.error("❌ Challenge page detected but no captcha solver available")
+                    try:
+                        await page.close()
+                    except Exception:
+                        pass
                     return {}
 
             # CRITICAL FIX: Wait for Angular app to render the horse data
@@ -262,7 +286,7 @@ class FixedPlaywrightSmartPickScraper:
                 logger.info("✅ Network idle state reached")
             except Exception as e:
                 logger.warning(f"⚠️  Network idle timeout: {e}")
-            
+
             # Additional wait for dynamic content
             await page.wait_for_timeout(8000)
 
@@ -321,7 +345,7 @@ class FixedPlaywrightSmartPickScraper:
                 horse_data = await page.evaluate('''
                     () => {
                         // Try multiple methods to extract horse data
-                        
+
                         // Method 1: Look for horse data in window object
                         if (window.ng && window.ng.probe) {
                             const appRoot = document.querySelector('app-root');
@@ -332,7 +356,7 @@ class FixedPlaywrightSmartPickScraper:
                                 }
                             }
                         }
-                        
+
                         // Method 2: Look for data in script tags
                         const scripts = document.querySelectorAll('script');
                         for (let script of scripts) {
@@ -347,7 +371,7 @@ class FixedPlaywrightSmartPickScraper:
                                 }
                             }
                         }
-                        
+
                         // Method 3: Extract from DOM after Angular renders
                         const horseElements = document.querySelectorAll('[data-horse-name], .horse-name, .runner-name');
                         if (horseElements.length > 0) {
@@ -363,7 +387,7 @@ class FixedPlaywrightSmartPickScraper:
                             });
                             return horses;
                         }
-                        
+
                         // Method 4: Look for any table rows with horse data
                         const tables = document.querySelectorAll('table');
                         for (let table of tables) {
@@ -392,7 +416,7 @@ class FixedPlaywrightSmartPickScraper:
                                 }
                             }
                         }
-                        
+
                         // Method 5: Look for any links to horse profiles
                         const horseLinks = document.querySelectorAll('a[href*="Results.cfm"][href*="type=Horse"]');
                         if (horseLinks.length > 0) {
@@ -409,19 +433,19 @@ class FixedPlaywrightSmartPickScraper:
                             });
                             return horses;
                         }
-                        
+
                         return null;
                     }
                 ''')
-                
+
                 if horse_data:
                     logger.info(f"✅ Found {len(horse_data)} horses via JavaScript extraction")
                 else:
                     logger.warning("⚠️  JavaScript extraction returned null")
-                    
+
             except Exception as e:
                 logger.warning(f"⚠️  JavaScript extraction failed: {e}")
-            
+
             # If JavaScript extraction worked, process the data
             if horse_data:
                 horses = {}
@@ -430,11 +454,11 @@ class FixedPlaywrightSmartPickScraper:
                         name = horse.get('name', '').strip()
                         if not name:
                             continue
-                        
+
                         # Extract additional data
                         url = horse.get('url', '')
                         refno, registry = self.parse_refno_registry(url) if url else (None, None)
-                        
+
                         # Look for combo win percentage
                         combo_win_pct = None
                         element = horse.get('element', '')
@@ -442,7 +466,7 @@ class FixedPlaywrightSmartPickScraper:
                             match = re.search(r'Jockey\s*/\s*Trainer\s*Win\s*%\s*(\d{1,3})%', element, re.I)
                             if match:
                                 combo_win_pct = int(match.group(1))
-                        
+
                         horses[name] = {
                             'smartpick': {
                                 'combo_win_pct': combo_win_pct
@@ -451,44 +475,44 @@ class FixedPlaywrightSmartPickScraper:
                             'refno': refno,
                             'registry': registry
                         }
-                        
+
                         logger.info(f"  ✅ Parsed: {name} (combo: {combo_win_pct}%)")
-                        
+
                     except Exception as e:
                         logger.warning(f"⚠️  Error parsing horse data: {e}")
-                
+
                 logger.info(f"🐎 Total horses parsed: {len(horses)}")
                 await page.close()
                 return horses
-            
+
             # Fallback: Try the original HTML parsing method
             logger.info("⚠️  JavaScript extraction failed, trying HTML parsing fallback...")
             html = await page.content()
             horses = self.parse_smartpick_html(html)
             logger.info(f"🐎 Found {len(horses)} horses via HTML parsing")
-            
+
             await page.close()
             return horses
-            
+
         except Exception as e:
             logger.error(f"❌ Error scraping race {race_number}: {e}")
             return {}
-    
+
     def parse_smartpick_html(self, html: str) -> Dict[str, Dict]:
         """
         Parse SmartPick HTML to extract horse data (fallback method)
-        
+
         Returns:
             Dict mapping horse names to their SmartPick data
         """
         horses = {}
-        
+
         if not html:
             logger.warning("⚠️  No HTML content to parse")
             return horses
-        
+
         soup = BeautifulSoup(html, 'html.parser')
-        
+
         # Check for blocked/error pages
         page_text = soup.get_text().lower()
         if 'incapsula' in page_text or 'access denied' in page_text:
@@ -502,19 +526,19 @@ class FixedPlaywrightSmartPickScraper:
         # Look for Results.cfm links with type=Horse
         results_links = [a for a in horse_links if 'Results.cfm' in a.get('href', '') and 'type=Horse' in a.get('href', '')]
         logger.info(f"🐎 Found {len(results_links)} horse profile links")
-        
+
         for link in results_links:
             try:
                 horse_name = link.get_text(strip=True)
                 if not horse_name:
                     continue
-                
+
                 href = link['href']
                 profile_url = href if href.startswith('http') else f"https://www.equibase.com{href if href.startswith('/') else '/' + href}"
-                
+
                 # Extract refno and registry from URL
                 refno, registry = self.parse_refno_registry(profile_url)
-                
+
                 # Look for Jockey/Trainer combo win percentage
                 combo_win_pct = None
                 parent = link.parent
@@ -526,7 +550,7 @@ class FixedPlaywrightSmartPickScraper:
                             combo_win_pct = int(match.group(1))
                             break
                         parent = parent.parent
-                
+
                 horses[horse_name] = {
                     'smartpick': {
                         'combo_win_pct': combo_win_pct
@@ -535,16 +559,16 @@ class FixedPlaywrightSmartPickScraper:
                     'refno': refno,
                     'registry': registry
                 }
-                
+
                 logger.info(f"  ✅ Parsed: {horse_name} (combo: {combo_win_pct}%)")
-                
+
             except Exception as e:
                 logger.warning(f"⚠️  Error parsing horse link: {e}")
                 continue
-        
+
         logger.info(f"📊 Total horses parsed: {len(horses)}")
         return horses
-    
+
     def parse_refno_registry(self, url: str) -> tuple:
         """Extract refno and registry from profile URL"""
         if not url:
