@@ -153,84 +153,79 @@ async def get_race_count_from_card_page(track_id: str, date_str: str) -> int:
             context = await browser.new_context(
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             )
+
+            # Reduce memory / speed up: block heavy resources
+            async def _route_handler(route, request):
+                try:
+                    if request.resource_type in {"image", "media", "font"}:
+                        await route.abort()
+                    else:
+                        await route.continue_()
+                except Exception:
+                    try:
+                        await route.continue_()
+                    except Exception:
+                        pass
+            await context.route("**/*", _route_handler)
+
             page = await context.new_page()
 
             # Navigate to race card page
-            response = await page.goto(url, wait_until='domcontentloaded', timeout=30000)
+            response = await page.goto(url, wait_until='load', timeout=45000)
 
-            if response.status != 200:
-                LOG.warning(f"⚠️  Race card page returned status {response.status}")
+            if response is None or response.status != 200:
+                LOG.warning(f"⚠️  Race card page returned status {getattr(response, 'status', 'None')}")
                 await browser.close()
                 return 8  # Default fallback
 
-            # Wait a bit for content to load
-            await page.wait_for_timeout(2000)
+            # Wait a bit for content to settle
+            await page.wait_for_timeout(1000)
 
-            # Count race sections - look for race headers
+            # Count race sections - robust multi-strategy
             race_count = await page.evaluate('''
                 () => {
-                    // Method 1: Look for table rows with race data
-                    // The Equibase entry page has a table with rows for each race
-                    const rows = document.querySelectorAll('table tr');
                     const raceNumbers = new Set();
 
-                    rows.forEach(row => {
-                        // Look for cells that contain race numbers
-                        const cells = row.querySelectorAll('td, th');
-                        cells.forEach(cell => {
-                            const text = cell.textContent || '';
-                            // Match standalone numbers 1-20 (race numbers)
-                            if (/^\\s*\\d{1,2}\\s*$/.test(text)) {
-                                const num = parseInt(text.trim());
-                                if (num >= 1 && num <= 20) {
-                                    raceNumbers.add(num);
-                                }
-                            }
-                        });
+                    // Strategy A: Anchors or IDs like #race1, #Race1, etc.
+                    const byAnchor = Array.from(document.querySelectorAll('a[href^="#"], [id], [name]'));
+                    byAnchor.forEach(el => {
+                        const attrs = [el.getAttribute('href') || '', el.id || '', el.getAttribute('name') || ''].join(' ');
+                        const m = attrs.match(/(?:^|#|\b)race[-_\s]*([0-9]{1,2})\b/i);
+                        if (m) raceNumbers.add(parseInt(m[1]));
                     });
 
-                    if (raceNumbers.size > 0) {
-                        console.log('Found race numbers:', Array.from(raceNumbers).sort((a,b) => a-b));
-                        return Math.max(...raceNumbers);
-                    }
-
-                    // Method 2: Look for race number headers
-                    const raceHeaders = document.querySelectorAll('[class*="race"], [id*="race"], h2, h3');
-                    raceHeaders.forEach(el => {
-                        const text = el.textContent || '';
-                        // Look for "Race 1", "Race 2", etc.
-                        const match = text.match(/Race\\s+(\\d+)/i);
-                        if (match) {
-                            raceNumbers.add(parseInt(match[1]));
-                        }
+                    // Strategy B: Visible headings containing "Race N"
+                    const headerEls = document.querySelectorAll('h1,h2,h3,h4,.race,.entry,.race-header,.raceTitle, .race-title, .raceHeader');
+                    headerEls.forEach(el => {
+                        const t = (el.textContent || '').replace(/\s+/g,' ').trim();
+                        const m = t.match(/Race\s*#?\s*([0-9]{1,2})\b/i);
+                        if (m) raceNumbers.add(parseInt(m[1]));
                     });
 
-                    if (raceNumbers.size > 0) {
-                        return Math.max(...raceNumbers);
-                    }
-
-                    // Method 3: Look for race links
-                    const links = document.querySelectorAll('a[href*="raceNumber"]');
-                    const linkRaceNumbers = new Set();
-                    links.forEach(link => {
-                        const href = link.getAttribute('href') || '';
-                        const match = href.match(/raceNumber=(\\d+)/);
-                        if (match) {
-                            linkRaceNumbers.add(parseInt(match[1]));
-                        }
+                    // Strategy C: Links/hrefs carrying raceNumber param
+                    const links = document.querySelectorAll('a[href]');
+                    links.forEach(a => {
+                        const href = a.getAttribute('href') || '';
+                        const m = href.match(/raceNumber=(\d{1,2})/i);
+                        if (m) raceNumbers.add(parseInt(m[1]));
                     });
 
-                    if (linkRaceNumbers.size > 0) {
-                        return Math.max(...linkRaceNumbers);
+                    // Strategy D: Global text fallback
+                    const bodyText = (document.body.innerText || '').replace(/\s+/g,' ');
+                    let m;
+                    const re = /\bRace\s*#?\s*([0-9]{1,2})\b/gi;
+                    while ((m = re.exec(bodyText)) !== null) {
+                        raceNumbers.add(parseInt(m[1]));
                     }
 
-                    return 0;
+                    if (raceNumbers.size === 0) return 0;
+                    return Math.max(...Array.from(raceNumbers));
                 }
             ''')
 
             await browser.close()
 
-            if race_count > 0:
+            if race_count and race_count > 0:
                 LOG.info(f"✅ Found {race_count} races on card")
                 return race_count
             else:
@@ -238,8 +233,26 @@ async def get_race_count_from_card_page(track_id: str, date_str: str) -> int:
                 return 8
 
     except Exception as e:
-        LOG.error(f"❌ Error fetching race count: {e}")
-        return 8  # Default fallback
+        LOG.error(f"❌ Error fetching race count via Playwright: {e}")
+
+    # Final fallback: try simple HTTP fetch + regex parsing (works for static entry pages)
+    try:
+        import re, requests
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
+        }
+        resp = requests.get(url, headers=headers, timeout=15)
+        if resp.status_code == 200 and resp.text:
+            numbers = set(int(n) for n in re.findall(r"\bRace\s*#?\s*([0-9]{1,2})\b", resp.text, flags=re.I))
+            if numbers:
+                race_count = max(numbers)
+                LOG.info(f"✅ (fallback) Found {race_count} races on card")
+                return race_count
+        LOG.warning("⚠️  (fallback) Could not determine race count from static HTML")
+    except Exception as e2:
+        LOG.error(f"❌ (fallback) Error parsing static entry page: {e2}")
+
+    return 8  # Default fallback
 
 
 async def scrape_smartpick_data_for_card(date_str: str, num_races: int) -> Dict:

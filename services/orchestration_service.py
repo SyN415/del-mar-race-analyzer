@@ -267,48 +267,44 @@ class OrchestrationService:
             logger.error(f"Failed to scrape horse data: {e}")
             raise
     
-    async def _enhance_with_smartpick_data(self, session_id: str, race_card: Dict, 
+    async def _enhance_with_smartpick_data(self, session_id: str, race_card: Dict,
                                          horse_data: Dict, race_date: str, track_id: str) -> Dict:
         """Enhance horse data with SmartPick jockey/trainer information"""
         enhanced_data = horse_data.copy()
-        
+
         try:
             # Convert date format for SmartPick (MM/DD/YYYY)
             date_parts = race_date.split('-')
             smartpick_date = f"{date_parts[1]}/{date_parts[2]}/{date_parts[0]}"
-            
-            smartpick_scraper = SmartPickRaceScraper(headless=True)
-            
-            try:
+
+            # Use async context manager for Playwright-based scraper
+            async with SmartPickRaceScraper() as smartpick_scraper:
                 # Process each race
                 for race in race_card.get('races', []):
                     race_number = race.get('race_number', 0)
-                    
+
                     if race_number > 0:
-                        # Scrape SmartPick data for this race
-                        smartpick_data = smartpick_scraper.scrape_race(
+                        # Scrape SmartPick data for this race (await async method)
+                        smartpick_data = await smartpick_scraper.scrape_race(
                             track_id, smartpick_date, race_number
                         )
-                        
+
                         # Merge SmartPick data with existing horse data
                         for horse_name, sp_data in smartpick_data.items():
                             if horse_name in enhanced_data:
                                 # Merge SmartPick data
                                 enhanced_data[horse_name]['smartpick'] = sp_data.get('smartpick', {})
-                                
+
                                 # Update quality rating if SmartPick has better data
                                 if sp_data.get('quality_rating', 0) > enhanced_data[horse_name].get('quality_rating', 0):
                                     enhanced_data[horse_name]['quality_rating'] = sp_data['quality_rating']
-                                
+
                                 # Add OUR speed figure if available
                                 if sp_data.get('our_speed_figure'):
                                     enhanced_data[horse_name]['our_speed_figure'] = sp_data['our_speed_figure']
-            
-            finally:
-                smartpick_scraper.close()
-            
+
             return enhanced_data
-            
+
         except Exception as e:
             logger.error(f"Failed to enhance with SmartPick data: {e}")
             # Return original data if SmartPick enhancement fails

@@ -2,6 +2,8 @@
 """
 Fix for SmartPick scraper - addresses the Angular/JavaScript rendering issue
 """
+import os
+
 import asyncio
 import logging
 import re
@@ -29,6 +31,10 @@ class FixedPlaywrightSmartPickScraper:
         self.context: Optional[BrowserContext] = None
         self.captcha_solver = get_captcha_solver() if CAPTCHA_SOLVER_AVAILABLE else None
         self.session_established = False
+        # Circuit breaker controls
+        self.captcha_fail_streak = 0
+        self.captcha_fail_threshold = int(os.environ.get('SMARTPICK_CB_THRESHOLD', '1'))
+        self.circuit_breaker_enabled = os.environ.get('SMARTPICK_CIRCUIT_BREAKER', '1').lower() not in ('0','false','no')
 
     async def __aenter__(self):
         """Async context manager entry"""
@@ -228,6 +234,8 @@ class FixedPlaywrightSmartPickScraper:
                     captcha_solved = await solve_equibase_captcha(page, self.captcha_solver)
                     if not captcha_solved:
                         logger.error("❌ Failed to solve captcha")
+                        # increment circuit breaker streak
+                        self.captcha_fail_streak += 1
                         try:
                             await page.close()
                         except Exception:
@@ -250,6 +258,7 @@ class FixedPlaywrightSmartPickScraper:
                     await page.wait_for_timeout(10000)  # Increased from 5s to 10s
                 else:
                     logger.error("❌ Challenge page detected but no captcha solver available")
+                    self.captcha_fail_streak += 1
                     try:
                         await page.close()
                     except Exception:
@@ -482,6 +491,8 @@ class FixedPlaywrightSmartPickScraper:
                         logger.warning(f"⚠️  Error parsing horse data: {e}")
 
                 logger.info(f"🐎 Total horses parsed: {len(horses)}")
+                # reset captcha fail streak on success
+                self.captcha_fail_streak = 0
                 await page.close()
                 return horses
 
@@ -491,6 +502,8 @@ class FixedPlaywrightSmartPickScraper:
             horses = self.parse_smartpick_html(html)
             logger.info(f"🐎 Found {len(horses)} horses via HTML parsing")
 
+            # reset captcha fail streak on success
+            self.captcha_fail_streak = 0
             await page.close()
             return horses
 
@@ -623,6 +636,17 @@ async def scrape_multiple_races_playwright(track_id: str, race_date: str, num_ra
                 race_data = await scraper.scrape_race(track_id, race_date, race_num, day)
                 all_races_data[race_num] = race_data
                 logger.info(f"✅ Race {race_num}: Found {len(race_data)} horses")
+
+                # Circuit breaker: stop if captcha has been failing
+                if scraper.circuit_breaker_enabled and \
+                   scraper.captcha_fail_streak >= scraper.captcha_fail_threshold:
+                    logger.warning(
+                        f"🛑 Circuit breaker triggered after race {race_num}: "
+                        f"captcha_fail_streak={scraper.captcha_fail_streak} >= threshold={scraper.captcha_fail_threshold}. "
+                        f"Stopping further SmartPick scraping."
+                    )
+                    break
+
             except Exception as e:
                 logger.error(f"❌ Error scraping race {race_num}: {e}")
                 all_races_data[race_num] = {}
