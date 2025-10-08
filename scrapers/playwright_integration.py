@@ -321,17 +321,22 @@ async def scrape_full_card_playwright() -> Dict[str, Dict]:
 
     # Determine horse list per race from the card overview (viewe2)
     date_str = os.environ.get('RACE_DATE_STR', '09/05/2025')
+    track_id = os.environ.get('TRACK_ID', 'DMR')  # Use TRACK_ID from environment
     entry_scraper = RaceEntryScraper()
     horses_with_urls: List[Tuple[str, str]] = []
 
     try:
-        overview = await entry_scraper.scrape_card_overview('DMR', date_str, 'USA')
+        print(f"Fetching overview for {track_id} on {date_str}")
+        overview = await entry_scraper.scrape_card_overview(track_id, date_str, 'USA')
         per_race = overview.get('races', []) if isinstance(overview, dict) else []
+        print(f"Overview returned {len(per_race)} races")
         # Build mapping from race -> set(name)
         allow: Dict[int, set] = {}
         for r in per_race:
             rn = int(r.get('race_number'))
             allow[rn] = { (h.get('name') or '').strip() for h in r.get('horses', []) }
+        print(f"Built allow list for {len(allow)} races")
+
         # Cross-match with card profile URLs to collect URLs for allowed names
         for race in card.get('races', []):
             rn = int(race.get('race_number') or race.get('number'))
@@ -341,8 +346,10 @@ async def scrape_full_card_playwright() -> Dict[str, Dict]:
                 url = (h.get('profile_url') or '').strip()
                 if name in names and name and url:
                     horses_with_urls.append((name, url))
-    except Exception:
+        print(f"Matched {len(horses_with_urls)} horses from overview")
+    except Exception as e:
         # Hard fallback to all card horses if overview fails
+        print(f"⚠️  Overview matching failed: {e}, using all card horses")
         for race in card.get('races', []):
             for h in race.get('horses', []):
                 name = (h.get('name') or '').strip()

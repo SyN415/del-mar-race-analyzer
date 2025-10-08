@@ -229,29 +229,37 @@ async def get_race_count_from_card_page(track_id: str, date_str: str) -> int:
                 LOG.info(f"✅ Found {race_count} races on card")
                 return race_count
             else:
-                LOG.warning(f"⚠️  Could not determine race count, using default of 8")
-                return 8
+                LOG.warning(f"⚠️  Could not determine race count from Playwright (got {race_count}), trying fallback")
+                # Don't return yet, let the fallback try
 
     except Exception as e:
         LOG.error(f"❌ Error fetching race count via Playwright: {e}")
+        import traceback
+        LOG.error(f"Traceback: {traceback.format_exc()}")
 
     # Final fallback: try simple HTTP fetch + regex parsing (works for static entry pages)
+    LOG.info(f"🔄 Trying HTTP fallback for race count from {url}")
     try:
         import re, requests
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36'
         }
         resp = requests.get(url, headers=headers, timeout=15)
+        LOG.info(f"HTTP fallback status: {resp.status_code}")
         if resp.status_code == 200 and resp.text:
             numbers = set(int(n) for n in re.findall(r"\bRace\s*#?\s*([0-9]{1,2})\b", resp.text, flags=re.I))
+            LOG.info(f"Found race numbers in HTML: {sorted(numbers) if numbers else 'none'}")
             if numbers:
                 race_count = max(numbers)
-                LOG.info(f"✅ (fallback) Found {race_count} races on card")
+                LOG.info(f"✅ (HTTP fallback) Found {race_count} races on card")
                 return race_count
-        LOG.warning("⚠️  (fallback) Could not determine race count from static HTML")
+        LOG.warning("⚠️  (HTTP fallback) Could not determine race count from static HTML")
     except Exception as e2:
-        LOG.error(f"❌ (fallback) Error parsing static entry page: {e2}")
+        LOG.error(f"❌ (HTTP fallback) Error parsing static entry page: {e2}")
+        import traceback
+        LOG.error(f"Traceback: {traceback.format_exc()}")
 
+    LOG.warning("⚠️  All race count detection methods failed, using default of 8")
     return 8  # Default fallback
 
 
