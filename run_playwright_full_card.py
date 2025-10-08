@@ -169,10 +169,33 @@ async def get_race_count_from_card_page(track_id: str, date_str: str) -> int:
             # Count race sections - look for race headers
             race_count = await page.evaluate('''
                 () => {
-                    // Method 1: Look for race number headers
-                    const raceHeaders = document.querySelectorAll('[class*="race"], [id*="race"], h2, h3');
+                    // Method 1: Look for table rows with race data
+                    // The Equibase entry page has a table with rows for each race
+                    const rows = document.querySelectorAll('table tr');
                     const raceNumbers = new Set();
 
+                    rows.forEach(row => {
+                        // Look for cells that contain race numbers
+                        const cells = row.querySelectorAll('td, th');
+                        cells.forEach(cell => {
+                            const text = cell.textContent || '';
+                            // Match standalone numbers 1-20 (race numbers)
+                            if (/^\\s*\\d{1,2}\\s*$/.test(text)) {
+                                const num = parseInt(text.trim());
+                                if (num >= 1 && num <= 20) {
+                                    raceNumbers.add(num);
+                                }
+                            }
+                        });
+                    });
+
+                    if (raceNumbers.size > 0) {
+                        console.log('Found race numbers:', Array.from(raceNumbers).sort((a,b) => a-b));
+                        return Math.max(...raceNumbers);
+                    }
+
+                    // Method 2: Look for race number headers
+                    const raceHeaders = document.querySelectorAll('[class*="race"], [id*="race"], h2, h3');
                     raceHeaders.forEach(el => {
                         const text = el.textContent || '';
                         // Look for "Race 1", "Race 2", etc.
@@ -184,12 +207,6 @@ async def get_race_count_from_card_page(track_id: str, date_str: str) -> int:
 
                     if (raceNumbers.size > 0) {
                         return Math.max(...raceNumbers);
-                    }
-
-                    // Method 2: Count tables (each race usually has a table)
-                    const tables = document.querySelectorAll('table');
-                    if (tables.length > 0) {
-                        return tables.length;
                     }
 
                     // Method 3: Look for race links

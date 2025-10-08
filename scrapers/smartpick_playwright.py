@@ -213,10 +213,21 @@ class FixedPlaywrightSmartPickScraper:
                     if not captcha_solved:
                         logger.error("❌ Failed to solve captcha")
                         return {}
-                    
+
                     # Wait for page to reload after captcha
                     logger.info("⏳ Waiting for page to reload after captcha...")
-                    await page.wait_for_timeout(5000)
+                    await page.wait_for_timeout(3000)
+
+                    # Wait for network to settle after captcha
+                    try:
+                        await page.wait_for_load_state('networkidle', timeout=15000)
+                        logger.info("✅ Network idle after captcha")
+                    except Exception as e:
+                        logger.warning(f"⚠️  Network idle timeout after captcha: {e}")
+
+                    # Additional wait for Angular to fetch and render data
+                    logger.info("⏳ Waiting for Angular to fetch race data...")
+                    await page.wait_for_timeout(10000)  # Increased from 5s to 10s
                 else:
                     logger.error("❌ Challenge page detected but no captcha solver available")
                     return {}
@@ -269,6 +280,37 @@ class FixedPlaywrightSmartPickScraper:
             page_text = await page.evaluate('() => document.body.innerText')
             if 'no entries' in page_text.lower() or 'not available' in page_text.lower():
                 logger.warning(f"⚠️  Page indicates no data available")
+
+            # CRITICAL: Wait for horse data to actually appear in the DOM
+            logger.info("⏳ Waiting for horse data to appear in DOM...")
+            data_loaded = False
+            for attempt in range(10):  # Try for up to 20 seconds (10 attempts x 2s)
+                has_data = await page.evaluate('''
+                    () => {
+                        // Check if there are any horse-related elements
+                        const horseElements = document.querySelectorAll(
+                            '[class*="horse"], [class*="runner"], [class*="starter"], ' +
+                            'table tr, .row, [data-horse]'
+                        );
+
+                        // Also check for text content that indicates horses
+                        const bodyText = document.body.innerText || '';
+                        const hasHorseNames = /[A-Z][a-z]+\\s+[A-Z][a-z]+/.test(bodyText);
+
+                        return horseElements.length > 5 || hasHorseNames;
+                    }
+                ''')
+
+                if has_data:
+                    logger.info(f"✅ Horse data detected in DOM (attempt {attempt + 1})")
+                    data_loaded = True
+                    break
+                else:
+                    logger.info(f"⏳ Waiting for data... (attempt {attempt + 1}/10)")
+                    await page.wait_for_timeout(2000)
+
+            if not data_loaded:
+                logger.warning("⚠️  No horse data detected after waiting - page may not have loaded correctly")
 
             # Try to extract data directly from Angular using JavaScript
             logger.info("🔍 Attempting to extract data from Angular app...")

@@ -56,30 +56,41 @@ class CaptchaSolver:
         try:
             logger.info(f"🔐 Solving hCaptcha for {url}")
             logger.info(f"   Site key: {sitekey[:20]}...")
-            
-            result = self.solver.hcaptcha(
-                sitekey=sitekey,
-                url=url
-            )
-            
+
+            # Try the correct method name for hCaptcha
+            try:
+                result = self.solver.hcaptcha(
+                    sitekey=sitekey,
+                    pageurl=url  # Changed from 'url' to 'pageurl'
+                )
+            except AttributeError:
+                # Fallback: try different method name
+                logger.warning("⚠️  Trying alternative hCaptcha method...")
+                result = self.solver.solve_hcaptcha(
+                    sitekey=sitekey,
+                    url=url
+                )
+
             token = result.get('code')
-            
+
             if token:
                 self.captchas_solved += 1
                 # 2Captcha hCaptcha cost is ~$2.99 per 1000 solves
                 cost = 0.00299
                 self.total_cost += cost
-                
+
                 logger.info(f"✅ Captcha solved! (#{self.captchas_solved}, cost: ${cost:.4f}, total: ${self.total_cost:.4f})")
                 logger.info(f"   Token: {token[:50]}...")
-                
+
                 return token
             else:
                 logger.error("❌ Captcha solving failed: No token returned")
                 return None
-                
+
         except Exception as e:
             logger.error(f"❌ Error solving captcha: {e}")
+            logger.error(f"   Error type: {type(e).__name__}")
+            logger.error(f"   Error details: {str(e)}")
             return None
     
     def get_balance(self) -> Optional[float]:
