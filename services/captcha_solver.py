@@ -57,19 +57,9 @@ class CaptchaSolver:
             logger.info(f"🔐 Solving hCaptcha for {url}")
             logger.info(f"   Site key: {sitekey[:20]}...")
 
-            # Try the correct method name for hCaptcha
-            try:
-                result = self.solver.hcaptcha(
-                    sitekey=sitekey,
-                    pageurl=url  # Changed from 'url' to 'pageurl'
-                )
-            except AttributeError:
-                # Fallback: try different method name
-                logger.warning("⚠️  Trying alternative hCaptcha method...")
-                result = self.solver.solve_hcaptcha(
-                    sitekey=sitekey,
-                    url=url
-                )
+            # The 2captcha library expects positional arguments, not keyword arguments
+            # Method signature: hcaptcha(sitekey, url)
+            result = self.solver.hcaptcha(sitekey, url)
 
             token = result.get('code')
 

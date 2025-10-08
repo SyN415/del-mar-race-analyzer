@@ -15,6 +15,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+import asyncio
 
 import uvicorn
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
@@ -91,6 +92,7 @@ class AppState:
         self.prediction_engine = RacePredictionEngine()
         self.gradient_boosting_predictor = None
         self.kelly_optimizer = None
+        self.active_tasks: Dict[str, asyncio.Task] = {}  # Track running tasks
         
     async def initialize(self):
         """Initialize services that require async setup"""
@@ -194,15 +196,17 @@ async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundT
             # Fallback session ID generation
             session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
-        # Start background analysis task
-        background_tasks.add_task(
-            run_analysis_pipeline,
-            session_id=session_id,
-            date=request.date,
-            llm_model=request.llm_model,
-            track_id=request.track_id
+        # Create and track the background task
+        task = asyncio.create_task(
+            run_analysis_pipeline(
+                session_id=session_id,
+                date=request.date,
+                llm_model=request.llm_model,
+                track_id=request.track_id
+            )
         )
-        
+        app_state.active_tasks[session_id] = task
+
         return JSONResponse({
             "session_id": session_id,
             "status": "started",
@@ -231,6 +235,33 @@ async def get_analysis_status(session_id: str):
             })
     except Exception as e:
         logger.error(f"Failed to get status for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/cancel/{session_id}")
+async def cancel_analysis(session_id: str):
+    """Cancel a running analysis session"""
+    try:
+        # Cancel the background task if it exists
+        if session_id in app_state.active_tasks:
+            task = app_state.active_tasks[session_id]
+            if not task.done():
+                task.cancel()
+                logger.info(f"Cancelled analysis task for session {session_id}")
+            del app_state.active_tasks[session_id]
+
+        # Update session status
+        if app_state.session_manager:
+            await app_state.session_manager.update_session_status(
+                session_id, "cancelled", 0, "Cancelled", "Analysis cancelled by user"
+            )
+
+        return JSONResponse({
+            "session_id": session_id,
+            "status": "cancelled",
+            "message": "Analysis cancelled successfully"
+        })
+    except Exception as e:
+        logger.error(f"Failed to cancel session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/progress/{session_id}", response_class=HTMLResponse)
@@ -313,6 +344,11 @@ async def run_analysis_pipeline(session_id: str, date: str, llm_model: str, trac
     """Background task to run the complete analysis pipeline"""
     try:
         logger.info(f"Starting analysis pipeline for session {session_id}")
+
+        # Check for cancellation before starting
+        if session_id not in app_state.active_tasks:
+            logger.info(f"Session {session_id} was cancelled before starting")
+            return
         
         # Update session status
         if app_state.session_manager:
@@ -393,9 +429,23 @@ async def run_analysis_pipeline(session_id: str, date: str, llm_model: str, trac
                 await playwright_scraper.close()
             if smartpick_scraper:
                 smartpick_scraper.close()
-                
+
+    except asyncio.CancelledError:
+        logger.info(f"Analysis pipeline cancelled for session {session_id}")
+        if app_state.session_manager:
+            await app_state.session_manager.update_session_status(
+                session_id, "cancelled", 0, "Cancelled", "Analysis cancelled by user"
+            )
+        raise  # Re-raise to properly cancel the task
+
     except Exception as e:
         logger.error(f"Critical error in analysis pipeline for session {session_id}: {e}")
+
+    finally:
+        # Remove task from active tasks
+        if session_id in app_state.active_tasks:
+            del app_state.active_tasks[session_id]
+            logger.info(f"Cleaned up task for session {session_id}")
 
 # Application lifecycle events
 @app.on_event("startup")
@@ -409,6 +459,19 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup on application shutdown"""
     logger.info("Shutting down Del Mar Race Analysis Application")
+
+    # Cancel all active tasks
+    for session_id, task in list(app_state.active_tasks.items()):
+        if not task.done():
+            logger.info(f"Cancelling active task for session {session_id}")
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    app_state.active_tasks.clear()
+    logger.info("All active tasks cancelled")
     # Add cleanup logic here
     logger.info("Application shutdown complete")
 
