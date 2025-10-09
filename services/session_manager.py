@@ -20,14 +20,31 @@ logger = logging.getLogger(__name__)
 
 class SessionManager:
     """Manages analysis sessions and data persistence using SQLite"""
-    
+
     def __init__(self, db_path: str = "data/sessions.db"):
+        """
+        Initialize session manager with database path
+
+        Args:
+            db_path: Path to SQLite database file. Defaults to "data/sessions.db"
+                    which maps to /app/data/sessions.db in Render container
+        """
         self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(exist_ok=True)
-        
+
+        # Ensure parent directory exists
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Log the actual database path for debugging
+        abs_path = self.db_path.absolute()
+        logger.info(f"📁 SessionManager initialized with database path: {abs_path}")
+        logger.info(f"📁 Database directory exists: {self.db_path.parent.exists()}")
+        logger.info(f"📁 Database file exists: {self.db_path.exists()}")
+
     async def initialize(self):
         """Initialize database tables"""
         try:
+            logger.info(f"🔧 Initializing database at: {self.db_path.absolute()}")
+
             async with aiosqlite.connect(self.db_path) as db:
                 # Create analysis_sessions table
                 await db.execute("""
@@ -79,10 +96,18 @@ class SessionManager:
                 """)
                 
                 await db.commit()
-                logger.info("Database initialized successfully")
-                
+
+                # Verify database was created successfully
+                if self.db_path.exists():
+                    size = self.db_path.stat().st_size
+                    logger.info(f"✅ Database initialized successfully at: {self.db_path.absolute()}")
+                    logger.info(f"✅ Database file size: {size} bytes")
+                else:
+                    logger.error(f"❌ Database file not found after initialization: {self.db_path.absolute()}")
+
         except Exception as e:
-            logger.error(f"Failed to initialize database: {e}")
+            logger.error(f"❌ Failed to initialize database: {e}")
+            logger.error(f"   Database path: {self.db_path.absolute()}")
             raise
     
     async def create_session(self, race_date: str, llm_model: str, track_id: str = "DMR") -> str:
@@ -254,30 +279,58 @@ class SessionManager:
             logger.error(f"Failed to get recent sessions: {e}")
             return []
     
+    async def recover_interrupted_sessions(self):
+        """
+        Recover sessions that were interrupted by server restart
+        Marks them as 'interrupted' so users know what happened
+        """
+        try:
+            async with aiosqlite.connect(self.db_path) as db:
+                # Find sessions that were running when server restarted
+                await db.execute("""
+                    UPDATE analysis_sessions
+                    SET status = 'interrupted',
+                        message = 'Analysis interrupted by server restart. Please start a new analysis.',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE status IN ('created', 'running', 'scraping')
+                    AND updated_at < datetime('now', '-5 minutes')
+                """)
+
+                rows_affected = db.total_changes
+                await db.commit()
+
+                if rows_affected > 0:
+                    logger.warning(f"⚠️  Recovered {rows_affected} interrupted session(s)")
+                else:
+                    logger.info("✅ No interrupted sessions found")
+
+        except Exception as e:
+            logger.error(f"❌ Failed to recover interrupted sessions: {e}")
+
     async def cleanup_old_sessions(self, days_old: int = 7):
         """Clean up old sessions and cached data"""
         try:
             async with aiosqlite.connect(self.db_path) as db:
                 # Delete old sessions
                 await db.execute("""
-                    DELETE FROM analysis_sessions 
+                    DELETE FROM analysis_sessions
                     WHERE created_at < datetime('now', '-{} days')
                 """.format(days_old))
-                
+
                 # Delete old cached horse data
                 await db.execute("""
-                    DELETE FROM horse_data_cache 
+                    DELETE FROM horse_data_cache
                     WHERE created_at < datetime('now', '-{} days')
                 """.format(days_old))
-                
+
                 # Delete old race data cache
                 await db.execute("""
-                    DELETE FROM race_data_cache 
+                    DELETE FROM race_data_cache
                     WHERE created_at < datetime('now', '-{} days')
                 """.format(days_old))
-                
+
                 await db.commit()
                 logger.info(f"Cleaned up sessions older than {days_old} days")
-                
+
         except Exception as e:
             logger.error(f"Failed to cleanup old sessions: {e}")

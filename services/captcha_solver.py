@@ -105,6 +105,21 @@ class CaptchaSolver:
             logger.error(f"   Error type: {type(e).__name__}")
             logger.error(f"   Error details: {err_text}")
 
+            # Provide helpful troubleshooting info based on error
+            if "ERROR_METHOD_CALL" in err_text:
+                logger.error("   ⚠️  ERROR_METHOD_CALL typically means:")
+                logger.error("      1. Invalid API key format (should be 32 chars)")
+                logger.error("      2. Insufficient account balance")
+                logger.error("      3. hCaptcha not enabled in account settings")
+                logger.error("      4. API key doesn't have proper permissions")
+                logger.error("   📖 See PRODUCTION_ISSUE_RESOLUTION.md for detailed troubleshooting")
+            elif "ERROR_ZERO_BALANCE" in err_text:
+                logger.error("   💰 Your 2Captcha account has insufficient funds")
+                logger.error("      Add balance at: https://2captcha.com/enterpage")
+            elif "ERROR_WRONG_USER_KEY" in err_text or "ERROR_KEY_DOES_NOT_EXIST" in err_text:
+                logger.error("   🔑 Your API key is invalid or not found")
+                logger.error("      Get your key at: https://2captcha.com/enterpage")
+
             try:
                 logger.info("🔁 Retrying with explicit solve(method='hcaptcha', pageurl=...) and enterprise flags")
                 fallback_kwargs = {**extra_kwargs}
@@ -126,9 +141,17 @@ class CaptchaSolver:
                 logger.error("❌ Fallback solve returned no token")
                 return None
             except Exception as e2:
+                err_text2 = str(e2)
                 logger.error(f"❌ Fallback error solving captcha: {e2}")
                 logger.error(f"   Error type: {type(e2).__name__}")
-                logger.error(f"   Error details: {str(e2)}")
+                logger.error(f"   Error details: {err_text2}")
+
+                # Provide troubleshooting info for fallback error too
+                if "ERROR_METHOD_CALL" in err_text2:
+                    logger.error("   ⚠️  Both primary and fallback methods failed with ERROR_METHOD_CALL")
+                    logger.error("   🔧 Action Required: Fix your 2Captcha API configuration")
+                    logger.error("   📖 See PRODUCTION_ISSUE_RESOLUTION.md for step-by-step guide")
+
                 return None
     
     def get_balance(self) -> Optional[float]:

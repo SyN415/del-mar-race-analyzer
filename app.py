@@ -100,7 +100,10 @@ class AppState:
             if SessionManager:
                 self.session_manager = SessionManager()
                 await self.session_manager.initialize()
-            
+
+                # Recover any interrupted sessions from previous restart
+                await self.session_manager.recover_interrupted_sessions()
+
             if OrchestrationService:
                 self.orchestration_service = OrchestrationService(
                     session_manager=self.session_manager,
@@ -223,6 +226,15 @@ async def get_analysis_status(session_id: str):
     try:
         if app_state.session_manager:
             status = await app_state.session_manager.get_session_status(session_id)
+
+            # Add helpful message for interrupted sessions
+            if status.get('status') == 'interrupted':
+                status['user_message'] = (
+                    "This analysis was interrupted by a server restart. "
+                    "This can happen during deployments or maintenance. "
+                    "Please start a new analysis."
+                )
+
             return JSONResponse(status)
         else:
             # Fallback status response
@@ -233,6 +245,13 @@ async def get_analysis_status(session_id: str):
                 "current_stage": "initializing",
                 "message": "Session manager not available"
             })
+    except ValueError as e:
+        # Session not found - provide helpful error message
+        logger.error(f"Session not found: {session_id}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session_id} not found. It may have expired or been cleaned up."
+        )
     except Exception as e:
         logger.error(f"Failed to get status for session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
