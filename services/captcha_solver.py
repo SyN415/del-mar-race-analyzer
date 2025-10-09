@@ -437,7 +437,19 @@ async def solve_equibase_captcha(page, captcha_solver: CaptchaSolver) -> bool:
 
         # Solve the captcha
         url = page.url
-        token = captcha_solver.solve_hcaptcha(sitekey, url, rqdata=rqdata, user_agent=user_agent, enterprise=True)
+        # Only set enterprise=True if we actually found rqdata (enterprise indicator)
+        # Setting enterprise=True for non-enterprise captchas causes ERROR_METHOD_CALL
+        is_enterprise = bool(rqdata)
+        if is_enterprise:
+            logger.info("   🏢 Detected enterprise hCaptcha (rqdata present)")
+
+        token = captcha_solver.solve_hcaptcha(
+            sitekey,
+            url,
+            rqdata=rqdata,
+            user_agent=user_agent,
+            enterprise=is_enterprise  # Only True if rqdata was found
+        )
 
         if not token:
             logger.error("❌ Failed to solve captcha")

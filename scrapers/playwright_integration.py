@@ -21,6 +21,7 @@ async def scrape_overview():
     """Scrape race card overview using RaceEntryScraper"""
     try:
         date_str = os.environ.get('RACE_DATE_STR', '09/07/2025')  # Updated to 09/07/2025
+        track_id = os.environ.get('TRACK_ID', 'DMR')  # Get track ID from environment
 
         # Convert date format if needed (YYYY-MM-DD to MM/DD/YYYY)
         if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
@@ -30,7 +31,7 @@ async def scrape_overview():
             print(f"Converted date format to: {date_str}")
 
         scraper = RaceEntryScraper()
-        result = await scraper.scrape_card_overview('DMR', date_str, 'USA')
+        result = await scraper.scrape_card_overview(track_id, date_str, 'USA')
         return result
     except Exception as e:
         print(f"Failed to scrape overview: {e}")
@@ -250,9 +251,10 @@ def load_race_card() -> Dict:
     try:
         import asyncio
         scraper = RaceEntryScraper()
-        
+        track_id = os.environ.get('TRACK_ID', 'DMR')  # Get track ID from environment
+
         async def scrape_card():
-            result = await scraper.scrape_card_overview('DMR', date_str, 'USA')
+            result = await scraper.scrape_card_overview(track_id, date_str, 'USA')
             return result
         
         # Use existing event loop if available
@@ -379,8 +381,9 @@ async def scrape_full_card_playwright() -> Dict[str, Dict]:
         sps = SmartPickRaceScraper(headless=True)
         try:
             date_str = os.environ.get('RACE_DATE_STR', '09/05/2025')
+            track_id = os.environ.get('TRACK_ID', 'DMR')  # Get track ID from environment
             # Find all race numbers from overview again to avoid mismatch
-            overview = await RaceEntryScraper().scrape_card_overview('DMR', date_str, 'USA')
+            overview = await RaceEntryScraper().scrape_card_overview(track_id, date_str, 'USA')
             races = [int(r.get('race_number')) for r in overview.get('races', [])]
             for rn in races:
                 sp = sps.scrape_race('DMR', date_str, rn, 'D')
