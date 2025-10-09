@@ -63,6 +63,17 @@ class CaptchaSolver:
             logger.error("❌ Cannot solve captcha: No API key configured")
             return None
 
+        # Check balance before attempting to solve
+        try:
+            balance = self.solver.balance()
+            logger.info(f"💰 2Captcha account balance: ${balance:.2f}")
+            if balance < 0.01:
+                logger.error(f"❌ Insufficient balance: ${balance:.2f} (need at least $0.01)")
+                return None
+        except Exception as e:
+            logger.warning(f"⚠️  Could not check balance: {e}")
+            # Continue anyway - balance check is not critical
+
         # Build extra kwargs supported by 2captcha for hCaptcha
         extra_kwargs = {}
         if rqdata:
@@ -76,8 +87,14 @@ class CaptchaSolver:
         try:
             logger.info(f"🔐 Solving hCaptcha for {url}")
             logger.info(f"   Site key: {sitekey[:20]}...")
+            logger.info(f"   URL length: {len(url)} chars")
+            logger.info(f"   Extra params: {list(extra_kwargs.keys())}")
             if rqdata:
-                logger.info("   Using rqdata param (enterprise)")
+                logger.info(f"   Using rqdata param (enterprise): {rqdata[:20]}...")
+
+            # Log what we're sending to help debug
+            logger.debug(f"   Full sitekey: {sitekey}")
+            logger.debug(f"   Full URL: {url}")
 
             # Primary attempt: use library wrapper (renames url->pageurl internally)
             result = self.solver.hcaptcha(
