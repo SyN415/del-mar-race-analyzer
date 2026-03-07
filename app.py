@@ -98,7 +98,7 @@ class AppState:
         """Initialize services that require async setup"""
         try:
             if SessionManager:
-                self.session_manager = SessionManager()
+                self.session_manager = SessionManager(config=self.config)
                 await self.session_manager.initialize()
 
                 # Recover any interrupted sessions from previous restart
@@ -382,37 +382,20 @@ async def run_analysis_pipeline(session_id: str, date: str, llm_model: str, trac
         try:
             # Get session details to set environment variables
             session_details = None
+            race_date = date
             if app_state.session_manager:
                 session_details = await app_state.session_manager.get_session_status(session_id)
 
             # Set environment variables for the pipeline
             if session_details and 'race_date' in session_details:
                 race_date = session_details['race_date']
-                os.environ['RACE_DATE_STR'] = race_date
-                logger.info(f"Set RACE_DATE_STR to {race_date}")
+            os.environ['RACE_DATE_STR'] = race_date
+            logger.info(f"Set RACE_DATE_STR to {race_date}")
 
             # Set track ID environment variable
             if track_id:
                 os.environ['TRACK_ID'] = track_id
                 logger.info(f"Set TRACK_ID to {track_id}")
-
-                # Force fresh scrape by removing old race card file if it has placeholders
-                old_card_file = f"del_mar_{race_date.replace('-', '_').replace('/', '_')}_races.json"
-                if os.path.exists(old_card_file):
-                    try:
-                        with open(old_card_file, 'r') as f:
-                            existing_data = json.load(f)
-                        # Check for placeholder URLs
-                        has_placeholders = any(
-                            'PLACEHOLDER' in horse.get('profile_url', '')
-                            for race in existing_data.get('races', [])
-                            for horse in race.get('horses', [])
-                        )
-                        if has_placeholders:
-                            os.remove(old_card_file)
-                            logger.info(f"Removed race card file with placeholder URLs: {old_card_file}")
-                    except Exception as e:
-                        logger.warning(f"Error checking race card file: {e}")
 
             # This will be replaced with proper orchestration service
             # For now, use existing pipeline logic
@@ -426,6 +409,16 @@ async def run_analysis_pipeline(session_id: str, date: str, llm_model: str, trac
 
             # Run existing pipeline (temporary integration)
             results = await run_existing_pipeline()
+
+            if not isinstance(results, dict):
+                raise RuntimeError("Analysis pipeline returned an invalid result payload")
+            if results.get("error"):
+                raise RuntimeError(results["error"])
+            if not results.get("race_analyses"):
+                raise RuntimeError("Analysis pipeline completed without race analyses")
+
+            results.setdefault("race_date", race_date)
+            results.setdefault("track_id", track_id)
             
             # Update final status
             if app_state.session_manager:

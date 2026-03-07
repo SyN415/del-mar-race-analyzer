@@ -47,10 +47,17 @@ class RacePredictionEngine:
 
         # Current weight factors (dynamically adjusted)
         self.weight_factors = self.base_weight_factors.copy()
+        self.track_jockey_rankings_enabled = self._is_track_jockey_rankings_enabled()
 
         # Load realistic jockey and trainer data
         self.jockey_data = self.load_jockey_data()
+        self.track_jockey_rankings = self.load_track_jockey_rankings()
         self.trainer_data = self.load_trainer_data()
+
+    def _is_track_jockey_rankings_enabled(self) -> bool:
+        """Require explicit opt-in before applying meet-specific jockey adjustments."""
+        raw_value = str(os.environ.get('ENABLE_TRACK_JOCKEY_RANKINGS', '')).strip().lower()
+        return raw_value in {'1', 'true', 'yes', 'on'}
 
     def load_jockey_data(self) -> Dict:
         """Load real jockey performance data only (no simulated sources)."""
@@ -73,6 +80,20 @@ class RacePredictionEngine:
         # No generated fallbacks; return empty to avoid fabricated analytics
         return {}
 
+    def load_track_jockey_rankings(self) -> Dict:
+        """Load meet-specific jockey rankings used for track-aware adjustments."""
+        if not self.track_jockey_rankings_enabled:
+            return {}
+
+        data_path = os.path.join('data', 'santa_anita_2026_jockey_rankings.json')
+        try:
+            if os.path.exists(data_path):
+                with open(data_path, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"Warning: Could not load track jockey rankings: {e}")
+        return {}
+
     def load_trainer_data(self) -> Dict:
         """Load real trainer performance data only (no simulated sources)."""
         try:
@@ -91,6 +112,73 @@ class RacePredictionEngine:
             print(f"Warning: Could not load trainer data: {e}")
         # No generated fallbacks; return empty to avoid fabricated analytics
         return {}
+
+    def _normalize_person_name(self, name: str) -> str:
+        """Normalize person names so abbreviated and punctuated forms can match."""
+        if not name:
+            return ""
+        return " ".join(str(name).replace('.', ' ').replace(',', ' ').split()).lower()
+
+    def _person_name_aliases(self, name: str) -> List[str]:
+        """Generate common aliases such as full name, first+last, and initials+last."""
+        normalized = self._normalize_person_name(name)
+        if not normalized:
+            return []
+
+        aliases = {normalized}
+        parts = normalized.split()
+        if len(parts) >= 2:
+            first, last = parts[0], parts[-1]
+            middle = parts[1:-1]
+            aliases.add(f"{first} {last}")
+            aliases.add(f"{first[0]} {last}")
+            initials = " ".join([first[0], *[p[0] for p in middle]]).strip()
+            if initials:
+                aliases.add(f"{initials} {last}")
+
+        return [alias for alias in aliases if alias]
+
+    def _is_santa_anita_race(self, race_data: Optional[Dict]) -> bool:
+        """Identify Santa Anita races using available race-level track metadata."""
+        if not isinstance(race_data, dict):
+            return False
+
+        for key in ('track_id', 'track_code', 'track', 'track_name', 'venue'):
+            normalized = self._normalize_person_name(race_data.get(key, ''))
+            if normalized in {'sa', 'santa anita', 'santa anita park'}:
+                return True
+
+        return False
+
+    def get_track_jockey_stats(self, jockey_name: str, race_data: Optional[Dict] = None) -> Optional[Dict]:
+        """Get Santa Anita meet stats for a jockey when the race is at Santa Anita."""
+        if not jockey_name or not self._is_santa_anita_race(race_data):
+            return None
+
+        ranking_data = self.track_jockey_rankings or {}
+        jockeys = ranking_data.get('jockeys', {}) if isinstance(ranking_data, dict) else {}
+        if not isinstance(jockeys, dict):
+            return None
+
+        normalized_name = self._normalize_person_name(jockey_name)
+        for canonical_name, record in jockeys.items():
+            aliases = set(self._person_name_aliases(canonical_name))
+            if isinstance(record, dict):
+                aliases.update(self._person_name_aliases(record.get('name', '')))
+                for alias in record.get('aliases', []):
+                    aliases.add(self._normalize_person_name(alias))
+
+            if normalized_name in aliases:
+                matched = dict(record) if isinstance(record, dict) else {}
+                matched.setdefault('name', canonical_name)
+                matched.setdefault('track', ranking_data.get('track', 'Santa Anita'))
+                matched.setdefault('track_code', ranking_data.get('track_code', 'SA'))
+                matched.setdefault('season', ranking_data.get('season'))
+                matched.setdefault('minimum_starts', ranking_data.get('minimum_starts'))
+                matched.setdefault('ranking_formula', ranking_data.get('ranking_formula'))
+                return matched
+
+        return None
 
     def get_dynamic_weights(self, race_info: Dict) -> Dict[str, float]:
         """Calculate context-aware weights based on race characteristics"""
@@ -348,7 +436,7 @@ class RacePredictionEngine:
 
         return 50.0
 
-    def calculate_jockey_trainer_ratings(self, horse_data: Dict, jockey_name: str = "", trainer_name: str = "") -> Tuple[float, float]:
+    def calculate_jockey_trainer_ratings(self, horse_data: Dict, jockey_name: str = "", trainer_name: str = "", race_data: Optional[Dict] = None) -> Tuple[float, float]:
         """Calculate jockey and trainer ratings using real data when available.
         Supports both flat mappings {name: {...}} and consolidated DBs with keys 'jockeys'/'trainers'.
         If only win_percentage is present, derives a rating from it.
@@ -361,6 +449,9 @@ class RacePredictionEngine:
             if isinstance(rec, dict):
                 if 'rating' in rec and isinstance(rec['rating'], (int, float)):
                     return float(rec['rating'])
+                points = rec.get('points')
+                if isinstance(points, (int, float)):
+                    return float(max(35.0, min(95.0, points * 0.85)))
                 win_pct = rec.get('win_percentage') or rec.get('overall_win_percentage')
                 if isinstance(win_pct, (int, float)):
                     # Map win% roughly to 30–90 scale (e.g., 10% -> 30, 25% -> 75)
@@ -369,7 +460,10 @@ class RacePredictionEngine:
 
         # Jockey
         jockey_rating = 50.0
-        if jockey_name:
+        track_jockey_stats = self.get_track_jockey_stats(jockey_name, race_data)
+        if track_jockey_stats:
+            jockey_rating = derive_rating(track_jockey_stats, jockey_rating)
+        elif jockey_name:
             jd = self.jockey_data or {}
             rec = None
             if isinstance(jd, dict):
@@ -667,6 +761,7 @@ class RacePredictionEngine:
         for horse in horses:
             horse_name = horse.get('name', '')
             horse_data = horse_data_collection.get(horse_name, {})
+            track_jockey_stats = self.get_track_jockey_stats(horse.get('jockey', ''), race_data)
 
             # Calculate all rating factors
             factors = PredictionFactors()
@@ -675,7 +770,7 @@ class RacePredictionEngine:
             factors.form_rating = self.calculate_form_rating(horse_data)
             factors.workout_rating = self.calculate_workout_rating(horse_data)
             factors.jockey_rating, factors.trainer_rating = self.calculate_jockey_trainer_ratings(
-                horse_data, horse.get('jockey', ''), horse.get('trainer', ''))
+                horse_data, horse.get('jockey', ''), horse.get('trainer', ''), race_data)
             factors.equipment_rating = self.calculate_equipment_rating(horse.get('equipment_changes', ''))
             factors.pace_rating = self.calculate_pace_rating(horse_data, race_info)
             factors.distance_rating, factors.surface_rating = self.calculate_distance_surface_ratings(horse_data, race_info)
@@ -687,6 +782,7 @@ class RacePredictionEngine:
 
             horse_prediction = {
                 'name': horse_name,
+                'horse_name': horse_name,
                 'post_position': horse.get('post_position', 0),
                 'jockey': horse.get('jockey', ''),
                 'trainer': horse.get('trainer', ''),
@@ -695,14 +791,24 @@ class RacePredictionEngine:
                 'composite_rating': round(composite_rating, 2),
                 'factors': {
                     'speed': round(factors.speed_rating, 1),
+                    'speed_rating': round(factors.speed_rating, 1),
                     'class': round(factors.class_rating, 1),
+                    'class_rating': round(factors.class_rating, 1),
                     'form': round(factors.form_rating, 1),
+                    'form_rating': round(factors.form_rating, 1),
                     'workout': round(factors.workout_rating, 1),
+                    'workout_rating': round(factors.workout_rating, 1),
                     'jockey': round(factors.jockey_rating, 1),
+                    'jockey_rating': round(factors.jockey_rating, 1),
                     'trainer': round(factors.trainer_rating, 1),
-                    'equipment': round(factors.equipment_rating, 1)
+                    'trainer_rating': round(factors.trainer_rating, 1),
+                    'equipment': round(factors.equipment_rating, 1),
+                    'equipment_rating': round(factors.equipment_rating, 1)
                 }
             }
+
+            if track_jockey_stats:
+                horse_prediction['track_jockey_stats'] = track_jockey_stats
 
             horse_predictions.append(horse_prediction)
 
@@ -715,7 +821,7 @@ class RacePredictionEngine:
             probability = (horse_pred['composite_rating'] / total_rating) * 100
             horse_pred['win_probability'] = round(probability, 1)
 
-        return {
+        prediction_result = {
             'race_number': race_data.get('race_number', 0),
             'race_type': race_data.get('race_type', ''),
             'distance': race_data.get('distance', ''),
@@ -724,6 +830,17 @@ class RacePredictionEngine:
             'top_pick': horse_predictions[0] if horse_predictions else None,
             'exotic_suggestions': self.generate_exotic_suggestions(horse_predictions)
         }
+
+        if self._is_santa_anita_race(race_data) and self.track_jockey_rankings:
+            prediction_result['track_jockey_context'] = {
+                'track': self.track_jockey_rankings.get('track', 'Santa Anita'),
+                'season': self.track_jockey_rankings.get('season', 2026),
+                'date_range': self.track_jockey_rankings.get('date_range', ''),
+                'minimum_starts': self.track_jockey_rankings.get('minimum_starts', 0),
+                'ranking_formula': self.track_jockey_rankings.get('ranking_formula', '')
+            }
+
+        return prediction_result
 
     def generate_exotic_suggestions(self, predictions: List[Dict]) -> Dict:
         """Generate exotic bet suggestions based on predictions"""

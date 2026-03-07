@@ -1,0 +1,28 @@
+{
+  "track": "Santa Anita",
+  "track_code": "SA",
+  "season": 2026,
+  "date_range": "December 28, 2025 - March 6, 2026",
+  "updated_at": "2026-03-06T18:45:45.868Z",
+  "minimum_starts": 50,
+  "ranking_formula": "points = (2 * win_percentage) + in_the_money_percentage",
+  "source": "https://www.santaanita.com/racing-information/",
+  "jockeys": {
+    "Juan J. Hernandez": {"rank": 1, "starts": 118, "wins": 27, "places": 32, "shows": 16, "win_percentage": 22.9, "in_the_money_percentage": 63.6, "points": 109.3, "earnings": 1957615},
+    "Umberto Rispoli": {"rank": 2, "starts": 70, "wins": 15, "places": 15, "shows": 12, "win_percentage": 21.4, "in_the_money_percentage": 60.0, "points": 102.9, "earnings": 1270011},
+    "Kazushi Kimura": {"rank": 3, "starts": 147, "wins": 28, "places": 24, "shows": 20, "win_percentage": 19.0, "in_the_money_percentage": 49.0, "points": 87.1, "earnings": 1751378},
+    "Emisael Jaramillo": {"rank": 4, "starts": 138, "wins": 29, "places": 19, "shows": 13, "win_percentage": 21.0, "in_the_money_percentage": 44.2, "points": 86.2, "earnings": 1533319},
+    "Hector Isaac Berrios": {"rank": 5, "starts": 98, "wins": 14, "places": 26, "shows": 14, "win_percentage": 14.3, "in_the_money_percentage": 55.1, "points": 83.7, "earnings": 1110646},
+    "Edwin A. Maldonado": {"rank": 6, "starts": 74, "wins": 13, "places": 10, "shows": 10, "win_percentage": 17.6, "in_the_money_percentage": 44.6, "points": 79.7, "earnings": 668283},
+    "Mirco Demuro": {"rank": 7, "starts": 88, "wins": 14, "places": 9, "shows": 12, "win_percentage": 15.9, "in_the_money_percentage": 39.8, "points": 71.6, "earnings": 844810},
+    "Ricardo Gonzalez": {"rank": 8, "starts": 76, "wins": 10, "places": 10, "shows": 11, "win_percentage": 13.2, "in_the_money_percentage": 40.8, "points": 67.1, "earnings": 635607},
+    "Armando Ayuso": {"rank": 9, "starts": 156, "wins": 20, "places": 16, "shows": 25, "win_percentage": 12.8, "in_the_money_percentage": 39.1, "points": 64.7, "earnings": 1112360},
+    "Antonio Fresu": {"rank": 10, "starts": 53, "wins": 6, "places": 9, "shows": 6, "win_percentage": 11.3, "in_the_money_percentage": 39.6, "points": 62.3, "earnings": 748158},
+    "Abel Lezcano": {"rank": 11, "starts": 66, "wins": 9, "places": 3, "shows": 11, "win_percentage": 13.6, "in_the_money_percentage": 34.8, "points": 62.1, "earnings": 372259},
+    "Kyle Frey": {"rank": 12, "starts": 100, "wins": 10, "places": 19, "shows": 13, "win_percentage": 10.0, "in_the_money_percentage": 42.0, "points": 62.0, "earnings": 569858},
+    "Tiago Josue Pereira": {"rank": 13, "starts": 134, "wins": 14, "places": 16, "shows": 22, "win_percentage": 10.4, "in_the_money_percentage": 38.8, "points": 59.7, "earnings": 840189},
+    "Diego A. Herrera": {"rank": 14, "starts": 80, "wins": 7, "places": 11, "shows": 7, "win_percentage": 8.8, "in_the_money_percentage": 31.2, "points": 48.8, "earnings": 395341},
+    "Tyler Baze": {"rank": 15, "starts": 94, "wins": 7, "places": 7, "shows": 12, "win_percentage": 7.4, "in_the_money_percentage": 27.7, "points": 42.6, "earnings": 362601},
+    "Armando Aguilar": {"rank": 16, "starts": 70, "wins": 4, "places": 8, "shows": 3, "win_percentage": 5.7, "in_the_money_percentage": 21.4, "points": 32.9, "earnings": 162817}
+  }
+}

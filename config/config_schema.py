@@ -20,7 +20,11 @@ class DatabaseConfig(BaseModel):
     database: str = "delmar_races"
     username: str = "delmar_user"
     password: Optional[str] = None
-    sqlite_path: str = "data/sessions.db"
+    supabase_url: Optional[str] = None
+    supabase_rest_url: Optional[str] = None
+    supabase_service_role_key: Optional[str] = None
+    supabase_schema: str = "public"
+    supabase_request_timeout_seconds: int = 30
 
 class ScrapingConfig(BaseModel):
     """Scraping configuration settings"""

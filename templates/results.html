@@ -257,6 +257,15 @@
                             Error analyzing this race: {{ race.error }}
                         </div>
                         {% elif race.predictions %}
+
+                        {% if race.track_jockey_context %}
+                        <div class="alert alert-secondary py-2 mb-3 small">
+                            <strong>{{ race.track_jockey_context.track }} {{ race.track_jockey_context.season }} jockey context:</strong>
+                            {{ race.track_jockey_context.date_range }} ·
+                            Min {{ race.track_jockey_context.minimum_starts }} starts ·
+                            {{ race.track_jockey_context.ranking_formula }}
+                        </div>
+                        {% endif %}
                         
                         <!-- AI Enhancement Display -->
                         {% if race.ai_enhancement and race.enhanced %}
@@ -330,6 +339,15 @@
                                         <strong>J:</strong> {{ prediction.jockey or 'N/A' }}<br>
                                         <strong>T:</strong> {{ prediction.trainer or 'N/A' }}
                                     </div>
+
+                                    {% if prediction.track_jockey_stats %}
+                                    <div class="small text-info mb-2">
+                                        <strong>SA Rank:</strong> #{{ prediction.track_jockey_stats.rank }} ·
+                                        <strong>Pts:</strong> {{ "%.1f"|format(prediction.track_jockey_stats.points or 0) }} ·
+                                        <strong>Win:</strong> {{ "%.1f"|format(prediction.track_jockey_stats.win_percentage or 0) }}% ·
+                                        <strong>ITM:</strong> {{ "%.1f"|format(prediction.track_jockey_stats.in_the_money_percentage or 0) }}%
+                                    </div>
+                                    {% endif %}
 
                                     <!-- Kelly Criterion Betting Recommendation -->
                                     {% if prediction.kelly_recommendation and prediction.kelly_recommendation.stake_size > 0 %}
@@ -425,7 +443,12 @@
                                             <td>{{ loop.index }}</td>
                                             <td><strong>{{ prediction.horse_name or 'Unknown' }}</strong></td>
                                             <td>{{ prediction.post_position or 'N/A' }}</td>
-                                            <td>{{ prediction.jockey or 'N/A' }}</td>
+                                            <td>
+                                                {{ prediction.jockey or 'N/A' }}
+                                                {% if prediction.track_jockey_stats %}
+                                                <div class="small text-info">SA #{{ prediction.track_jockey_stats.rank }} · {{ "%.1f"|format(prediction.track_jockey_stats.points or 0) }} pts</div>
+                                                {% endif %}
+                                            </td>
                                             <td>{{ "%.1f"|format(prediction.composite_rating or 0) }}</td>
                                             <td>{{ "%.1f"|format(prediction.win_probability or 0) }}%</td>
                                             <td>{{ "%.1f"|format(prediction.factors.speed_rating or 0) if prediction.factors else 'N/A' }}</td>

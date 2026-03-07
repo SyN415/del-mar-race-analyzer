@@ -50,6 +50,11 @@ class ConfigManager:
                 'database': os.getenv('DB_NAME') or 'delmar_races',
                 'username': os.getenv('DB_USER') or 'delmar_user',
                 'password': os.getenv('DB_PASSWORD'),
+                'supabase_url': os.getenv('SUPABASE_URL'),
+                'supabase_rest_url': os.getenv('SUPABASE_REST_URL'),
+                'supabase_service_role_key': os.getenv('SUPABASE_SERVICE_ROLE_KEY'),
+                'supabase_schema': os.getenv('SUPABASE_SCHEMA', 'public'),
+                'supabase_request_timeout_seconds': int(os.getenv('SUPABASE_REQUEST_TIMEOUT_SECONDS', 30)),
             },
             'scraping': {
                 'browser_timeout': int(os.getenv('BROWSER_TIMEOUT', 30)),

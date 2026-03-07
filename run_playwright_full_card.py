@@ -11,12 +11,21 @@ import re
 import sys
 import time
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from scrapers.playwright_integration import scrape_full_card_playwright, save_results, load_race_card
+from scrapers.playwright_integration import (
+    build_smartpick_data_path,
+    convert_overview_to_race_card,
+    get_track_id,
+    load_race_card,
+    normalize_race_date,
+    save_race_card_data,
+    save_results,
+    scrape_full_card_playwright,
+)
 from scrapers.smartpick_scraper import SmartPickRaceScraper
 from race_entry_scraper import RaceEntryScraper
 from race_prediction_engine import RacePredictionEngine
@@ -41,10 +50,6 @@ logging.basicConfig(
 )
 
 LOG = logging.getLogger('playwright_full_card')
-
-
-
-
 def count_horses_with_profiles(card: Dict) -> int:
     """Count horses that have profile URLs"""
     count = 0
@@ -55,74 +60,49 @@ def count_horses_with_profiles(card: Dict) -> int:
     return count
 
 
-def convert_overview_to_race_card(overview_result: Dict, date_str: str) -> Dict:
-    """Convert race overview data to race card format"""
-    races = []
+def generate_analysis_summary(race_analyses: List[Dict]) -> Dict:
+    """Generate a UI-compatible summary for the current analysis run."""
+    total_races = len(race_analyses)
+    successful_races = len([race for race in race_analyses if 'error' not in race])
+    total_horses = sum(len(race.get('predictions', [])) for race in race_analyses)
 
-    for race_overview in overview_result.get('races', []):
-        race_number = race_overview.get('race_number', 1)
+    all_predictions = []
+    ai_enhanced_races = 0
+    confidence_scores = []
 
-        # Filter horses to only include actual race entries (not sires/dams)
-        race_horses = []
-        seen_names = set()
+    for race_analysis in race_analyses:
+        if race_analysis.get('enhanced'):
+            ai_enhanced_races += 1
 
-        for horse_data in race_overview.get('horses', []):
-            horse_name = horse_data.get('name', '')
-            profile_url = horse_data.get('profile_url', '')
+        for prediction in race_analysis.get('predictions', []):
+            best_bet = dict(prediction)
+            best_bet.setdefault('race_number', race_analysis.get('race_number'))
+            all_predictions.append(best_bet)
 
-            # Skip if we've seen this horse or if it's clearly a sire/dam
-            if horse_name in seen_names:
-                continue
-            if not profile_url or 'refno=' not in profile_url:
-                continue
+        confidence_analysis = race_analysis.get('ai_enhancement', {}).get('confidence_analysis', {})
+        if isinstance(confidence_analysis, dict):
+            for confidence_data in confidence_analysis.values():
+                if isinstance(confidence_data, dict):
+                    confidence_scores.append(confidence_data.get('score', 0))
 
-            # Basic filtering for actual race entries vs sires/dams
-            # Race entries typically have state abbreviations in parentheses
-            if '(' in horse_name and ')' in horse_name:
-                race_horses.append({
-                    'name': horse_name,
-                    'post_position': len(race_horses) + 1,
-                    'jockey': 'TBD',
-                    'trainer': 'TBD',
-                    'weight': 120,
-                    'morning_line_odds': '5/1',
-                    'age': 3,
-                    'sex': 'C',
-                    'equipment_changes': '',
-                    'claiming_price': None,
-                    'profile_url': profile_url
-                })
-                seen_names.add(horse_name)
+    all_predictions.sort(key=lambda prediction: prediction.get('composite_rating', 0), reverse=True)
 
-                # Reasonable limit for race entries
-                if len(race_horses) >= 20:
-                    break
-
-        race_data = {
-            'race_number': race_number,
-            'post_time': f'{2 + race_number}:30 PM PT',
-            'race_type': 'TBD',
-            'purse': '$50,000',
-            'distance': '6 Furlongs',
-            'surface': 'Dirt',
-            'conditions': 'TBD',
-            'horses': race_horses
-        }
-        races.append(race_data)
+    average_confidence = (
+        sum(confidence_scores) / len(confidence_scores)
+        if confidence_scores else 0
+    )
 
     return {
-        'date': date_str,
-        'races': races
+        'total_races': total_races,
+        'successful_races': successful_races,
+        'total_horses': total_horses,
+        'best_bets': all_predictions[:3],
+        'success_rate': (successful_races / total_races * 100) if total_races else 0,
+        'ai_enhanced_races': ai_enhanced_races,
+        'ai_enhancement_rate': (ai_enhanced_races / total_races * 100) if total_races else 0,
+        'average_confidence': average_confidence,
+        'betting_recommendations': {},
     }
-
-
-def save_race_card_data(race_card_data: Dict, date_str: str):
-    """Save race card data to JSON file"""
-    import json
-    filename = f"del_mar_{date_str.replace('/', '_')}_races.json"
-    with open(filename, 'w') as f:
-        json.dump(race_card_data, f, indent=2)
-    print(f"Race card saved to {filename}")
 
 
 async def get_race_count_from_card_page(track_id: str, date_str: str) -> int:
@@ -268,7 +248,7 @@ async def scrape_smartpick_data_for_card(date_str: str, num_races: int) -> Dict:
     LOG.info(f"🎯 Scraping SmartPick data for {num_races} races on {date_str}")
 
     # Get track ID from environment variable
-    track_id = os.environ.get('TRACK_ID', 'DMR')
+    track_id = get_track_id()
     LOG.info(f"Using track ID: {track_id}")
 
     # Use Playwright-based scraper to bypass WAF
@@ -283,6 +263,11 @@ async def scrape_smartpick_data_for_card(date_str: str, num_races: int) -> Dict:
         for race_num, horses in all_races_data.items():
             all_smartpick_data[race_num] = horses
             LOG.info(f"  ✅ Race {race_num}: {len(horses)} horses")
+
+        smartpick_path = build_smartpick_data_path(track_id, date_str)
+        with open(smartpick_path, 'w') as f:
+            json.dump(all_smartpick_data, f, indent=2)
+        LOG.info(f"💾 SmartPick data saved to {smartpick_path}")
 
         return all_smartpick_data
 
@@ -416,15 +401,10 @@ def merge_smartpick_with_horse_data(horse_data: Dict, smartpick_data: Dict) -> D
 async def scrape_horses():
     """Scrape horse data using Playwright"""
     LOG.info("=== Playwright-Based Full Card Analysis ===")
-    date_str = os.environ.get('RACE_DATE_STR', '09/07/2025')  # Updated to 09/07/2025
-
-    # Convert date format if needed (YYYY-MM-DD to MM/DD/YYYY)
-    if len(date_str) == 10 and date_str[4] == '-' and date_str[7] == '-':
-        # Convert from YYYY-MM-DD to MM/DD/YYYY
-        year, month, day = date_str.split('-')
-        date_str = f"{month}/{day}/{year}"
-        os.environ['RACE_DATE_STR'] = date_str  # Update environment variable
-        LOG.info(f"Converted date format to: {date_str}")
+    date_str = normalize_race_date()
+    track_id = get_track_id()
+    os.environ['RACE_DATE_STR'] = date_str
+    os.environ['TRACK_ID'] = track_id
 
     LOG.info(f"Date: {date_str}")
 
@@ -448,7 +428,6 @@ async def scrape_horses():
 
     # If no races in saved card, fetch from race card page
     if not unique_race_numbers:
-        track_id = os.environ.get('TRACK_ID', 'DMR')
         LOG.info(f"No races in saved card, fetching race count from Equibase for {track_id} on {date_str}")
         num_races = await get_race_count_from_card_page(track_id, date_str)
     else:
@@ -460,9 +439,6 @@ async def scrape_horses():
     if horses_with_profiles == 0:
         LOG.info("No horses with profile URLs found in saved card; scraping card now.")
         # Proactively scrape card for the given date and retry
-        # Use the already converted date_str from above
-        # Get track ID from environment variable
-        track_id = os.environ.get('TRACK_ID', 'DMR')
         from race_entry_scraper import RaceEntryScraper
         scraper = RaceEntryScraper()
         url = scraper.build_card_overview_url(track_id, date_str, 'USA')
@@ -472,8 +448,8 @@ async def scrape_horses():
             overview_result = await scraper.scrape_card_overview(track_id, date_str, 'USA')
             if overview_result and overview_result.get('races'):
                 # Convert overview to race card format and save
-                race_card_data = convert_overview_to_race_card(overview_result, date_str)
-                save_race_card_data(race_card_data, date_str)
+                race_card_data = convert_overview_to_race_card(overview_result, date_str, track_id)
+                save_race_card_data(race_card_data, date_str, track_id)
                 card = load_race_card()
                 total_horses = sum(len(race.get('horses', [])) for race in card.get('races', []))
                 horses_with_profiles = count_horses_with_profiles(card)
@@ -515,25 +491,28 @@ async def scrape_horses():
         return {}
 
 
-def run_analysis():
+def run_analysis(horse_data: Optional[Dict] = None) -> Dict:
     """Run the race analysis with scraped data"""
     LOG.info("=== Running Race Analysis ===")
+    analysis_started_at = time.time()
 
     try:
-        # Load horse data
-        horse_data_path = "real_equibase_horse_data.json"
-        if not os.path.exists(horse_data_path):
-            LOG.error(f"Horse data file not found: {horse_data_path}")
-            return
+        if horse_data is None:
+            horse_data_path = "real_equibase_horse_data.json"
+            if not os.path.exists(horse_data_path):
+                message = f"Horse data file not found: {horse_data_path}"
+                LOG.error(message)
+                return {'error': message}
 
-        with open(horse_data_path, 'r') as f:
-            horse_data = json.load(f)
+            with open(horse_data_path, 'r') as f:
+                horse_data = json.load(f)
 
         LOG.info(f"Loaded data for {len(horse_data)} horses")
 
         # Load SmartPick data
-        date_str = os.environ.get('RACE_DATE_STR', '09/05/2025')
-        smartpick_path = f"smartpick_data_{date_str.replace('/', '_')}.json"
+        date_str = normalize_race_date()
+        track_id = get_track_id()
+        smartpick_path = build_smartpick_data_path(track_id, date_str)
         smartpick_data = {}
 
         if os.path.exists(smartpick_path):
@@ -549,8 +528,9 @@ def run_analysis():
         # Load race card
         card = load_race_card()
         if not card:
-            LOG.error("Race card not found")
-            return
+            message = "Race card not found"
+            LOG.error(message)
+            return {'error': message}
             
         # Initialize prediction engine
         engine = RacePredictionEngine()
@@ -569,45 +549,93 @@ def run_analysis():
                 LOG.info(f"Race {race_num}: analyzed {len(predictions.get('predictions', []))} horses")
             except Exception as e:
                 LOG.error(f"Error analyzing race {race_num}: {e}")
+                all_race_analyses.append({
+                    'race_number': race_num,
+                    'race_type': race.get('race_type', ''),
+                    'distance': race.get('distance', ''),
+                    'surface': race.get('surface', ''),
+                    'error': str(e),
+                    'predictions': [],
+                })
+
+        summary = generate_analysis_summary(all_race_analyses)
+        final_results = {
+            'race_date': date_str,
+            'track_id': track_id,
+            'analysis_duration_seconds': time.time() - analysis_started_at,
+            'total_races': len(card.get('races', [])),
+            'total_horses': len(horse_data),
+            'race_card': card,
+            'horse_data': horse_data,
+            'race_analyses': all_race_analyses,
+            'generated_at': datetime.now().isoformat(),
+            'summary': summary,
+            'ai_services_used': {
+                'openrouter_client': False,
+                'scraping_assistant': False,
+                'analysis_enhancer': False,
+            },
+        }
 
         # Save analysis results
         output_path = f"analysis_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
         with open(output_path, 'w') as f:
-            json.dump(all_race_analyses, f, indent=2)
+            json.dump(final_results, f, indent=2)
             
         LOG.info(f"Analysis complete. Results saved to {output_path}")
         LOG.info(f"Analyzed {len(all_race_analyses)} races")
         
-        return all_race_analyses
+        return final_results
         
     except Exception as e:
         LOG.error(f"Error during analysis: {e}")
-        raise
+        return {'error': str(e)}
 
 
 async def main():
     """Main entry point"""
+    pipeline_started_at = time.time()
     try:
         # Step 1: Scrape horse data using Playwright
         horse_results = await scrape_horses()
         
         if not horse_results:
-            LOG.error("No horse data scraped. Cannot proceed with analysis.")
-            return
+            message = "No horse data scraped. Cannot proceed with analysis."
+            LOG.error(message)
+            return {
+                'error': message,
+                'race_date': normalize_race_date(),
+                'track_id': get_track_id(),
+                'generated_at': datetime.now().isoformat(),
+            }
         
         # Step 2: Run race analysis
-        analysis_results = run_analysis()
-        
+        analysis_results = run_analysis(horse_results)
         if analysis_results:
+            analysis_results['analysis_duration_seconds'] = time.time() - pipeline_started_at
+        
+        if analysis_results and not analysis_results.get('error'):
             LOG.info("=== Pipeline Complete ===")
-            LOG.info(f"Successfully analyzed {len(analysis_results)} races")
+            LOG.info(f"Successfully analyzed {len(analysis_results.get('race_analyses', []))} races")
             LOG.info(f"Horse data: {len(horse_results)} horses")
+            return analysis_results
         else:
             LOG.warning("Analysis completed but no results generated")
+            return analysis_results or {
+                'error': 'Analysis completed without returning results',
+                'race_date': normalize_race_date(),
+                'track_id': get_track_id(),
+                'generated_at': datetime.now().isoformat(),
+            }
             
     except Exception as e:
         LOG.error(f"Pipeline failed: {e}")
-        raise
+        return {
+            'error': str(e),
+            'race_date': normalize_race_date(),
+            'track_id': get_track_id(),
+            'generated_at': datetime.now().isoformat(),
+        }
 
 
 if __name__ == "__main__":
