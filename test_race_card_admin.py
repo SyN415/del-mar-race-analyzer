@@ -131,6 +131,7 @@ _install_app_import_stubs()
 import app as app_module
 
 from services.race_card_admin import (
+    _parse_equibase_expected_horses_by_race,
     build_equibase_card_overview_url,
     extract_json_object,
     extract_structured_horse_names_by_race,
@@ -254,6 +255,76 @@ class RaceCardAdminTests(unittest.TestCase):
                 {1: ["Alpha", "Bravo", "Delta"], 2: ["Charlie", "Echo"]},
             ),
             {1: ["Delta"], 2: ["Echo"]},
+        )
+
+    def test_parse_equibase_expected_horses_filters_pedigree_links(self):
+        fake_module = types.ModuleType("race_entry_scraper")
+
+        class FakeRaceEntryScraper:
+            def parse_card_overview(self, html):
+                return [
+                    {
+                        "race_number": 1,
+                        "horses": [
+                            {
+                                "name": "Empire's Classic (KY)",
+                                "profile_url": "https://www.equibase.com/profiles/Results.cfm?type=Horse&refno=10999956&registry=T&rbt=TB",
+                            },
+                            {
+                                "name": "Classic Empire",
+                                "profile_url": "https://www.equibase.com/profiles/Results.cfm?type=Horse&refno=9709258&registry=T&rbt=TB",
+                            },
+                            {
+                                "name": "Princess Roi",
+                                "profile_url": "https://www.equibase.com/profiles/Results.cfm?type=Horse&refno=9658264&registry=T&rbt=TB",
+                            },
+                            {
+                                "name": "Smooth Salute (KY)",
+                                "profile_url": "https://www.equibase.com/profiles/Results.cfm?type=Horse&refno=10784093&registry=T&rbt=TB",
+                            },
+                            {
+                                "name": "Midnight Lute",
+                                "profile_url": "https://www.equibase.com/profiles/Results.cfm?type=Horse&refno=6875760&registry=T&rbt=TB",
+                            },
+                        ],
+                    }
+                ]
+
+        fake_module.RaceEntryScraper = FakeRaceEntryScraper
+        original_module = sys.modules.get("race_entry_scraper")
+        sys.modules["race_entry_scraper"] = fake_module
+
+        try:
+            expected_horses = _parse_equibase_expected_horses_by_race(
+                """
+                <input type='checkbox' onclick="onVSAddClick(this, 10999956, 'TB', 'Empire%27s%20Classic')">
+                <input type='checkbox' onclick="onVSAddClick(this, 10784093, 'TB', 'Smooth%20Salute')">
+                <div><b>Pedigrees (Sire - Dam, by Dam Sire):</b></div>
+                """
+            )
+        finally:
+            if original_module is None:
+                sys.modules.pop("race_entry_scraper", None)
+            else:
+                sys.modules["race_entry_scraper"] = original_module
+
+        self.assertEqual(expected_horses, {1: ["Empire's Classic", "Smooth Salute"]})
+        self.assertEqual(
+            find_missing_horses_by_race(
+                {
+                    "race_analyses": [
+                        {
+                            "race_number": 1,
+                            "predictions": [
+                                {"horse_name": "Empire's Classic"},
+                                {"horse_name": "Smooth Salute"},
+                            ],
+                        }
+                    ]
+                },
+                expected_horses,
+            ),
+            {},
         )
 
     def test_merge_structured_race_cards_merges_split_race_fields(self):

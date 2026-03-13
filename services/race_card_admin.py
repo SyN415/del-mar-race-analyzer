@@ -459,9 +459,30 @@ def _fetch_equibase_card_overview_html(track_id: str, race_date: str, timeout_se
         return ""
 
 
+def _extract_equibase_runner_refnos(html: str) -> set[str]:
+    if not html:
+        return set()
+
+    return {
+        match.group(1)
+        for match in re.finditer(r"onVSAddClick\(\s*this\s*,\s*([0-9]+)\s*,", html, flags=re.IGNORECASE)
+        if match.group(1)
+    }
+
+
+def _extract_equibase_refno(value: Any) -> str:
+    if not value:
+        return ""
+
+    match = re.search(r"[?&]refno=([0-9]+)\b", str(value), flags=re.IGNORECASE)
+    return match.group(1) if match else ""
+
+
 def _parse_equibase_expected_horses_by_race(html: str) -> Dict[int, List[str]]:
     if not html:
         return {}
+
+    valid_runner_refnos = _extract_equibase_runner_refnos(html)
 
     try:
         from race_entry_scraper import RaceEntryScraper
@@ -478,6 +499,10 @@ def _parse_equibase_expected_horses_by_race(html: str) -> Dict[int, List[str]]:
         horses: List[str] = []
         seen_horses = set()
         for horse in race.get("horses") or []:
+            horse_refno = _extract_equibase_refno(horse.get("profile_url") or horse.get("url"))
+            if valid_runner_refnos and horse_refno and horse_refno not in valid_runner_refnos:
+                continue
+
             horse_name = _normalize_horse_name(horse.get("name"))
             horse_key = _horse_name_key(horse_name)
             if horse_key and horse_key not in seen_horses:
