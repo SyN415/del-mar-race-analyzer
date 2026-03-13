@@ -34,23 +34,18 @@ from config.config_manager import ConfigManager
 # Import new services
 try:
     from services.session_manager import SessionManager
-    from services.orchestration_service import OrchestrationService
     from services.openrouter_client import OpenRouterClient
-    from services.gradient_boosting_predictor import GradientBoostingPredictor
-    from services.kelly_optimizer import KellyCriterionOptimizer
     from services.race_card_admin import extract_json_object, merge_source_urls, normalize_admin_results
 except ImportError as e:
     print(f"Some services not available: {e}")
     SessionManager = None
-    OrchestrationService = None
     OpenRouterClient = None
-    GradientBoostingPredictor = None
-    KellyCriterionOptimizer = None
     extract_json_object = None
     merge_source_urls = None
     normalize_admin_results = None
 
 # Configure logging
+os.makedirs('logs', exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -60,9 +55,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-# Create logs directory if it doesn't exist
-os.makedirs('logs', exist_ok=True)
 
 # Import SmartPick scraper after logger is configured
 # Use the fixed Playwright-based SmartPick scraper that handles Angular/JavaScript rendering
@@ -96,39 +88,79 @@ class AppState:
         self.gradient_boosting_predictor = None
         self.kelly_optimizer = None
         self.active_tasks: Dict[str, asyncio.Task] = {}  # Track running tasks
+        self._session_manager_lock = asyncio.Lock()
+        self._orchestration_service_lock = asyncio.Lock()
+
+    def ensure_openrouter_client(self):
+        """Initialize the OpenRouter client only when needed."""
+        if self.openrouter_client or not OpenRouterClient:
+            return self.openrouter_client
+
+        try:
+            self.openrouter_client = OpenRouterClient(self.config)
+            logger.info("OpenRouter client initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize OpenRouter client: {e}")
+
+        return self.openrouter_client
+
+    async def ensure_session_manager(self):
+        """Initialize persistence only when a route actually needs it."""
+        if self.session_manager or not SessionManager:
+            return self.session_manager
+
+        async with self._session_manager_lock:
+            if self.session_manager:
+                return self.session_manager
+
+            try:
+                session_manager = SessionManager(config=self.config)
+                await session_manager.initialize()
+                self.session_manager = session_manager
+                logger.info("Session manager initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize session manager on demand: {e}")
+                return None
+
+        try:
+            asyncio.create_task(self.session_manager.recover_interrupted_sessions())
+        except Exception as e:
+            logger.warning(f"Failed to schedule interrupted session recovery: {e}")
+
+        return self.session_manager
+
+    async def ensure_orchestration_service(self):
+        """Initialize orchestration only for endpoints that need it."""
+        if self.orchestration_service:
+            return self.orchestration_service
+
+        session_manager = await self.ensure_session_manager()
+        if not session_manager:
+            return None
+
+        async with self._orchestration_service_lock:
+            if self.orchestration_service:
+                return self.orchestration_service
+
+            try:
+                from services.orchestration_service import OrchestrationService
+
+                self.orchestration_service = OrchestrationService(
+                    session_manager=session_manager,
+                    prediction_engine=self.prediction_engine,
+                    config_manager=self.config_manager,
+                )
+                logger.info("Orchestration service initialized")
+            except Exception as e:
+                logger.warning(f"Failed to initialize orchestration service on demand: {e}")
+                return None
+
+        return self.orchestration_service
         
     async def initialize(self):
-        """Initialize services that require async setup"""
+        """Initialize only lightweight services needed for first HTTP readiness."""
         try:
-            if SessionManager:
-                self.session_manager = SessionManager(config=self.config)
-                await self.session_manager.initialize()
-
-                # Recover any interrupted sessions from previous restart
-                await self.session_manager.recover_interrupted_sessions()
-
-            if OrchestrationService:
-                self.orchestration_service = OrchestrationService(
-                    session_manager=self.session_manager,
-                    prediction_engine=self.prediction_engine,
-                    config_manager=self.config_manager
-                )
-            
-            if OpenRouterClient:
-                self.openrouter_client = OpenRouterClient(self.config)
-
-            # Initialize ML services
-            if GradientBoostingPredictor:
-                try:
-                    self.gradient_boosting_predictor = GradientBoostingPredictor()
-                    logger.info("Gradient Boosting Predictor initialized")
-                except Exception as e:
-                    logger.warning(f"Failed to initialize Gradient Boosting Predictor: {e}")
-
-            if KellyCriterionOptimizer:
-                self.kelly_optimizer = KellyCriterionOptimizer()
-                logger.info("Kelly Criterion Optimizer initialized")
-
+            self.ensure_openrouter_client()
             logger.info("Application state initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize application state: {e}")
@@ -201,14 +233,14 @@ class AnalysisStatus(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def landing_page(request: Request):
     """Public dashboard for recent race cards."""
-    dashboard_cards = await _load_dashboard_cards(limit=8)
+    dashboard_cards = await _safe_load_dashboard_cards(limit=8)
     return templates.TemplateResponse("landing.html", {
         "request": request,
         "title": "Race Card Dashboard",
         "dashboard_cards": dashboard_cards,
         "card_count": len(dashboard_cards),
         "completed_count": len([card for card in dashboard_cards if card["status"] == "completed"]),
-        "openrouter_configured": bool(app_state.openrouter_client and app_state.openrouter_client.api_key),
+        "openrouter_configured": bool(app_state.ensure_openrouter_client() and app_state.openrouter_client.api_key),
     })
 
 
@@ -222,7 +254,7 @@ async def admin_page(request: Request):
         "default_model": DEFAULT_LLM_MODEL,
         "available_tracks": [{"id": track_id, "name": track_name} for track_id, track_name in SUPPORTED_TRACKS.items()],
         "default_date": datetime.now().strftime("%Y-%m-%d"),
-        "openrouter_configured": bool(app_state.openrouter_client and app_state.openrouter_client.api_key),
+        "openrouter_configured": bool(app_state.ensure_openrouter_client() and app_state.openrouter_client.api_key),
     })
 
 @app.post("/api/analyze")
@@ -238,9 +270,11 @@ async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundT
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
 
+        session_manager = await app_state.ensure_session_manager()
+
         # Create new analysis session
-        if app_state.session_manager:
-            session_id = await app_state.session_manager.create_session(
+        if session_manager:
+            session_id = await session_manager.create_session(
                 race_date=request.date,
                 llm_model=request.llm_model,
                 track_id=request.track_id
@@ -274,9 +308,12 @@ async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundT
 @app.post("/api/admin/race-cards")
 async def create_admin_race_card(request: AdminRaceCardRequest):
     """Create a saved race card from manual notes or OpenRouter web search."""
-    if not app_state.session_manager:
+    session_manager = await app_state.ensure_session_manager()
+    openrouter_client = app_state.ensure_openrouter_client()
+
+    if not session_manager:
         raise HTTPException(status_code=503, detail="Session manager is not available")
-    if not app_state.openrouter_client or not app_state.openrouter_client.api_key:
+    if not openrouter_client or not openrouter_client.api_key:
         raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured on the server")
     if not extract_json_object or not merge_source_urls or not normalize_admin_results:
         raise HTTPException(status_code=503, detail="Admin race-card helpers are unavailable")
@@ -294,7 +331,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
         raise HTTPException(status_code=400, detail="Source text is required in manual mode")
 
     started_at = time.perf_counter()
-    session_id = await app_state.session_manager.create_session(
+    session_id = await session_manager.create_session(
         race_date=request.race_date,
         llm_model=request.llm_model,
         track_id=request.track_id,
@@ -307,11 +344,11 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
             if is_web_search_mode
             else "Structuring race card from manual source material"
         )
-        await app_state.session_manager.update_session_status(
+        await session_manager.update_session_status(
             session_id, "running", 25, "admin_structuring", status_message
         )
 
-        openrouter_response = await app_state.openrouter_client.call_model(
+        openrouter_response = await openrouter_client.call_model(
             model=request.llm_model,
             task_type="analysis",
             prompt=_build_admin_structuring_prompt(request),
@@ -338,8 +375,8 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
             analysis_duration_seconds=time.perf_counter() - started_at,
         )
 
-        await app_state.session_manager.save_session_results(session_id, normalized_results)
-        await app_state.session_manager.update_session_status(
+        await session_manager.save_session_results(session_id, normalized_results)
+        await session_manager.update_session_status(
             session_id, "completed", 100, "analysis_complete", "Admin race card saved"
         )
 
@@ -349,18 +386,18 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
             "redirect_url": f"/results/{session_id}",
         })
     except ValueError as exc:
-        await app_state.session_manager.update_session_status(
+        await session_manager.update_session_status(
             session_id, "failed", 0, "admin_failed", str(exc)
         )
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except HTTPException:
-        await app_state.session_manager.update_session_status(
+        await session_manager.update_session_status(
             session_id, "failed", 0, "admin_failed", "Admin race card creation failed"
         )
         raise
     except Exception as exc:
         logger.error(f"Admin race card creation failed: {exc}")
-        await app_state.session_manager.update_session_status(
+        await session_manager.update_session_status(
             session_id, "failed", 0, "admin_failed", str(exc)
         )
         raise HTTPException(status_code=500, detail=f"Failed to create admin race card: {exc}") from exc
@@ -369,8 +406,9 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
 async def get_analysis_status(session_id: str):
     """Get current status of analysis session"""
     try:
-        if app_state.session_manager:
-            status = await app_state.session_manager.get_session_status(session_id)
+        session_manager = await app_state.ensure_session_manager()
+        if session_manager:
+            status = await session_manager.get_session_status(session_id)
 
             # Add helpful message for interrupted sessions
             if status.get('status') == 'interrupted':
@@ -414,8 +452,9 @@ async def cancel_analysis(session_id: str):
             del app_state.active_tasks[session_id]
 
         # Update session status
-        if app_state.session_manager:
-            await app_state.session_manager.update_session_status(
+        session_manager = await app_state.ensure_session_manager()
+        if session_manager:
+            await session_manager.update_session_status(
                 session_id, "cancelled", 0, "Cancelled", "Analysis cancelled by user"
             )
 
@@ -441,8 +480,9 @@ async def progress_page(request: Request, session_id: str):
 async def results_page(request: Request, session_id: str):
     """Results display page"""
     try:
-        if app_state.session_manager:
-            results = await app_state.session_manager.get_session_results(session_id)
+        session_manager = await app_state.ensure_session_manager()
+        if session_manager:
+            results = await session_manager.get_session_results(session_id)
         else:
             results = {"error": "Session manager not available"}
             
@@ -536,6 +576,16 @@ async def _load_dashboard_cards(limit: int = 8) -> List[Dict]:
     return dashboard_cards
 
 
+async def _safe_load_dashboard_cards(limit: int = 8) -> List[Dict]:
+    try:
+        return await asyncio.wait_for(_load_dashboard_cards(limit=limit), timeout=2.0)
+    except asyncio.TimeoutError:
+        logger.warning("Dashboard card loading timed out; serving landing page without cards")
+    except Exception as e:
+        logger.warning(f"Dashboard card loading failed; serving landing page without cards: {e}")
+    return []
+
+
 def _build_admin_structuring_prompt(request: AdminRaceCardRequest) -> str:
     source_strategy = (
         "Use web search before answering. Prefer official or high-confidence racing sources for the selected card, and cross-check fields when needed."
@@ -614,16 +664,17 @@ def _build_admin_structuring_context(request: AdminRaceCardRequest, source_text:
 async def run_validation():
     """Run validation framework to test prediction accuracy"""
     try:
-        if not app_state.orchestration_service or not app_state.orchestration_service.validation_framework:
+        orchestration_service = await app_state.ensure_orchestration_service()
+        if not orchestration_service or not orchestration_service.ensure_validation_framework():
             raise HTTPException(status_code=503, detail="Validation framework not available")
 
         # Run backtest validation
-        validation_result = app_state.orchestration_service.validation_framework.run_backtest(
+        validation_result = orchestration_service.validation_framework.run_backtest(
             app_state.prediction_engine
         )
 
         # Generate comprehensive report
-        validation_report = app_state.orchestration_service.validation_framework.generate_validation_report(
+        validation_report = orchestration_service.validation_framework.generate_validation_report(
             validation_result
         )
 
@@ -633,6 +684,8 @@ async def run_validation():
             "timestamp": datetime.now().isoformat()
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Validation failed: {e}")
         raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")

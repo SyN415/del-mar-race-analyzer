@@ -191,6 +191,50 @@ class RaceCardAdminTests(unittest.TestCase):
 
         self.assertEqual(merged, ["https://example.com/card", "https://example.com/entries"])
 
+    def test_app_state_initialize_only_sets_up_lightweight_services(self):
+        session_manager_called = False
+
+        class SessionManagerShouldNotRun:
+            def __init__(self, *args, **kwargs):
+                nonlocal session_manager_called
+                session_manager_called = True
+
+        class OpenRouterClientStub:
+            def __init__(self, config):
+                self.api_key = getattr(config, "openrouter_api_key", None)
+
+        original_session_manager = app_module.SessionManager
+        original_openrouter_client = app_module.OpenRouterClient
+
+        try:
+            app_module.SessionManager = SessionManagerShouldNotRun
+            app_module.OpenRouterClient = OpenRouterClientStub
+
+            app_state = app_module.AppState()
+            app_module.asyncio.run(app_state.initialize())
+
+            self.assertFalse(session_manager_called)
+            self.assertIsNone(app_state.session_manager)
+            self.assertEqual(app_state.openrouter_client.api_key, "test-key")
+        finally:
+            app_module.SessionManager = original_session_manager
+            app_module.OpenRouterClient = original_openrouter_client
+
+    def test_landing_page_fails_open_when_dashboard_loading_errors(self):
+        original_loader = app_module._load_dashboard_cards
+
+        try:
+            app_module._load_dashboard_cards = AsyncMock(side_effect=RuntimeError("dashboard unavailable"))
+
+            response = app_module.asyncio.run(app_module.landing_page(object()))
+
+            self.assertEqual(response["template"], "landing.html")
+            self.assertEqual(response["context"]["dashboard_cards"], [])
+            self.assertEqual(response["context"]["card_count"], 0)
+            self.assertEqual(response["context"]["completed_count"], 0)
+        finally:
+            app_module._load_dashboard_cards = original_loader
+
 
 class AdminRaceCardRouteTests(unittest.TestCase):
     def setUp(self):

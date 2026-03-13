@@ -70,19 +70,39 @@ class OrchestrationService:
         self.kelly_optimizer = None
         self.validation_framework = None
 
-        if ML_SERVICES_AVAILABLE:
+    def ensure_optional_ml_services(self):
+        """Initialize heavyweight optional ML services only when analysis needs them."""
+        if not ML_SERVICES_AVAILABLE:
+            return
+
+        if self.gradient_boosting_predictor is None and GradientBoostingPredictor:
             try:
-                if GradientBoostingPredictor:
-                    self.gradient_boosting_predictor = GradientBoostingPredictor()
-                    logger.info("Gradient Boosting Predictor initialized in orchestration")
-                if KellyCriterionOptimizer:
-                    self.kelly_optimizer = KellyCriterionOptimizer()
-                    logger.info("Kelly Criterion Optimizer initialized in orchestration")
-                if ValidationFramework:
-                    self.validation_framework = ValidationFramework()
-                    logger.info("Validation Framework initialized in orchestration")
+                self.gradient_boosting_predictor = GradientBoostingPredictor()
+                logger.info("Gradient Boosting Predictor initialized in orchestration")
             except Exception as e:
-                logger.warning(f"Failed to initialize ML services: {e}")
+                logger.warning(f"Failed to initialize Gradient Boosting Predictor: {e}")
+
+        if self.kelly_optimizer is None and KellyCriterionOptimizer:
+            try:
+                self.kelly_optimizer = KellyCriterionOptimizer()
+                logger.info("Kelly Criterion Optimizer initialized in orchestration")
+            except Exception as e:
+                logger.warning(f"Failed to initialize Kelly Criterion Optimizer: {e}")
+
+    def ensure_validation_framework(self):
+        """Initialize the validation framework only for validation requests."""
+        if self.validation_framework is not None:
+            return self.validation_framework
+        if not ML_SERVICES_AVAILABLE or not ValidationFramework:
+            return None
+
+        try:
+            self.validation_framework = ValidationFramework()
+            logger.info("Validation Framework initialized in orchestration")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Validation Framework: {e}")
+
+        return self.validation_framework
         
     async def analyze_race_card(self, session_id: str, race_date: str, track_id: str = "DMR") -> Dict:
         """
@@ -99,6 +119,8 @@ class OrchestrationService:
         start_time = datetime.now()
         
         try:
+            self.ensure_optional_ml_services()
+
             # Step 1: Update status - Starting analysis
             await self.session_manager.update_session_status(
                 session_id, "running", 5, "initializing", "Starting race card analysis..."
