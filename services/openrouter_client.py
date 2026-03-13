@@ -154,7 +154,16 @@ class OpenRouterClient:
         """
         if not self.api_key:
             logger.warning("OpenRouter API key not configured, returning fallback response")
-            return self._build_fallback_result(prompt, context, task_type, model, tier, return_metadata)
+            return self._build_fallback_result(
+                prompt,
+                context,
+                task_type,
+                model,
+                tier,
+                return_metadata,
+                failure_reason="missing_api_key",
+                failure_detail="OpenRouter API key is not configured",
+            )
 
         # Auto-select model if not specified
         if not model:
@@ -254,6 +263,20 @@ class OpenRouterClient:
                             await asyncio.sleep(delay)
                             continue
 
+                        self.usage_tracker.record_request(0, 0, response_time, False)
+                        return self._build_fallback_result(
+                            prompt,
+                            context,
+                            task_type,
+                            model,
+                            tier,
+                            return_metadata,
+                            failure_reason="rate_limited",
+                            failure_detail="OpenRouter API rate limit was reached",
+                            attempts=attempt + 1,
+                            status_code=response.status,
+                        )
+
                     else:
                         error_text = await response.text()
                         logger.error(f"OpenRouter API error {response.status}: {error_text}")
@@ -268,7 +291,18 @@ class OpenRouterClient:
                             await asyncio.sleep(delay)
                             continue
 
-                        return self._build_fallback_result(prompt, context, task_type, model, tier, return_metadata)
+                        return self._build_fallback_result(
+                            prompt,
+                            context,
+                            task_type,
+                            model,
+                            tier,
+                            return_metadata,
+                            failure_reason="http_error",
+                            failure_detail=f"OpenRouter API returned status {response.status}",
+                            attempts=attempt + 1,
+                            status_code=response.status,
+                        )
 
             except asyncio.TimeoutError:
                 logger.error(f"OpenRouter API timeout on attempt {attempt + 1}")
@@ -277,7 +311,17 @@ class OpenRouterClient:
                     await asyncio.sleep(delay)
                     continue
                 self.usage_tracker.record_request(0, 0, 0, False)
-                return self._build_fallback_result(prompt, context, task_type, model, tier, return_metadata)
+                return self._build_fallback_result(
+                    prompt,
+                    context,
+                    task_type,
+                    model,
+                    tier,
+                    return_metadata,
+                    failure_reason="timeout",
+                    failure_detail="OpenRouter API request timed out",
+                    attempts=attempt + 1,
+                )
 
             except Exception as e:
                 logger.error(f"OpenRouter API call failed on attempt {attempt + 1}: {e}")
@@ -286,10 +330,30 @@ class OpenRouterClient:
                     await asyncio.sleep(delay)
                     continue
                 self.usage_tracker.record_request(0, 0, 0, False)
-                return self._build_fallback_result(prompt, context, task_type, model, tier, return_metadata)
+                return self._build_fallback_result(
+                    prompt,
+                    context,
+                    task_type,
+                    model,
+                    tier,
+                    return_metadata,
+                    failure_reason="request_failed",
+                    failure_detail=str(e),
+                    attempts=attempt + 1,
+                )
 
         # All retries exhausted
-        return self._build_fallback_result(prompt, context, task_type, model, tier, return_metadata)
+        return self._build_fallback_result(
+            prompt,
+            context,
+            task_type,
+            model,
+            tier,
+            return_metadata,
+            failure_reason="retry_exhausted",
+            failure_detail="OpenRouter request failed after all retry attempts",
+            attempts=self.retry_config["max_retries"] + 1,
+        )
 
     def _get_model_config(self, model: Optional[str]) -> Optional[ModelConfig]:
         """Resolve model config even when the requested model has a suffix."""
@@ -304,6 +368,10 @@ class OpenRouterClient:
         model: Optional[str],
         tier: Optional[ModelTier],
         return_metadata: bool,
+        failure_reason: str = "fallback",
+        failure_detail: Optional[str] = None,
+        attempts: Optional[int] = None,
+        status_code: Optional[int] = None,
     ) -> Union[str, Dict[str, Any]]:
         fallback_response = self._generate_fallback_response(prompt, context, task_type)
         if not return_metadata:
@@ -316,6 +384,11 @@ class OpenRouterClient:
             "model": model or self.get_optimal_model(task_type, tier),
             "provider": None,
             "raw_response": {},
+            "fallback": True,
+            "failure_reason": failure_reason,
+            "failure_detail": failure_detail,
+            "attempts": attempts,
+            "status_code": status_code,
         }
 
     def _parse_chat_completion_response(self, result: Dict[str, Any], requested_model: str) -> Dict[str, Any]:

@@ -363,6 +363,40 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
         track_id=request.track_id,
     )
 
+    def extract_admin_openrouter_payload(
+        openrouter_response: object,
+        *,
+        phase_label: str,
+    ) -> Dict[str, object]:
+        if not isinstance(openrouter_response, dict):
+            raise HTTPException(
+                status_code=502,
+                detail=f"OpenRouter returned an unexpected response format while {phase_label}.",
+            )
+
+        if openrouter_response.get("fallback"):
+            failure_reason = str(openrouter_response.get("failure_reason") or "fallback")
+            failure_detail = str(openrouter_response.get("failure_detail") or "").strip()
+            attempts = openrouter_response.get("attempts")
+
+            if failure_reason == "timeout":
+                attempts_suffix = f" after {attempts} attempts" if attempts else ""
+                detail = (
+                    f"OpenRouter timed out while {phase_label}{attempts_suffix}. "
+                    "Please try again in a moment."
+                )
+            elif failure_reason == "rate_limited":
+                detail = f"OpenRouter rate limited the request while {phase_label}. Please retry shortly."
+            else:
+                detail = f"OpenRouter was unavailable while {phase_label}."
+
+            if failure_detail and failure_detail not in detail:
+                detail = f"{detail} {failure_detail}"
+
+            raise HTTPException(status_code=503, detail=detail)
+
+        return extract_json_object(openrouter_response.get("content", ""))
+
     try:
         is_web_search_mode = request.source_mode == "web_search"
         official_card_url = (
@@ -412,8 +446,10 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
             plugins=[{"id": "web"}] if is_web_search_mode else None,
             return_metadata=True,
         )
-        response_text = openrouter_response.get("content", "")
-        structured_payload = extract_json_object(response_text)
+        structured_payload = extract_admin_openrouter_payload(
+            openrouter_response,
+            phase_label="structuring the admin race card",
+        )
         merged_urls = merge_source_urls(
             source_urls=request.source_urls + ([official_card_url] if official_card_url else []),
             annotations=openrouter_response.get("annotations"),
@@ -471,7 +507,10 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
                 plugins=[{"id": "web"}],
                 return_metadata=True,
             )
-            retry_payload = extract_json_object(retry_response.get("content", ""))
+            retry_payload = extract_admin_openrouter_payload(
+                retry_response,
+                phase_label="retrying the incomplete admin race card",
+            )
             final_structured_payload = merge_structured_race_cards(structured_payload, retry_payload)
             merged_urls = merge_source_urls(
                 source_urls=merged_urls,
@@ -518,9 +557,9 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
             session_id, "failed", 0, "admin_failed", str(exc)
         )
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except HTTPException:
+    except HTTPException as exc:
         await session_manager.update_session_status(
-            session_id, "failed", 0, "admin_failed", "Admin race card creation failed"
+            session_id, "failed", 0, "admin_failed", str(exc.detail)
         )
         raise
     except Exception as exc:

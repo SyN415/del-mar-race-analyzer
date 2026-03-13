@@ -572,6 +572,37 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         self.assertEqual(self.openrouter_client.call_model.await_count, 2)
         self.session_manager.save_session_results.assert_not_awaited()
 
+    def test_create_admin_race_card_surfaces_openrouter_timeout_as_503(self):
+        self.openrouter_client.call_model = AsyncMock(return_value={
+            "content": "AI analysis enhancement (fallback mode): timeout fallback",
+            "annotations": [],
+            "usage": {},
+            "model": "x-ai/grok-4.20-beta",
+            "fallback": True,
+            "failure_reason": "timeout",
+            "failure_detail": "OpenRouter API request timed out",
+            "attempts": 4,
+        })
+
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="x-ai/grok-4.20-beta",
+            source_mode="web_search",
+        )
+
+        with self.assertRaises(app_module.HTTPException) as exc:
+            app_module.asyncio.run(app_module.create_admin_race_card(request))
+
+        self.assertEqual(exc.exception.status_code, 503)
+        self.assertIn("timed out", exc.exception.detail)
+        self.assertIn("4 attempts", exc.exception.detail)
+        self.session_manager.save_session_results.assert_not_awaited()
+        self.assertTrue(any(
+            args.args[4] == exc.exception.detail
+            for args in self.session_manager.update_session_status.await_args_list
+        ))
+
     def test_create_admin_race_card_requires_text_in_manual_mode(self):
         request = app_module.AdminRaceCardRequest(
             race_date="2026-03-13",
