@@ -23,8 +23,8 @@ fi
 # Start the application
 echo "🎯 Starting application on port $PORT..."
 if [ "$ENVIRONMENT" = "production" ]; then
-    # Use Gunicorn for production
-    exec gunicorn app:app -w 1 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --log-level $LOG_LEVEL
+    # Use a single-process Uvicorn server on Render to avoid Gunicorn worker boot stalls
+    exec python -m uvicorn app:app --host 0.0.0.0 --port "$PORT" --log-level "$LOG_LEVEL"
 else
     # Use Uvicorn for development
     exec python app.py
