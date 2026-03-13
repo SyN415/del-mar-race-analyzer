@@ -19,9 +19,13 @@
                     <i class="fas fa-print me-1"></i>
                     Print
                 </button>
+                <a href="/admin" class="btn btn-outline-light me-2">
+                    <i class="fas fa-user-shield me-1"></i>
+                    Admin
+                </a>
                 <a href="/" class="btn btn-primary">
-                    <i class="fas fa-plus me-1"></i>
-                    New Analysis
+                    <i class="fas fa-table-cells-large me-1"></i>
+                    Dashboard
                 </a>
             </div>
         </div>
@@ -36,6 +40,55 @@
             <p class="mb-0">{{ results.error }}</p>
         </div>
         {% else %}
+
+        {% if results.card_overview or results.admin_metadata or results.source_urls %}
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-dark text-white">
+                <h4 class="card-title mb-0"><i class="fas fa-clipboard-list me-2"></i>Card context</h4>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="small text-muted">Track</div>
+                        <div class="fw-semibold">{{ results.track_id or 'N/A' }}</div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="small text-muted">Race date</div>
+                        <div class="fw-semibold">{{ results.race_date or 'N/A' }}</div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="small text-muted">Model used</div>
+                        <div class="fw-semibold">{{ results.admin_metadata.model_used if results.admin_metadata else 'N/A' }}</div>
+                    </div>
+                </div>
+
+                {% if results.card_overview %}
+                <div class="mt-3">
+                    <div class="small text-muted">Overview</div>
+                    <div>{{ results.card_overview }}</div>
+                </div>
+                {% endif %}
+
+                {% if results.source_urls %}
+                <div class="mt-3">
+                    <div class="small text-muted">Sources</div>
+                    <ul class="mb-0 small">
+                        {% for source_url in results.source_urls %}
+                        <li><a href="{{ source_url }}" target="_blank" rel="noopener noreferrer">{{ source_url }}</a></li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+
+                {% if results.admin_metadata and results.admin_metadata.notes %}
+                <div class="mt-3">
+                    <div class="small text-muted">Admin notes</div>
+                    <div>{{ results.admin_metadata.notes }}</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
         
         <!-- Enhanced Summary Card with AI Metrics -->
         {% if results.summary %}

@@ -8,21 +8,20 @@ with AI-powered enhancements and professional user interface.
 """
 
 import asyncio
-import json
 import logging
 import os
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
-import asyncio
 
 import uvicorn
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Add project root to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -39,6 +38,7 @@ try:
     from services.openrouter_client import OpenRouterClient
     from services.gradient_boosting_predictor import GradientBoostingPredictor
     from services.kelly_optimizer import KellyCriterionOptimizer
+    from services.race_card_admin import extract_json_object, normalize_admin_results
 except ImportError as e:
     print(f"Some services not available: {e}")
     SessionManager = None
@@ -46,6 +46,8 @@ except ImportError as e:
     OpenRouterClient = None
     GradientBoostingPredictor = None
     KellyCriterionOptimizer = None
+    extract_json_object = None
+    normalize_admin_results = None
 
 # Configure logging
 logging.basicConfig(
@@ -139,11 +141,51 @@ SUPPORTED_TRACKS = {
     "SA": "Santa Anita"
 }
 
+MODEL_OPTIONS = [
+    {
+        "id": "google/gemini-3.1-flash-lite-preview",
+        "label": "Gemini 3.1 Flash Lite Preview",
+        "tier_label": "Cheap",
+        "description": "Fast, lower-cost option for first-pass structuring.",
+    },
+    {
+        "id": "x-ai/grok-4.20-beta",
+        "label": "Grok 4.20 Beta",
+        "tier_label": "Affordable",
+        "description": "Balanced option for race-card organization and ranking.",
+    },
+    {
+        "id": "openai/gpt-5.4",
+        "label": "GPT-5.4",
+        "tier_label": "Best",
+        "description": "Highest-quality option for the strongest reasoning pass.",
+    },
+]
+MODEL_LOOKUP = {model["id"]: model for model in MODEL_OPTIONS}
+DEFAULT_LLM_MODEL = "x-ai/grok-4.20-beta"
+STATUS_BADGE_CLASSES = {
+    "completed": "success",
+    "running": "primary",
+    "created": "secondary",
+    "failed": "danger",
+    "cancelled": "secondary",
+    "interrupted": "warning",
+}
+
 # Pydantic models for API requests
 class AnalysisRequest(BaseModel):
     date: str  # Format: YYYY-MM-DD
-    llm_model: str = "anthropic/claude-sonnet-4.5"
+    llm_model: str = DEFAULT_LLM_MODEL
     track_id: str = "DMR"  # DMR (Del Mar) or SA (Santa Anita)
+
+
+class AdminRaceCardRequest(BaseModel):
+    race_date: str
+    track_id: str = "DMR"
+    llm_model: str = DEFAULT_LLM_MODEL
+    source_text: str
+    source_urls: List[str] = Field(default_factory=list)
+    admin_notes: str = ""
 
 class AnalysisStatus(BaseModel):
     session_id: str
@@ -156,37 +198,43 @@ class AnalysisStatus(BaseModel):
 # API Routes
 @app.get("/", response_class=HTMLResponse)
 async def landing_page(request: Request):
-    """Main landing page with date and model selection"""
+    """Public dashboard for recent race cards."""
+    dashboard_cards = await _load_dashboard_cards(limit=8)
     return templates.TemplateResponse("landing.html", {
         "request": request,
-        "title": "Del Mar Race Analyzer - Multi-Track Support",
-        "available_models": [
-            "zhipu-ai/glm-4-plus",
-            "anthropic/claude-sonnet-4.5"
-        ],
-        "available_tracks": [
-            {"id": "DMR", "name": "Del Mar"},
-            {"id": "SA", "name": "Santa Anita"}
-        ],
-        "default_date": datetime.now().strftime("%Y-%m-%d")
+        "title": "Race Card Dashboard",
+        "dashboard_cards": dashboard_cards,
+        "card_count": len(dashboard_cards),
+        "completed_count": len([card for card in dashboard_cards if card["status"] == "completed"]),
+        "openrouter_configured": bool(app_state.openrouter_client and app_state.openrouter_client.api_key),
+    })
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page(request: Request):
+    """Admin workflow for saving structured race cards with OpenRouter."""
+    return templates.TemplateResponse("admin.html", {
+        "request": request,
+        "title": "Admin Race Card Workflow",
+        "model_options": MODEL_OPTIONS,
+        "default_model": DEFAULT_LLM_MODEL,
+        "available_tracks": [{"id": track_id, "name": track_name} for track_id, track_name in SUPPORTED_TRACKS.items()],
+        "default_date": datetime.now().strftime("%Y-%m-%d"),
+        "openrouter_configured": bool(app_state.openrouter_client and app_state.openrouter_client.api_key),
     })
 
 @app.post("/api/analyze")
 async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundTasks):
     """Start race analysis for specified date and track"""
     try:
+        _validate_track_id(request.track_id)
+        _validate_llm_model(request.llm_model)
+
         # Validate date format
         try:
             analysis_date = datetime.strptime(request.date, "%Y-%m-%d")
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
-
-        # Validate track ID
-        if request.track_id not in SUPPORTED_TRACKS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid track ID. Supported tracks: {', '.join(SUPPORTED_TRACKS.keys())}"
-            )
 
         # Create new analysis session
         if app_state.session_manager:
@@ -219,6 +267,94 @@ async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundT
     except Exception as e:
         logger.error(f"Failed to start analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/race-cards")
+async def create_admin_race_card(request: AdminRaceCardRequest):
+    """Create a saved race card from pasted source material using OpenRouter."""
+    if not app_state.session_manager:
+        raise HTTPException(status_code=503, detail="Session manager is not available")
+    if not app_state.openrouter_client or not app_state.openrouter_client.api_key:
+        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured on the server")
+    if not extract_json_object or not normalize_admin_results:
+        raise HTTPException(status_code=503, detail="Admin race-card helpers are unavailable")
+
+    _validate_track_id(request.track_id)
+    _validate_llm_model(request.llm_model)
+
+    try:
+        datetime.strptime(request.race_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD") from exc
+
+    source_text = request.source_text.strip()
+    if not source_text:
+        raise HTTPException(status_code=400, detail="Source text is required")
+
+    started_at = time.perf_counter()
+    session_id = await app_state.session_manager.create_session(
+        race_date=request.race_date,
+        llm_model=request.llm_model,
+        track_id=request.track_id,
+    )
+
+    try:
+        await app_state.session_manager.update_session_status(
+            session_id, "running", 25, "admin_structuring", "Structuring race card with OpenRouter"
+        )
+
+        raw_response = await app_state.openrouter_client.call_model(
+            model=request.llm_model,
+            task_type="analysis",
+            prompt=_build_admin_structuring_prompt(request),
+            context={
+                "race_date": request.race_date,
+                "track_id": request.track_id,
+                "track_name": SUPPORTED_TRACKS[request.track_id],
+                "source_urls": request.source_urls,
+                "admin_notes": request.admin_notes,
+                "source_text": source_text,
+            },
+            max_tokens=2500,
+            temperature=0.2,
+        )
+        structured_payload = extract_json_object(raw_response)
+        normalized_results = normalize_admin_results(
+            structured_payload,
+            race_date=request.race_date,
+            track_id=request.track_id,
+            llm_model=request.llm_model,
+            source_urls=request.source_urls,
+            admin_notes=request.admin_notes,
+            analysis_duration_seconds=time.perf_counter() - started_at,
+        )
+
+        await app_state.session_manager.save_session_results(session_id, normalized_results)
+        await app_state.session_manager.update_session_status(
+            session_id, "completed", 100, "analysis_complete", "Admin race card saved"
+        )
+
+        return JSONResponse({
+            "session_id": session_id,
+            "status": "completed",
+            "redirect_url": f"/results/{session_id}",
+        })
+    except ValueError as exc:
+        await app_state.session_manager.update_session_status(
+            session_id, "failed", 0, "admin_failed", str(exc)
+        )
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except HTTPException:
+        await app_state.session_manager.update_session_status(
+            session_id, "failed", 0, "admin_failed", "Admin race card creation failed"
+        )
+        raise
+    except Exception as exc:
+        logger.error(f"Admin race card creation failed: {exc}")
+        await app_state.session_manager.update_session_status(
+            session_id, "failed", 0, "admin_failed", str(exc)
+        )
+        raise HTTPException(status_code=500, detail=f"Failed to create admin race card: {exc}") from exc
 
 @app.get("/api/status/{session_id}")
 async def get_analysis_status(session_id: str):
@@ -330,6 +466,112 @@ async def health_check():
             "kelly_optimizer": app_state.kelly_optimizer is not None
         }
     }
+
+
+def _validate_track_id(track_id: str):
+    if track_id not in SUPPORTED_TRACKS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid track ID. Supported tracks: {', '.join(SUPPORTED_TRACKS.keys())}",
+        )
+
+
+def _validate_llm_model(llm_model: str):
+    if llm_model not in MODEL_LOOKUP:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid LLM model. Use one of the configured OpenRouter models.",
+        )
+
+
+async def _load_dashboard_cards(limit: int = 8) -> List[Dict]:
+    if not app_state.session_manager:
+        return []
+
+    sessions = await app_state.session_manager.get_recent_sessions(limit=limit)
+    completed_sessions = [session for session in sessions if session.get("status") == "completed"]
+    results_by_session: Dict[str, Dict] = {}
+
+    if completed_sessions:
+        fetched_results = await asyncio.gather(
+            *(app_state.session_manager.get_session_results(session["session_id"]) for session in completed_sessions),
+            return_exceptions=True,
+        )
+        for session, results in zip(completed_sessions, fetched_results):
+            if isinstance(results, dict):
+                results_by_session[session["session_id"]] = results
+
+    dashboard_cards = []
+    for session in sessions:
+        session_id = session.get("session_id")
+        results = results_by_session.get(session_id, {})
+        summary = results.get("summary", {}) if isinstance(results, dict) else {}
+        best_bet = (summary.get("best_bets") or [None])[0]
+        dashboard_cards.append({
+            "session_id": session_id,
+            "race_date": session.get("race_date"),
+            "track_id": session.get("track_id"),
+            "track_name": SUPPORTED_TRACKS.get(session.get("track_id"), session.get("track_id")),
+            "llm_model": session.get("llm_model"),
+            "model_label": MODEL_LOOKUP.get(session.get("llm_model"), {}).get("label", session.get("llm_model")),
+            "status": session.get("status", "unknown"),
+            "status_class": STATUS_BADGE_CLASSES.get(session.get("status"), "secondary"),
+            "progress": session.get("progress", 0),
+            "updated_at": session.get("updated_at"),
+            "generated_at": results.get("generated_at") if isinstance(results, dict) else None,
+            "total_races": summary.get("total_races", 0),
+            "total_horses": summary.get("total_horses", 0),
+            "best_bet": best_bet,
+        })
+
+    return dashboard_cards
+
+
+def _build_admin_structuring_prompt(request: AdminRaceCardRequest) -> str:
+    return f"""
+You are structuring a horse racing card for internal display.
+
+Track: {SUPPORTED_TRACKS[request.track_id]} ({request.track_id})
+Race date: {request.race_date}
+
+Return ONLY valid JSON with this shape:
+{{
+  "card_overview": "short summary",
+  "race_analyses": [
+    {{
+      "race_number": 1,
+      "race_type": "Allowance Optional Claiming",
+      "distance": "6f",
+      "surface": "Dirt",
+      "predictions": [
+        {{
+          "horse_name": "Horse Name",
+          "post_position": 1,
+          "jockey": "Jockey Name",
+          "trainer": "Trainer Name",
+          "composite_rating": 88.5,
+          "factors": {{
+            "speed_rating": 88,
+            "form_rating": 84,
+            "class_rating": 82,
+            "workout_rating": 80
+          }},
+          "notes": "brief grounded note"
+        }}
+      ],
+      "exotic_suggestions": {{"exacta": "1-4", "trifecta": "1-4-6"}}
+    }}
+  ]
+}}
+
+Rules:
+- Do not wrap the JSON in markdown fences.
+- Include every race you can identify from the provided source material.
+- Order each race's predictions strongest to weakest.
+- Use only grounded details from the supplied material; leave uncertain text blank instead of inventing facts.
+- `composite_rating` must be numeric on a 0-100 scale.
+- Keep notes concise.
+""".strip()
 
 @app.post("/api/validate")
 async def run_validation():

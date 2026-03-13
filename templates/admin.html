@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-xl-10">
+        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-4">
+            <div>
+                <h1 class="mb-2"><i class="fas fa-user-shield me-2"></i>Admin race-card workflow</h1>
+                <p class="text-muted mb-0">Paste your scraped notes or web-search material, pick a model, and save a structured card.</p>
+            </div>
+            <a href="/" class="btn btn-outline-light">
+                <i class="fas fa-arrow-left me-2"></i>Back to dashboard
+            </a>
+        </div>
+
+        {% if not openrouter_configured %}
+        <div class="alert alert-warning">
+            <strong>OpenRouter is not configured on the server.</strong>
+            Set <code>OPENROUTER_API_KEY</code> in the environment before using this workflow.
+        </div>
+        {% endif %}
+
+        <div class="card shadow-lg border-0">
+            <div class="card-body p-4">
+                <form id="adminCardForm">
+                    <div class="row">
+                        <div class="col-md-4 mb-3">
+                            <label for="raceDate" class="form-label">Race date</label>
+                            <input type="date" class="form-control" id="raceDate" value="{{ default_date }}" required>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="trackId" class="form-label">Track</label>
+                            <select class="form-select" id="trackId" required>
+                                {% for track in available_tracks %}
+                                <option value="{{ track.id }}">{{ track.name }} ({{ track.id }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label for="llmModel" class="form-label">OpenRouter model</label>
+                            <select class="form-select" id="llmModel" required>
+                                {% for model in model_options %}
+                                <option value="{{ model.id }}" {% if model.id == default_model %}selected{% endif %}>
+                                    {{ model.label }} — {{ model.tier_label }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="sourceUrls" class="form-label">Source URLs</label>
+                        <textarea class="form-control" id="sourceUrls" rows="2" placeholder="One URL per line, optional"></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="sourceText" class="form-label">Raw source material</label>
+                        <textarea class="form-control" id="sourceText" rows="12" placeholder="Paste race-card notes, copied entries, web-search findings, or manually gathered data here." required></textarea>
+                        <div class="form-text">The AI will normalize this into the stored race-card format used by the public dashboard.</div>
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="adminNotes" class="form-label">Admin notes</label>
+                        <textarea class="form-control" id="adminNotes" rows="3" placeholder="Optional notes about source quality, assumptions, or follow-up work."></textarea>
+                    </div>
+
+                    <div class="row g-3 mb-4">
+                        {% for model in model_options %}
+                        <div class="col-md-4">
+                            <div class="card h-100 border-0 bg-dark-subtle">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between align-items-center mb-2">
+                                        <strong>{{ model.label }}</strong>
+                                        <span class="badge bg-primary">{{ model.tier_label }}</span>
+                                    </div>
+                                    <p class="small text-muted mb-0">{{ model.description }}</p>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button type="submit" class="btn btn-primary btn-lg" id="saveCardBtn" {% if not openrouter_configured %}disabled{% endif %}>
+                            <i class="fas fa-save me-2"></i>Structure and save race card
+                        </button>
+                        <a href="/" class="btn btn-outline-secondary btn-lg">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.getElementById('adminCardForm').addEventListener('submit', async function(event) {
+    event.preventDefault();
+
+    const saveButton = document.getElementById('saveCardBtn');
+    const payload = {
+        race_date: document.getElementById('raceDate').value,
+        track_id: document.getElementById('trackId').value,
+        llm_model: document.getElementById('llmModel').value,
+        source_text: document.getElementById('sourceText').value,
+        admin_notes: document.getElementById('adminNotes').value,
+        source_urls: document.getElementById('sourceUrls').value
+            .split(/\n|,/)
+            .map(value => value.trim())
+            .filter(Boolean)
+    };
+
+    saveButton.disabled = true;
+    saveButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Saving...';
+
+    try {
+        const response = await fetch('/api/admin/race-cards', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+            throw new Error(result.detail || 'Failed to save race card');
+        }
+
+        window.location.href = result.redirect_url;
+    } catch (error) {
+        alert(error.message);
+        saveButton.disabled = false;
+        saveButton.innerHTML = '<i class="fas fa-save me-2"></i>Structure and save race card';
+    }
+});
+</script>
+{% endblock %}

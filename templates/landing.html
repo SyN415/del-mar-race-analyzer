@@ -1,244 +1,133 @@
 {% extends "base.html" %}
 
-{% block title %}{{ title }} - Start Analysis{% endblock %}
+{% block title %}{{ title }}{% endblock %}
 
 {% block content %}
-<div class="row justify-content-center">
-    <div class="col-lg-8">
-        <!-- Hero Section -->
-        <div class="text-center mb-5 hero-section">
-            <h1 class="display-3 fw-bold mb-3">
-                <i class="fas fa-horse-head me-3"></i>
-                Del Mar Race Analyzer
-            </h1>
-            <p class="lead mb-4">
-                AI-powered racing analysis with intelligent scraping • Multi-track support
-            </p>
-            <div class="d-flex justify-content-center gap-3 flex-wrap">
-                <span class="badge px-4 py-2">
-                    <i class="fas fa-robot me-2"></i>AI Enhanced
-                </span>
-                <span class="badge px-4 py-2">
-                    <i class="fas fa-chart-line me-2"></i>6-Factor Analysis
-                </span>
-                <span class="badge px-4 py-2">
-                    <i class="fas fa-trophy me-2"></i>Premium Predictions
-                </span>
-            </div>
-        </div>
-
-        <!-- Analysis Form -->
-        <div class="card shadow-lg">
-            <div class="card-header bg-primary text-white">
-                <h3 class="card-title mb-0">
-                    <i class="fas fa-play-circle me-2"></i>
-                    Start New Analysis
-                </h3>
-            </div>
-            <div class="card-body p-4">
-                <form id="analysisForm">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label for="raceDate" class="form-label">
-                                <i class="fas fa-calendar me-1"></i>
-                                Race Date
-                            </label>
-                            <input type="date" class="form-control" id="raceDate" name="date" 
-                                   value="{{ default_date }}" required>
-                            <div class="form-text">Select the race date to analyze</div>
-                        </div>
-                        
-                        <div class="col-md-6 mb-3">
-                            <label for="llmModel" class="form-label">
+<div class="row g-4">
+    <div class="col-12">
+        <div class="card shadow-lg border-0">
+            <div class="card-body p-4 p-lg-5">
+                <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-4">
+                    <div>
+                        <h1 class="display-5 fw-bold mb-3">
+                            <i class="fas fa-horse-head me-2"></i>
+                            Race Card Dashboard
+                        </h1>
+                        <p class="lead mb-3">
+                            Public view of the latest structured Del Mar and Santa Anita race cards.
+                        </p>
+                        <div class="d-flex gap-3 flex-wrap text-muted small">
+                            <span><i class="fas fa-layer-group me-1"></i>{{ card_count }} recent cards</span>
+                            <span><i class="fas fa-circle-check me-1"></i>{{ completed_count }} ready to review</span>
+                            <span>
                                 <i class="fas fa-robot me-1"></i>
-                                AI Model Selection
-                                <span class="badge bg-success ms-2">AI Enhanced</span>
-                            </label>
-                            <select class="form-select" id="llmModel" name="llm_model" required>
-                                <option value="zhipu-ai/glm-4-plus" selected>GLM-4.6 (Recommended - Cost Effective)</option>
-                                <option value="anthropic/claude-sonnet-4.5">Claude Sonnet 4.5 (Premium Analysis)</option>
-                            </select>
-                            <div class="form-text">
-                                <i class="fas fa-info-circle me-1"></i>
-                                AI model for enhanced prediction analysis, scraping assistance, and betting recommendations
-                            </div>
+                                OpenRouter {{ 'configured' if openrouter_configured else 'not configured' }}
+                            </span>
                         </div>
                     </div>
-                    
-                    <div class="mb-4">
-                        <label for="trackId" class="form-label">
-                            <i class="fas fa-map-marker-alt me-1"></i>
-                            Track
-                        </label>
-                        <select class="form-select" id="trackId" name="track_id" required>
-                            <option value="DMR" selected>Del Mar (DMR)</option>
-                            <option value="SA">Santa Anita (SA)</option>
-                        </select>
-                        <div class="form-text">Select the racing track to analyze</div>
-                    </div>
-                    
-                    <!-- AI Services Status -->
-                    <div class="mb-4">
-                        <h6 class="text-muted mb-3">
-                            <i class="fas fa-cogs me-1"></i>
-                            AI Services Status
-                        </h6>
-                        <div class="row">
-                            <div class="col-md-4 mb-2">
-                                <div class="d-flex align-items-center">
-                                    <span class="badge bg-success me-2">●</span>
-                                    <small>OpenRouter Client</small>
-                                </div>
-                            </div>
-                            <div class="col-md-4 mb-2">
-                                <div class="d-flex align-items-center">
-                                    <span class="badge bg-success me-2">●</span>
-                                    <small>Scraping Assistant</small>
-                                </div>
-                            </div>
-                            <div class="col-md-4 mb-2">
-                                <div class="d-flex align-items-center">
-                                    <span class="badge bg-success me-2">●</span>
-                                    <small>Analysis Enhancer</small>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="d-grid">
-                        <button type="submit" class="btn btn-primary btn-lg" id="startAnalysisBtn">
-                            <i class="fas fa-rocket me-2"></i>
-                            Start AI-Enhanced Analysis
-                        </button>
-                    </div>
-                </form>
-            </div>
-        </div>
-
-        <!-- Enhanced Features Section -->
-        <div class="row mt-5">
-            <div class="col-md-4 mb-4">
-                <div class="card h-100 border-0 shadow-sm">
-                    <div class="card-body text-center">
-                        <div class="text-primary mb-3">
-                            <i class="fas fa-robot fa-3x"></i>
-                        </div>
-                        <h5 class="card-title">
-                            AI-Powered Analysis
-                            <span class="badge bg-primary ms-1">NEW</span>
-                        </h5>
-                        <p class="card-text text-muted">
-                            Advanced AI models enhance predictions with confidence scoring, value detection, and strategic betting recommendations
-                        </p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-4 mb-4">
-                <div class="card h-100 border-0 shadow-sm">
-                    <div class="card-body text-center">
-                        <div class="text-success mb-3">
-                            <i class="fas fa-shield-alt fa-3x"></i>
-                        </div>
-                        <h5 class="card-title">
-                            Intelligent Scraping
-                            <span class="badge bg-success ms-1">AI</span>
-                        </h5>
-                        <p class="card-text text-muted">
-                            AI-powered scraping with CAPTCHA detection, WAF bypass, and adaptive error recovery
-                        </p>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-4 mb-4">
-                <div class="card h-100 border-0 shadow-sm">
-                    <div class="card-body text-center">
-                        <div class="text-warning mb-3">
-                            <i class="fas fa-chart-line fa-3x"></i>
-                        </div>
-                        <h5 class="card-title">6-Factor + AI Analysis</h5>
-                        <p class="card-text text-muted">
-                            Sophisticated algorithmic engine enhanced with AI insights for superior prediction accuracy
-                        </p>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="col-md-4 mb-4">
-                <div class="card h-100 border-0 shadow-sm">
-                    <div class="card-body text-center">
-                        <div class="text-warning mb-3">
-                            <i class="fas fa-robot fa-3x"></i>
-                        </div>
-                        <h5 class="card-title">AI Enhancement</h5>
-                        <p class="card-text text-muted">
-                            OpenRouter integration for tactical insights and betting recommendations
-                        </p>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <a href="/admin" class="btn btn-primary btn-lg">
+                            <i class="fas fa-user-shield me-2"></i>Open Admin Workflow
+                        </a>
+                        <a href="/health" class="btn btn-outline-light btn-lg">
+                            <i class="fas fa-heartbeat me-2"></i>System Status
+                        </a>
                     </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
 
-<!-- Loading Modal -->
-<div class="modal fade" id="loadingModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-body text-center p-4">
-                <div class="spinner-border text-primary mb-3" role="status">
-                    <span class="visually-hidden">Loading...</span>
+    <div class="col-lg-8">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h3 class="mb-0">Recent cards</h3>
+            <span class="text-muted small">Newest sessions first</span>
+        </div>
+
+        {% if dashboard_cards %}
+            {% for card in dashboard_cards %}
+            <div class="card shadow-sm mb-3 border-0">
+                <div class="card-body">
+                    <div class="d-flex flex-column flex-md-row justify-content-between gap-3">
+                        <div>
+                            <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+                                <h5 class="mb-0">{{ card.track_name }} · {{ card.race_date or 'Unknown date' }}</h5>
+                                <span class="badge bg-{{ card.status_class }}">{{ card.status|title }}</span>
+                            </div>
+                            <div class="text-muted small mb-2">
+                                Session <code>{{ card.session_id }}</code>
+                            </div>
+                            <div class="small text-muted">
+                                <strong>Model:</strong> {{ card.model_label }}
+                                {% if card.generated_at %}
+                                · <strong>Saved:</strong> {{ card.generated_at }}
+                                {% elif card.updated_at %}
+                                · <strong>Updated:</strong> {{ card.updated_at }}
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="text-md-end">
+                            {% if card.status == 'completed' %}
+                            <div class="fw-semibold">{{ card.total_races }} races · {{ card.total_horses }} horses</div>
+                            {% if card.best_bet %}
+                            <div class="small text-success mb-2">
+                                Top pick: <strong>{{ card.best_bet.horse_name }}</strong>
+                                (Race {{ card.best_bet.race_number }})
+                            </div>
+                            {% endif %}
+                            <a href="/results/{{ card.session_id }}" class="btn btn-primary btn-sm">
+                                <i class="fas fa-chart-bar me-1"></i>View card
+                            </a>
+                            {% else %}
+                            <div class="small text-muted mb-2">Progress: {{ card.progress or 0 }}%</div>
+                            <a href="{% if card.status in ['running', 'created', 'interrupted'] %}/progress/{{ card.session_id }}{% else %}/results/{{ card.session_id }}{% endif %}" class="btn btn-outline-primary btn-sm">
+                                <i class="fas fa-arrow-up-right-from-square me-1"></i>Open session
+                            </a>
+                            {% endif %}
+                        </div>
+                    </div>
                 </div>
-                <h5>Starting Analysis...</h5>
-                <p class="text-muted mb-0">Please wait while we initialize the analysis session</p>
+            </div>
+            {% endfor %}
+        {% else %}
+        <div class="card shadow-sm border-0">
+            <div class="card-body p-4 text-center">
+                <h4>No race cards yet</h4>
+                <p class="text-muted mb-3">
+                    Use the admin workflow to paste your source material and save the next card.
+                </p>
+                <a href="/admin" class="btn btn-primary">
+                    <i class="fas fa-user-shield me-2"></i>Go to admin
+                </a>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card shadow-sm border-0 mb-3">
+            <div class="card-body">
+                <h5><i class="fas fa-user-shield me-2"></i>Admin workflow</h5>
+                <p class="text-muted small mb-3">
+                    Paste raw notes, web-search findings, or copied race-card text into the private admin page.
+                </p>
+                <ul class="small text-muted mb-3">
+                    <li>Select one of your three approved OpenRouter models.</li>
+                    <li>Have AI normalize the card into the app's stored results shape.</li>
+                    <li>Publish it here for quick review.</li>
+                </ul>
+                <a href="/admin" class="btn btn-outline-primary w-100">Open admin</a>
+            </div>
+        </div>
+
+        <div class="card shadow-sm border-0">
+            <div class="card-body">
+                <h5><i class="fas fa-lightbulb me-2"></i>Current direction</h5>
+                <p class="text-muted small mb-0">
+                    The public site is now focused on displaying structured race cards, while the AI-assisted work stays in the admin flow.
+                </p>
             </div>
         </div>
     </div>
 </div>
-{% endblock %}
-
-{% block extra_scripts %}
-<script>
-document.getElementById('analysisForm').addEventListener('submit', async function(e) {
-    e.preventDefault();
-    
-    const formData = new FormData(this);
-    const data = Object.fromEntries(formData);
-    
-    // Show loading modal
-    const loadingModal = new bootstrap.Modal(document.getElementById('loadingModal'));
-    loadingModal.show();
-    
-    // Disable submit button
-    const submitBtn = document.getElementById('startAnalysisBtn');
-    submitBtn.disabled = true;
-    
-    try {
-        const response = await fetch('/api/analyze', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(data)
-        });
-        
-        if (response.ok) {
-            const result = await response.json();
-            // Redirect to progress page
-            window.location.href = `/progress/${result.session_id}`;
-        } else {
-            const error = await response.json();
-            throw new Error(error.detail || 'Analysis failed to start');
-        }
-    } catch (error) {
-        console.error('Error starting analysis:', error);
-        alert('Failed to start analysis: ' + error.message);
-        
-        // Hide loading modal and re-enable button
-        loadingModal.hide();
-        submitBtn.disabled = false;
-    }
-});
-</script>
 {% endblock %}

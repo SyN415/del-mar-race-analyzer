@@ -45,14 +45,11 @@ class WebConfig(BaseModel):
 
 class AIConfig(BaseModel):
     """AI/LLM configuration settings"""
-    default_model: str = "anthropic/claude-sonnet-4.5"
+    default_model: str = "x-ai/grok-4.20-beta"
     available_models: list = Field(default_factory=lambda: [
-        "anthropic/claude-sonnet-4.5",
-        "anthropic/claude-3.5-haiku",
-        "gpt-4o",
-        "gpt-4-turbo",
-        "z-ai/glm-4.5",
-        "qwen/qwen3-coder"
+        "google/gemini-3.1-flash-lite-preview",
+        "x-ai/grok-4.20-beta",
+        "openai/gpt-5.4",
     ])
     max_tokens: int = 1000
     temperature: float = 0.7

@@ -70,17 +70,15 @@ class OpenRouterClient:
 
     # Available models with configurations
     MODELS = {
-        # Fast tier - Quick responses for simple tasks
-        "x-ai/grok-code-fast-1": ModelConfig("x-ai/grok-code-fast-1", ModelTier.FAST, 8192, 0.003, 2.0, 0.94),
-
-        # Balanced tier - Good performance for most tasks
-        "z-ai/glm-4.5": ModelConfig("z-ai/glm-4.5", ModelTier.BALANCED, 8192, 0.02, 3.5, 0.96),
-        "anthropic/claude-3.5-haiku": ModelConfig("anthropic/claude-3.5-haiku", ModelTier.BALANCED, 8192, 0.001, 2.5, 0.97),
-
-        # Premium tier - Best quality for complex analysis
-        "anthropic/claude-sonnet-4.5": ModelConfig("anthropic/claude-sonnet-4.5", ModelTier.PREMIUM, 200000, 0.003, 3.5, 0.99),
-        "moonshotai/kimi-k2-0905": ModelConfig("moonshotai/kimi-k2-0905", ModelTier.PREMIUM, 16384, 0.04, 4.0, 0.98),
-        "qwen/qwen3-coder": ModelConfig("qwen/qwen3-coder", ModelTier.PREMIUM, 12288, 0.035, 3.8, 0.97),
+        "google/gemini-3.1-flash-lite-preview": ModelConfig(
+            "google/gemini-3.1-flash-lite-preview", ModelTier.FAST, 32768, 0.001, 1.8, 0.96
+        ),
+        "x-ai/grok-4.20-beta": ModelConfig(
+            "x-ai/grok-4.20-beta", ModelTier.BALANCED, 32768, 0.01, 3.0, 0.97
+        ),
+        "openai/gpt-5.4": ModelConfig(
+            "openai/gpt-5.4", ModelTier.PREMIUM, 128000, 0.03, 4.2, 0.99
+        ),
     }
 
     def __init__(self, config):
@@ -96,13 +94,13 @@ class OpenRouterClient:
             "backoff_factor": 2.0
         }
 
-        # Model selection preferences - Claude Sonnet 4.5 as primary
+        # Model selection preferences aligned with the admin workflow
         self.preferred_models = {
-            "scraping": "anthropic/claude-sonnet-4.5",  # Best reasoning for scraping strategies
-            "analysis": "anthropic/claude-sonnet-4.5",  # Excellent for complex analysis
-            "betting": "anthropic/claude-sonnet-4.5",  # Premium reasoning for betting recommendations
-            "general": "anthropic/claude-sonnet-4.5",  # Default for all tasks
-            "fallback": "anthropic/claude-3.5-haiku"  # Fast Claude fallback
+            "scraping": "x-ai/grok-4.20-beta",
+            "analysis": "openai/gpt-5.4",
+            "betting": "openai/gpt-5.4",
+            "general": "x-ai/grok-4.20-beta",
+            "fallback": "google/gemini-3.1-flash-lite-preview",
         }
         
     def _get_api_key_from_env(self) -> Optional[str]:
@@ -129,8 +127,8 @@ class OpenRouterClient:
                 return max(tier_models, key=lambda m: self.MODELS[m].reliability_score)
 
         # Use task-specific preferences
-        preferred = self.preferred_models.get(task_type, "anthropic/claude-sonnet-4.5")
-        return preferred if preferred in self.MODELS else "anthropic/claude-sonnet-4.5"
+        preferred = self.preferred_models.get(task_type, "x-ai/grok-4.20-beta")
+        return preferred if preferred in self.MODELS else "x-ai/grok-4.20-beta"
 
     async def call_model(self, model: str = None, prompt: str = "", context: Dict = None,
                         max_tokens: int = None, temperature: float = 0.7,
@@ -678,9 +676,9 @@ class OpenRouterClient:
 
         # Test different model tiers
         test_models = [
-            ("x-ai/grok-code-fast-1", "fast"),
-            ("anthropic/claude-3.5-haiku", "balanced"),
-            ("anthropic/claude-sonnet-4.5", "premium")
+            ("google/gemini-3.1-flash-lite-preview", "fast"),
+            ("x-ai/grok-4.20-beta", "balanced"),
+            ("openai/gpt-5.4", "premium")
         ]
 
         for model, tier in test_models:
