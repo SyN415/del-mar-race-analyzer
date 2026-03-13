@@ -19,7 +19,7 @@
     /* Text Colors */
     --text-primary: #f9fafb;
     --text-secondary: #9ca3af;
-    --text-muted: #6b7280;
+    --text-muted: #94a3b8;
 
     /* Border Colors */
     --border-primary: #1f2937;
@@ -331,24 +331,53 @@ main.container {
     background: linear-gradient(135deg, var(--accent-primary), #2563eb);
 }
 
+.race-card .race-meta {
+    color: rgba(255, 255, 255, 0.9);
+    font-weight: 500;
+}
+
+.race-card .race-submeta {
+    color: rgba(255, 255, 255, 0.78);
+}
+
 .horse-prediction {
+    background: rgba(148, 163, 184, 0.08);
+    border: 1px solid var(--border-accent);
     border-left: 3px solid transparent;
+    color: var(--text-primary);
     transition: all 0.2s ease;
+}
+
+.horse-prediction .text-muted,
+.horse-prediction .small.text-muted {
+    color: #d5deeb !important;
 }
 
 .horse-prediction.top-pick {
     border-left-color: var(--accent-success);
-    background-color: rgba(16, 185, 129, 0.05);
+    background-color: rgba(16, 185, 129, 0.12);
 }
 
 .horse-prediction.second-pick {
     border-left-color: var(--accent-warning);
-    background-color: rgba(245, 158, 11, 0.05);
+    background-color: rgba(245, 158, 11, 0.12);
 }
 
 .horse-prediction.third-pick {
     border-left-color: var(--accent-info);
-    background-color: rgba(6, 182, 212, 0.05);
+    background-color: rgba(6, 182, 212, 0.12);
+}
+
+.source-link-list a {
+    color: #7dd3fc;
+}
+
+.source-link-list a:hover {
+    color: #bae6fd;
+}
+
+.full-field-alert {
+    box-shadow: inset 0 0 0 1px rgba(245, 158, 11, 0.08);
 }
 
 /* Badges */
@@ -503,7 +532,7 @@ footer .fas {
 .alert-info {
     background-color: rgba(13, 202, 240, 0.1);
     border-color: rgba(13, 202, 240, 0.2);
-    color: #055160;
+    color: var(--text-primary);
     border-radius: 8px;
 }
 
@@ -559,6 +588,7 @@ footer .fas {
 .alert-info .fas.fa-robot {
     color: var(--accent-info);
     font-size: 1.1em;
+}
 
 /* Bootstrap Overrides for Dark Theme */
 .btn-primary {
@@ -683,6 +713,11 @@ footer .fas {
     background-color: var(--bg-tertiary) !important;
 }
 
+.card.bg-light {
+    background-color: var(--bg-tertiary) !important;
+    border-color: var(--border-accent) !important;
+}
+
 .text-muted {
     color: var(--text-muted) !important;
 }
@@ -712,8 +747,26 @@ footer .fas {
     color: var(--text-primary) !important;
 }
 
+.table-responsive {
+    border: 1px solid var(--border-primary);
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.35);
+}
+
 .table td, .table th {
     border-color: var(--border-primary) !important;
+}
+
+.table tbody tr:nth-child(odd) {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.table tbody tr:hover {
+    background: rgba(59, 130, 246, 0.08);
+}
+
+.race-card .text-white-50 {
+    color: rgba(255, 255, 255, 0.82) !important;
 }
 
 /* Spinner fixes */
@@ -745,5 +798,4 @@ footer .fas {
 .spinner-border.text-info {
     border-color: var(--accent-info) !important;
     border-right-color: transparent !important;
-}
 }

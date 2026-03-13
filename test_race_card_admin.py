@@ -133,7 +133,9 @@ import app as app_module
 from services.race_card_admin import (
     build_equibase_card_overview_url,
     extract_json_object,
+    extract_structured_horse_names_by_race,
     extract_structured_race_numbers,
+    find_missing_horses_by_race,
     find_missing_race_numbers,
     merge_source_urls,
     merge_structured_race_cards,
@@ -151,7 +153,7 @@ class RaceCardAdminTests(unittest.TestCase):
 
         self.assertEqual(payload["race_analyses"][0]["race_number"], 1)
 
-    def test_normalize_admin_results_maps_predictions_and_summary(self):
+    def test_normalize_admin_results_maps_predictions_summary_and_field_metadata(self):
         structured = {
             "overview": "Del Mar Friday card",
             "races": [
@@ -173,6 +175,7 @@ class RaceCardAdminTests(unittest.TestCase):
             race_date="2026-03-13",
             track_id="DMR",
             llm_model="x-ai/grok-4.20-beta",
+            expected_horses_by_race={1: ["Alpha", "Bravo", "Charlie"]},
             source_urls=["https://example.com/card"],
             admin_notes="Imported from notes",
             analysis_duration_seconds=1.25,
@@ -182,6 +185,10 @@ class RaceCardAdminTests(unittest.TestCase):
         self.assertEqual(results["race_analyses"][0]["predictions"][0]["horse_name"], "Alpha")
         self.assertEqual(results["race_analyses"][0]["top_pick"]["horse_name"], "Alpha")
         self.assertEqual(results["admin_metadata"]["model_used"], "x-ai/grok-4.20-beta")
+        self.assertEqual(results["race_analyses"][0]["field_size"], 2)
+        self.assertEqual(results["race_analyses"][0]["expected_field_size"], 3)
+        self.assertFalse(results["race_analyses"][0]["field_complete"])
+        self.assertEqual(results["race_analyses"][0]["missing_horses"], ["Charlie"])
         self.assertAlmostEqual(
             sum(pred["win_probability"] for pred in results["race_analyses"][0]["predictions"]),
             100.0,
@@ -218,11 +225,48 @@ class RaceCardAdminTests(unittest.TestCase):
         self.assertEqual(extract_structured_race_numbers(structured), [1, 3])
         self.assertEqual(find_missing_race_numbers(structured, [1, 2, 3, 4]), [2, 4])
 
-    def test_merge_structured_race_cards_prefers_more_complete_race_payload(self):
+    def test_extract_structured_horse_names_and_find_missing_horses_by_race(self):
+        structured = {
+            "race_analyses": [
+                {
+                    "race_number": 1,
+                    "predictions": [
+                        {"horse_name": "Alpha"},
+                        {"horse_name": "Bravo (KY)"},
+                    ],
+                },
+                {
+                    "race_number": 2,
+                    "entries": [
+                        {"horse": "Charlie"},
+                    ],
+                },
+            ]
+        }
+
+        self.assertEqual(
+            extract_structured_horse_names_by_race(structured),
+            {1: ["Alpha", "Bravo"], 2: ["Charlie"]},
+        )
+        self.assertEqual(
+            find_missing_horses_by_race(
+                structured,
+                {1: ["Alpha", "Bravo", "Delta"], 2: ["Charlie", "Echo"]},
+            ),
+            {1: ["Delta"], 2: ["Echo"]},
+        )
+
+    def test_merge_structured_race_cards_merges_split_race_fields(self):
         first = {
             "card_overview": "First pass",
             "race_analyses": [
-                {"race_number": 1, "predictions": [{"horse_name": "Alpha"}]},
+                {
+                    "race_number": 1,
+                    "predictions": [
+                        {"horse_name": "Alpha", "composite_rating": 90},
+                        {"horse_name": "Charlie", "composite_rating": 82},
+                    ],
+                },
             ],
         }
         second = {
@@ -234,8 +278,8 @@ class RaceCardAdminTests(unittest.TestCase):
                     "distance": "6f",
                     "surface": "Dirt",
                     "predictions": [
-                        {"horse_name": "Alpha"},
-                        {"horse_name": "Bravo"},
+                        {"horse_name": "Alpha", "jockey": "A. Rider", "composite_rating": 91},
+                        {"horse_name": "Bravo", "composite_rating": 84},
                     ],
                 },
                 {"race_number": 2, "predictions": [{"horse_name": "Charlie"}]},
@@ -246,9 +290,13 @@ class RaceCardAdminTests(unittest.TestCase):
 
         self.assertEqual(merged["card_overview"], "First pass")
         self.assertEqual([race["race_number"] for race in merged["race_analyses"]], [1, 2])
-        self.assertEqual(len(merged["race_analyses"][0]["predictions"]), 2)
+        self.assertEqual(merged["race_analyses"][0]["race_type"], "Allowance")
+        self.assertEqual(
+            {prediction["horse_name"] for prediction in merged["race_analyses"][0]["predictions"]},
+            {"Alpha", "Bravo", "Charlie"},
+        )
 
-    def test_admin_prompt_and_context_include_expected_and_missing_races(self):
+    def test_admin_prompt_and_context_include_expected_and_missing_horses(self):
         request = app_module.AdminRaceCardRequest(
             race_date="2026-03-13",
             track_id="SA",
@@ -262,6 +310,8 @@ class RaceCardAdminTests(unittest.TestCase):
             request,
             expected_race_numbers=[1, 2, 3],
             missing_race_numbers=[3],
+            expected_horses_by_race={3: ["Gamma", "Delta"]},
+            missing_horses_by_race={3: ["Delta"]},
             official_card_url="https://example.com/official-card",
         )
         context = app_module._build_admin_structuring_context(
@@ -269,13 +319,19 @@ class RaceCardAdminTests(unittest.TestCase):
             "",
             expected_race_numbers=[1, 2, 3],
             missing_race_numbers=[3],
+            expected_horses_by_race={3: ["Gamma", "Delta"]},
+            missing_horses_by_race={3: ["Delta"]},
             official_card_url="https://example.com/official-card",
         )
 
         self.assertIn("Official card URL: https://example.com/official-card", prompt)
         self.assertIn("ONLY for these missing races: 3", prompt)
+        self.assertIn("Missing horses on retry: Race 3: Delta.", prompt)
+        self.assertIn("Never truncate to only the top 3-5 horses", prompt)
         self.assertEqual(context["expected_race_numbers"], [1, 2, 3])
         self.assertEqual(context["missing_race_numbers"], [3])
+        self.assertEqual(context["expected_horses_by_race"], {3: ["Gamma", "Delta"]})
+        self.assertEqual(context["missing_horses_by_race"], {3: ["Delta"]})
         self.assertEqual(context["official_card_url"], "https://example.com/official-card")
 
     def test_app_state_initialize_only_sets_up_lightweight_services(self):
@@ -327,6 +383,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
     def setUp(self):
         self.original_session_manager = app_module.app_state.session_manager
         self.original_openrouter_client = app_module.app_state.openrouter_client
+        self.original_fetch_expected_horses_by_race = app_module.fetch_equibase_expected_horses_by_race
         self.original_fetch_expected_race_numbers = app_module.fetch_equibase_expected_race_numbers
 
         self.session_manager = type("SessionManagerStub", (), {})()
@@ -345,15 +402,16 @@ class AdminRaceCardRouteTests(unittest.TestCase):
 
         app_module.app_state.session_manager = self.session_manager
         app_module.app_state.openrouter_client = self.openrouter_client
+        app_module.fetch_equibase_expected_horses_by_race = lambda *args, **kwargs: {}
+        app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: []
 
     def tearDown(self):
         app_module.app_state.session_manager = self.original_session_manager
         app_module.app_state.openrouter_client = self.original_openrouter_client
+        app_module.fetch_equibase_expected_horses_by_race = self.original_fetch_expected_horses_by_race
         app_module.fetch_equibase_expected_race_numbers = self.original_fetch_expected_race_numbers
 
     def test_create_admin_race_card_uses_web_plugin_in_web_search_mode(self):
-        app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: []
-
         request = app_module.AdminRaceCardRequest(
             race_date="2026-03-13",
             track_id="SA",
@@ -416,7 +474,44 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         self.assertIn("exactly these races: 1, 2", first_call_kwargs["prompt"])
         self.assertIn("ONLY for these missing races: 2", second_call_kwargs["prompt"])
         self.assertEqual(second_call_kwargs["context"]["missing_race_numbers"], [2])
-        self.assertTrue(any(args.args[3] == "admin_retry_missing_races" for args in self.session_manager.update_session_status.await_args_list))
+        self.assertTrue(any(args.args[3] == "admin_retry_incomplete_card" for args in self.session_manager.update_session_status.await_args_list))
+
+    def test_create_admin_race_card_retries_missing_horses_and_saves_merged_field(self):
+        app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: [1]
+        app_module.fetch_equibase_expected_horses_by_race = lambda *args, **kwargs: {
+            1: ["Alpha", "Bravo", "Charlie"]
+        }
+        self.openrouter_client.call_model = AsyncMock(side_effect=[
+            {
+                "content": '{"race_analyses":[{"race_number":1,"predictions":[{"horse_name":"Alpha","jockey":"A. Rider","trainer":"T. One","composite_rating":90}]}]}',
+                "annotations": [{"type": "url_citation", "url": "https://example.com/initial"}],
+            },
+            {
+                "content": '{"race_analyses":[{"race_number":1,"predictions":[{"horse_name":"Bravo","jockey":"B. Rider","trainer":"T. Two","composite_rating":84},{"horse_name":"Charlie","jockey":"C. Rider","trainer":"T. Three","composite_rating":82}]}]}',
+                "annotations": [{"type": "url_citation", "url": "https://example.com/retry"}],
+            },
+        ])
+
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="x-ai/grok-4.20-beta",
+            source_mode="web_search",
+        )
+
+        response = app_module.asyncio.run(app_module.create_admin_race_card(request))
+        saved_results = self.session_manager.save_session_results.await_args.args[1]
+        second_call_kwargs = self.openrouter_client.call_model.await_args_list[1].kwargs
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.openrouter_client.call_model.await_count, 2)
+        self.assertEqual(
+            {prediction["horse_name"] for prediction in saved_results["race_analyses"][0]["predictions"]},
+            {"Alpha", "Bravo", "Charlie"},
+        )
+        self.assertTrue(saved_results["race_analyses"][0]["field_complete"])
+        self.assertEqual(second_call_kwargs["context"]["missing_horses_by_race"], {1: ["Bravo", "Charlie"]})
+        self.assertIn("Missing horses on retry: Race 1: Bravo, Charlie.", second_call_kwargs["prompt"])
 
     def test_create_admin_race_card_rejects_incomplete_card_after_retry(self):
         app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: [1, 2, 3]
@@ -443,6 +538,37 @@ class AdminRaceCardRouteTests(unittest.TestCase):
 
         self.assertEqual(exc.exception.status_code, 422)
         self.assertIn("Missing races: 3", exc.exception.detail)
+        self.assertEqual(self.openrouter_client.call_model.await_count, 2)
+        self.session_manager.save_session_results.assert_not_awaited()
+
+    def test_create_admin_race_card_rejects_incomplete_field_after_retry(self):
+        app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: [1]
+        app_module.fetch_equibase_expected_horses_by_race = lambda *args, **kwargs: {
+            1: ["Alpha", "Bravo"]
+        }
+        self.openrouter_client.call_model = AsyncMock(side_effect=[
+            {
+                "content": '{"race_analyses":[{"race_number":1,"predictions":[{"horse_name":"Alpha","jockey":"A. Rider","trainer":"T. One","composite_rating":90}]}]}',
+                "annotations": [],
+            },
+            {
+                "content": '{"race_analyses":[{"race_number":1,"predictions":[{"horse_name":"Alpha","jockey":"A. Rider","trainer":"T. One","composite_rating":90}]}]}',
+                "annotations": [],
+            },
+        ])
+
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="x-ai/grok-4.20-beta",
+            source_mode="web_search",
+        )
+
+        with self.assertRaises(app_module.HTTPException) as exc:
+            app_module.asyncio.run(app_module.create_admin_race_card(request))
+
+        self.assertEqual(exc.exception.status_code, 422)
+        self.assertIn("Missing horses: Race 1: Bravo", exc.exception.detail)
         self.assertEqual(self.openrouter_client.call_model.await_count, 2)
         self.session_manager.save_session_results.assert_not_awaited()
 

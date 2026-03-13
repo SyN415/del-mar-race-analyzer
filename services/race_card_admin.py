@@ -69,24 +69,28 @@ def fetch_equibase_expected_race_numbers(
     timeout_seconds: float = 12.0,
 ) -> List[int]:
     """Fetch the official Equibase overview page and infer race numbers on the card."""
-    overview_url = build_equibase_card_overview_url(track_id, race_date)
-    req = urllib_request.Request(
-        overview_url,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-            )
-        },
-    )
-
-    try:
-        with urllib_request.urlopen(req, timeout=timeout_seconds) as response:
-            html = response.read().decode("utf-8", errors="ignore")
-    except Exception:
+    html = _fetch_equibase_card_overview_html(track_id, race_date, timeout_seconds=timeout_seconds)
+    if not html:
         return []
 
+    expected_horses_by_race = _parse_equibase_expected_horses_by_race(html)
+    if expected_horses_by_race:
+        return sorted(expected_horses_by_race)
+
     return _extract_race_numbers_from_text(html)
+
+
+def fetch_equibase_expected_horses_by_race(
+    track_id: str,
+    race_date: str,
+    timeout_seconds: float = 12.0,
+) -> Dict[int, List[str]]:
+    """Fetch the official Equibase overview page and infer horse fields by race."""
+    html = _fetch_equibase_card_overview_html(track_id, race_date, timeout_seconds=timeout_seconds)
+    if not html:
+        return {}
+
+    return _parse_equibase_expected_horses_by_race(html)
 
 
 def extract_structured_race_numbers(structured_card: Dict[str, Any]) -> List[int]:
@@ -108,6 +112,58 @@ def find_missing_race_numbers(structured_card: Dict[str, Any], expected_race_num
     return [race_number for race_number in expected_race_numbers if race_number not in seen_numbers]
 
 
+def extract_structured_horse_names_by_race(structured_card: Dict[str, Any]) -> Dict[int, List[str]]:
+    """Extract normalized horse names by race from a structured card payload."""
+    raw_races = structured_card.get("race_analyses") or structured_card.get("races") or []
+    horses_by_race: Dict[int, List[str]] = {}
+
+    for index, race in enumerate(raw_races, start=1):
+        race_number = _to_int(race.get("race_number") or race.get("number"), index)
+        raw_predictions = race.get("predictions") or race.get("entries") or race.get("horses") or []
+        normalized_names: List[str] = []
+        seen_names = set()
+        for prediction in raw_predictions:
+            horse_name = _normalize_horse_name(
+                prediction.get("horse_name") or prediction.get("name") or prediction.get("horse")
+            )
+            horse_key = _horse_name_key(horse_name)
+            if horse_key and horse_key not in seen_names:
+                normalized_names.append(horse_name)
+                seen_names.add(horse_key)
+        if normalized_names:
+            horses_by_race[race_number] = normalized_names
+
+    return horses_by_race
+
+
+def find_missing_horses_by_race(
+    structured_card: Dict[str, Any],
+    expected_horses_by_race: Dict[int, List[str]],
+) -> Dict[int, List[str]]:
+    """Return missing official horse names for each race in the structured payload."""
+    if not expected_horses_by_race:
+        return {}
+
+    seen_horses_by_race = extract_structured_horse_names_by_race(structured_card)
+    missing_horses_by_race: Dict[int, List[str]] = {}
+
+    for race_number, expected_horses in sorted(expected_horses_by_race.items()):
+        seen_keys = {
+            _horse_name_key(name)
+            for name in seen_horses_by_race.get(race_number, [])
+            if _horse_name_key(name)
+        }
+        missing_horses: List[str] = []
+        for horse_name in expected_horses:
+            horse_key = _horse_name_key(horse_name)
+            if horse_key and horse_key not in seen_keys:
+                missing_horses.append(horse_name)
+        if missing_horses:
+            missing_horses_by_race[race_number] = missing_horses
+
+    return missing_horses_by_race
+
+
 def merge_structured_race_cards(*structured_cards: Dict[str, Any]) -> Dict[str, Any]:
     """Merge multiple structured card payloads, keeping the strongest version of each race."""
     merged_card: Dict[str, Any] = {"card_overview": "", "race_analyses": []}
@@ -126,8 +182,10 @@ def merge_structured_race_cards(*structured_cards: Dict[str, Any]) -> Dict[str, 
         for index, race in enumerate(raw_races, start=1):
             race_number = _to_int(race.get("race_number") or race.get("number"), index)
             current = merged_races.get(race_number)
-            if current is None or _race_payload_quality(race) >= _race_payload_quality(current):
+            if current is None:
                 merged_races[race_number] = race
+            else:
+                merged_races[race_number] = _merge_race_payloads(current, race)
 
     merged_card["race_analyses"] = [merged_races[number] for number in sorted(merged_races)]
     return merged_card
@@ -139,6 +197,7 @@ def normalize_admin_results(
     race_date: str,
     track_id: str,
     llm_model: str,
+    expected_horses_by_race: Optional[Dict[int, List[str]]] = None,
     source_urls: Optional[List[str]] = None,
     admin_notes: str = "",
     workflow: str = "admin_openrouter",
@@ -149,20 +208,28 @@ def normalize_admin_results(
     race_analyses: List[Dict[str, Any]] = []
 
     for index, race in enumerate(raw_races, start=1):
+        race_number = _to_int(race.get("race_number") or race.get("number"), index)
         predictions = _normalize_predictions(
             race.get("predictions") or race.get("entries") or race.get("horses") or []
         )
         if not predictions:
             continue
 
+        expected_horses = (expected_horses_by_race or {}).get(race_number, [])
+        missing_horses = _find_missing_expected_horses(predictions, expected_horses)
+
         race_analysis = {
-            "race_number": _to_int(race.get("race_number") or race.get("number"), index),
+            "race_number": race_number,
             "race_type": race.get("race_type") or race.get("type") or "",
             "distance": race.get("distance") or "",
             "surface": race.get("surface") or "",
             "predictions": predictions,
             "top_pick": predictions[0],
             "exotic_suggestions": race.get("exotic_suggestions") if isinstance(race.get("exotic_suggestions"), dict) else {},
+            "field_size": len(predictions),
+            "expected_field_size": len(expected_horses) if expected_horses else len(predictions),
+            "field_complete": not missing_horses,
+            "missing_horses": missing_horses,
         }
         race_analyses.append(race_analysis)
 
@@ -242,7 +309,7 @@ def _normalize_predictions(raw_predictions: List[Dict[str, Any]]) -> List[Dict[s
         factors = _normalize_factors(prediction.get("factors"))
 
         normalized.append({
-            "horse_name": str(horse_name).strip(),
+            "horse_name": _normalize_horse_name(horse_name),
             "post_position": prediction.get("post_position") or prediction.get("post") or prediction.get("program_number"),
             "jockey": prediction.get("jockey") or "",
             "trainer": prediction.get("trainer") or "",
@@ -266,6 +333,50 @@ def _race_payload_quality(race: Dict[str, Any]) -> int:
     for key in ("race_type", "type", "distance", "surface", "exotic_suggestions"):
         if race.get(key):
             quality += 1
+    return quality
+
+
+def _merge_race_payloads(existing_race: Dict[str, Any], incoming_race: Dict[str, Any]) -> Dict[str, Any]:
+    merged_race = dict(existing_race if _race_payload_quality(existing_race) >= _race_payload_quality(incoming_race) else incoming_race)
+
+    for key in ("race_number", "number", "race_type", "type", "distance", "surface", "exotic_suggestions"):
+        if not merged_race.get(key):
+            merged_race[key] = existing_race.get(key) or incoming_race.get(key)
+
+    existing_predictions = existing_race.get("predictions") or existing_race.get("entries") or existing_race.get("horses") or []
+    incoming_predictions = incoming_race.get("predictions") or incoming_race.get("entries") or incoming_race.get("horses") or []
+    merged_predictions = _merge_prediction_lists(existing_predictions, incoming_predictions)
+    if merged_predictions:
+        merged_race["predictions"] = merged_predictions
+
+    return merged_race
+
+
+def _merge_prediction_lists(*prediction_lists: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    merged_predictions: Dict[str, Dict[str, Any]] = {}
+
+    for predictions in prediction_lists:
+        for prediction in predictions or []:
+            horse_name = prediction.get("horse_name") or prediction.get("name") or prediction.get("horse")
+            horse_key = _horse_name_key(horse_name)
+            if not horse_key:
+                continue
+            current = merged_predictions.get(horse_key)
+            if current is None or _prediction_payload_quality(prediction) >= _prediction_payload_quality(current):
+                merged_predictions[horse_key] = prediction
+
+    return list(merged_predictions.values())
+
+
+def _prediction_payload_quality(prediction: Dict[str, Any]) -> int:
+    quality = 0
+    for key in ("horse_name", "name", "horse", "post_position", "post", "program_number", "jockey", "trainer", "notes", "analysis"):
+        if prediction.get(key):
+            quality += 1
+    if prediction.get("composite_rating") is not None or prediction.get("rating") is not None or prediction.get("confidence_score") is not None:
+        quality += 2
+    if prediction.get("factors"):
+        quality += 2
     return quality
 
 
@@ -327,3 +438,79 @@ def _to_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _fetch_equibase_card_overview_html(track_id: str, race_date: str, timeout_seconds: float = 12.0) -> str:
+    overview_url = build_equibase_card_overview_url(track_id, race_date)
+    req = urllib_request.Request(
+        overview_url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            )
+        },
+    )
+
+    try:
+        with urllib_request.urlopen(req, timeout=timeout_seconds) as response:
+            return response.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+
+def _parse_equibase_expected_horses_by_race(html: str) -> Dict[int, List[str]]:
+    if not html:
+        return {}
+
+    try:
+        from race_entry_scraper import RaceEntryScraper
+
+        parsed_races = RaceEntryScraper().parse_card_overview(html)
+    except Exception:
+        parsed_races = []
+
+    expected_horses_by_race: Dict[int, List[str]] = {}
+    for race in parsed_races or []:
+        race_number = _to_int(race.get("race_number"), 0)
+        if race_number <= 0:
+            continue
+        horses: List[str] = []
+        seen_horses = set()
+        for horse in race.get("horses") or []:
+            horse_name = _normalize_horse_name(horse.get("name"))
+            horse_key = _horse_name_key(horse_name)
+            if horse_key and horse_key not in seen_horses:
+                horses.append(horse_name)
+                seen_horses.add(horse_key)
+        if horses:
+            expected_horses_by_race[race_number] = horses
+
+    return expected_horses_by_race
+
+
+def _find_missing_expected_horses(predictions: List[Dict[str, Any]], expected_horses: List[str]) -> List[str]:
+    if not expected_horses:
+        return []
+
+    predicted_keys = {
+        _horse_name_key(prediction.get("horse_name"))
+        for prediction in predictions
+        if _horse_name_key(prediction.get("horse_name"))
+    }
+    return [horse_name for horse_name in expected_horses if _horse_name_key(horse_name) not in predicted_keys]
+
+
+def _normalize_horse_name(value: Any) -> str:
+    if not value:
+        return ""
+
+    text = str(value).strip()
+    text = re.sub(r"\s*\([A-Z]{2,3}\)\s*$", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _horse_name_key(value: Any) -> str:
+    normalized = _normalize_horse_name(value).lower()
+    return re.sub(r"[^a-z0-9]+", "", normalized)

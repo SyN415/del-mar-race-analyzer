@@ -38,7 +38,9 @@ try:
     from services.race_card_admin import (
         build_equibase_card_overview_url,
         extract_json_object,
+        fetch_equibase_expected_horses_by_race,
         fetch_equibase_expected_race_numbers,
+        find_missing_horses_by_race,
         find_missing_race_numbers,
         merge_source_urls,
         merge_structured_race_cards,
@@ -50,7 +52,9 @@ except ImportError as e:
     OpenRouterClient = None
     build_equibase_card_overview_url = None
     extract_json_object = None
+    fetch_equibase_expected_horses_by_race = None
     fetch_equibase_expected_race_numbers = None
+    find_missing_horses_by_race = None
     find_missing_race_numbers = None
     merge_source_urls = None
     merge_structured_race_cards = None
@@ -330,7 +334,9 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
     if (
         not build_equibase_card_overview_url
         or not extract_json_object
+        or not fetch_equibase_expected_horses_by_race
         or not fetch_equibase_expected_race_numbers
+        or not find_missing_horses_by_race
         or not find_missing_race_numbers
         or not merge_source_urls
         or not merge_structured_race_cards
@@ -364,11 +370,18 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
             if is_web_search_mode
             else None
         )
+        expected_horses_by_race = (
+            fetch_equibase_expected_horses_by_race(request.track_id, request.race_date)
+            if is_web_search_mode
+            else {}
+        )
         expected_race_numbers = (
             fetch_equibase_expected_race_numbers(request.track_id, request.race_date)
             if is_web_search_mode
             else []
         )
+        if expected_horses_by_race and not expected_race_numbers:
+            expected_race_numbers = sorted(expected_horses_by_race)
         status_message = (
             "Auto-gathering and structuring race card with OpenRouter web search"
             if is_web_search_mode
@@ -384,12 +397,14 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
             prompt=_build_admin_structuring_prompt(
                 request,
                 expected_race_numbers=expected_race_numbers,
+                expected_horses_by_race=expected_horses_by_race,
                 official_card_url=official_card_url,
             ),
             context=_build_admin_structuring_context(
                 request,
                 source_text,
                 expected_race_numbers=expected_race_numbers,
+                expected_horses_by_race=expected_horses_by_race,
                 official_card_url=official_card_url,
             ),
             max_tokens=7000 if is_web_search_mode else 2500,
@@ -410,14 +425,25 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
             if expected_race_numbers
             else []
         )
+        missing_horses_by_race = _filter_missing_horses_by_race(
+            find_missing_horses_by_race(final_structured_payload, expected_horses_by_race),
+            excluded_race_numbers=missing_race_numbers,
+        )
 
-        if is_web_search_mode and missing_race_numbers:
+        if is_web_search_mode and (missing_race_numbers or missing_horses_by_race):
+            retry_details: List[str] = []
+            if missing_race_numbers:
+                retry_details.append(
+                    f"missing races: {', '.join(str(number) for number in missing_race_numbers)}"
+                )
+            if missing_horses_by_race:
+                retry_details.append(f"missing horses: {_format_missing_horses_by_race(missing_horses_by_race)}")
             await session_manager.update_session_status(
                 session_id,
                 "running",
                 60,
-                "admin_retry_missing_races",
-                f"Retrying missing races: {', '.join(str(number) for number in missing_race_numbers)}",
+                "admin_retry_incomplete_card",
+                f"Retrying incomplete card for {'; '.join(retry_details)}",
             )
 
             retry_response = await openrouter_client.call_model(
@@ -427,6 +453,8 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
                     request,
                     expected_race_numbers=expected_race_numbers,
                     missing_race_numbers=missing_race_numbers,
+                    expected_horses_by_race=expected_horses_by_race,
+                    missing_horses_by_race=missing_horses_by_race,
                     official_card_url=official_card_url,
                 ),
                 context=_build_admin_structuring_context(
@@ -434,6 +462,8 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
                     source_text,
                     expected_race_numbers=expected_race_numbers,
                     missing_race_numbers=missing_race_numbers,
+                    expected_horses_by_race=expected_horses_by_race,
+                    missing_horses_by_race=missing_horses_by_race,
                     official_card_url=official_card_url,
                 ),
                 max_tokens=4500,
@@ -448,16 +478,25 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
                 annotations=retry_response.get("annotations"),
             )
             missing_race_numbers = find_missing_race_numbers(final_structured_payload, expected_race_numbers)
+            missing_horses_by_race = _filter_missing_horses_by_race(
+                find_missing_horses_by_race(final_structured_payload, expected_horses_by_race),
+                excluded_race_numbers=missing_race_numbers,
+            )
 
         if expected_race_numbers and missing_race_numbers:
             missing_labels = ", ".join(str(number) for number in missing_race_numbers)
             raise ValueError(f"Model response was incomplete. Missing races: {missing_labels}")
+        if missing_horses_by_race:
+            raise ValueError(
+                f"Model response was incomplete. Missing horses: {_format_missing_horses_by_race(missing_horses_by_race)}"
+            )
 
         normalized_results = normalize_admin_results(
             final_structured_payload,
             race_date=request.race_date,
             track_id=request.track_id,
             llm_model=request.llm_model,
+            expected_horses_by_race=expected_horses_by_race,
             source_urls=merged_urls,
             admin_notes=request.admin_notes,
             workflow="admin_openrouter_web_search" if is_web_search_mode else "admin_openrouter_manual",
@@ -680,6 +719,8 @@ def _build_admin_structuring_prompt(
     *,
     expected_race_numbers: Optional[List[int]] = None,
     missing_race_numbers: Optional[List[int]] = None,
+    expected_horses_by_race: Optional[Dict[int, List[str]]] = None,
+    missing_horses_by_race: Optional[Dict[int, List[str]]] = None,
     official_card_url: Optional[str] = None,
 ) -> str:
     source_strategy = (
@@ -689,12 +730,25 @@ def _build_admin_structuring_prompt(
     )
     expected_race_numbers = expected_race_numbers or []
     missing_race_numbers = missing_race_numbers or []
+    expected_horses_by_race = expected_horses_by_race or {}
+    missing_horses_by_race = missing_horses_by_race or {}
 
-    if missing_race_numbers:
-        discovery_requirements = (
-            f"This is a retry. Return race analyses ONLY for these missing races: {', '.join(str(number) for number in missing_race_numbers)}. "
-            "Do not repeat races that were already covered."
-        )
+    if missing_race_numbers or missing_horses_by_race:
+        retry_requirements: List[str] = ["This is a retry."]
+        if missing_race_numbers:
+            retry_requirements.append(
+                f"Return race analyses ONLY for these missing races: {', '.join(str(number) for number in missing_race_numbers)}."
+            )
+        if missing_horses_by_race:
+            retry_requirements.append(
+                "For these incomplete races, return the FULL field in strongest-to-weakest order: "
+                f"{', '.join(str(number) for number in sorted(missing_horses_by_race))}."
+            )
+            retry_requirements.append(
+                f"Missing horses on retry: {_format_missing_horses_by_race(missing_horses_by_race)}."
+            )
+        retry_requirements.append("Do not repeat races that are already complete.")
+        discovery_requirements = " ".join(retry_requirements)
     elif expected_race_numbers:
         discovery_requirements = (
             f"The official card expects exactly these races: {', '.join(str(number) for number in expected_race_numbers)}. "
@@ -706,6 +760,7 @@ def _build_admin_structuring_prompt(
         discovery_requirements = "Include every race you can identify from the supplied material."
 
     official_url_line = f"Official card URL: {official_card_url}" if official_card_url else ""
+    official_field_summary = _format_expected_field_summary(expected_horses_by_race)
 
     return f"""
 You are structuring a horse racing card for internal display.
@@ -715,6 +770,7 @@ Race date: {request.race_date}
 Source mode: {request.source_mode}
 {source_strategy}
 {official_url_line}
+{official_field_summary}
 
 Return ONLY valid JSON with this shape:
 {{
@@ -750,11 +806,12 @@ Rules:
 - Do not wrap the JSON in markdown fences.
 - {discovery_requirements}
 - Prioritize covering every race on the card over exhaustive writeups for a single race.
-- If space is limited, include the strongest 3-5 horses for a race rather than omitting the race.
+- Return a ranked prediction for EVERY horse in every returned race. Never truncate to only the top 3-5 horses.
+- If official horse names are provided, include every listed horse exactly once in that race.
 - Order each race's predictions strongest to weakest.
 - Use only grounded details; leave uncertain text blank instead of inventing facts.
 - `composite_rating` must be numeric on a 0-100 scale.
-- If evidence is limited, still provide a cautious strongest-to-weakest ordering and keep notes concise about uncertainty.
+- If evidence is limited, still rank the full field strongest to weakest and keep notes concise about uncertainty.
 - Keep notes concise.
 """.strip()
 
@@ -765,6 +822,8 @@ def _build_admin_structuring_context(
     *,
     expected_race_numbers: Optional[List[int]] = None,
     missing_race_numbers: Optional[List[int]] = None,
+    expected_horses_by_race: Optional[Dict[int, List[str]]] = None,
+    missing_horses_by_race: Optional[Dict[int, List[str]]] = None,
     official_card_url: Optional[str] = None,
 ) -> Dict[str, object]:
     context: Dict[str, object] = {
@@ -779,11 +838,50 @@ def _build_admin_structuring_context(
         context["expected_race_numbers"] = expected_race_numbers
     if missing_race_numbers:
         context["missing_race_numbers"] = missing_race_numbers
+    if expected_horses_by_race:
+        context["expected_horses_by_race"] = expected_horses_by_race
+    if missing_horses_by_race:
+        context["missing_horses_by_race"] = missing_horses_by_race
     if official_card_url:
         context["official_card_url"] = official_card_url
     if source_text:
         context["source_text"] = source_text
     return context
+
+
+def _format_expected_field_summary(expected_horses_by_race: Dict[int, List[str]]) -> str:
+    if not expected_horses_by_race:
+        return ""
+
+    race_summaries = []
+    for race_number in sorted(expected_horses_by_race):
+        horse_names = expected_horses_by_race[race_number]
+        if horse_names:
+            race_summaries.append(f"Race {race_number} ({len(horse_names)}): {', '.join(horse_names)}")
+    if not race_summaries:
+        return ""
+    return "Official horse fields by race: " + " | ".join(race_summaries)
+
+
+def _filter_missing_horses_by_race(
+    missing_horses_by_race: Dict[int, List[str]],
+    *,
+    excluded_race_numbers: Optional[List[int]] = None,
+) -> Dict[int, List[str]]:
+    excluded = set(excluded_race_numbers or [])
+    return {
+        race_number: horse_names
+        for race_number, horse_names in sorted(missing_horses_by_race.items())
+        if horse_names and race_number not in excluded
+    }
+
+
+def _format_missing_horses_by_race(missing_horses_by_race: Dict[int, List[str]]) -> str:
+    return "; ".join(
+        f"Race {race_number}: {', '.join(horse_names)}"
+        for race_number, horse_names in sorted(missing_horses_by_race.items())
+        if horse_names
+    )
 
 @app.post("/api/validate")
 async def run_validation():
