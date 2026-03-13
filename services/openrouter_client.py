@@ -130,6 +130,30 @@ class OpenRouterClient:
         preferred = self.preferred_models.get(task_type, "x-ai/grok-4.20-beta")
         return preferred if preferred in self.MODELS else "x-ai/grok-4.20-beta"
 
+    def _calculate_timeout_seconds(
+        self,
+        *,
+        model_config: Optional[ModelConfig],
+        max_tokens: int,
+        plugins: Optional[List[Dict[str, Any]]] = None,
+        context_size_chars: int = 0,
+    ) -> int:
+        """Adapt timeout budget to heavier requests such as web-search card structuring."""
+        timeout_seconds = 45
+
+        if model_config:
+            timeout_seconds = max(timeout_seconds, int(model_config.avg_response_time * 12))
+
+        timeout_seconds += min(60, max(0, int(max_tokens / 150)))
+
+        if plugins:
+            timeout_seconds += 30
+
+        if context_size_chars > 0:
+            timeout_seconds += min(30, max(0, int(context_size_chars / 1500) * 5))
+
+        return min(180, max(45, timeout_seconds))
+
     async def call_model(self, model: str = None, prompt: str = "", context: Dict = None,
                         max_tokens: int = None, temperature: float = 0.7,
                         task_type: str = "general", tier: ModelTier = None,
@@ -213,21 +237,26 @@ class OpenRouterClient:
                     "temperature": temperature
                 }
 
+                context_str = ""
+                if context:
+                    context_str = json.dumps(context, indent=2)
+
                 if plugins:
                     payload["plugins"] = plugins
 
                 # Add context if provided
-                if context:
-                    context_str = json.dumps(context, indent=2)
+                if context_str:
                     payload["messages"][0]["content"] += f"\n\nContext data:\n{context_str}"
 
                 if not self.session:
                     self.session = aiohttp.ClientSession()
 
-                # Calculate timeout based on model performance
-                timeout_seconds = 30
-                if model_config:
-                    timeout_seconds = max(30, int(model_config.avg_response_time * 3))
+                timeout_seconds = self._calculate_timeout_seconds(
+                    model_config=model_config,
+                    max_tokens=max_tokens,
+                    plugins=plugins,
+                    context_size_chars=len(context_str),
+                )
 
                 async with self.session.post(
                     f"{self.base_url}/chat/completions",

@@ -212,6 +212,10 @@ MODEL_OPTIONS = [
 ]
 MODEL_LOOKUP = {model["id"]: model for model in MODEL_OPTIONS}
 DEFAULT_LLM_MODEL = "x-ai/grok-4.20-beta"
+DEFAULT_ADMIN_LLM_MODEL = "google/gemini-3.1-flash-lite-preview"
+ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS = 3500
+ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS = 2200
+ADMIN_MANUAL_MAX_TOKENS = 2500
 STATUS_BADGE_CLASSES = {
     "completed": "success",
     "running": "primary",
@@ -231,7 +235,7 @@ class AnalysisRequest(BaseModel):
 class AdminRaceCardRequest(BaseModel):
     race_date: str
     track_id: str = "DMR"
-    llm_model: str = DEFAULT_LLM_MODEL
+    llm_model: str = DEFAULT_ADMIN_LLM_MODEL
     source_mode: Literal["web_search", "manual"] = "web_search"
     source_text: str = ""
     source_urls: List[str] = Field(default_factory=list)
@@ -267,7 +271,7 @@ async def admin_page(request: Request):
         "request": request,
         "title": "Admin Race Card Workflow",
         "model_options": MODEL_OPTIONS,
-        "default_model": DEFAULT_LLM_MODEL,
+        "default_model": DEFAULT_ADMIN_LLM_MODEL,
         "available_tracks": [{"id": track_id, "name": track_name} for track_id, track_name in SUPPORTED_TRACKS.items()],
         "default_date": datetime.now().strftime("%Y-%m-%d"),
         "openrouter_configured": bool(app_state.ensure_openrouter_client() and app_state.openrouter_client.api_key),
@@ -441,7 +445,11 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
                 expected_horses_by_race=expected_horses_by_race,
                 official_card_url=official_card_url,
             ),
-            max_tokens=7000 if is_web_search_mode else 2500,
+            max_tokens=(
+                ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS
+                if is_web_search_mode
+                else ADMIN_MANUAL_MAX_TOKENS
+            ),
             temperature=0.2,
             plugins=[{"id": "web"}] if is_web_search_mode else None,
             return_metadata=True,
@@ -502,7 +510,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
                     missing_horses_by_race=missing_horses_by_race,
                     official_card_url=official_card_url,
                 ),
-                max_tokens=4500,
+                max_tokens=ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS,
                 temperature=0.2,
                 plugins=[{"id": "web"}],
                 return_metadata=True,

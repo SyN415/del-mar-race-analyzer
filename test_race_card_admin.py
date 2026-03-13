@@ -428,12 +428,18 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.openrouter_client.call_model.await_count, 1)
         self.assertEqual(call_kwargs["plugins"], [{"id": "web"}])
+        self.assertEqual(call_kwargs["max_tokens"], app_module.ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS)
         self.assertTrue(call_kwargs["return_metadata"])
         self.assertEqual(
             saved_results["source_urls"],
             ["https://example.com/hint", official_card_url, "https://example.com/search"],
         )
         self.assertEqual(saved_results["admin_metadata"]["workflow"], "admin_openrouter_web_search")
+
+    def test_admin_race_card_request_defaults_to_fast_admin_model(self):
+        request = app_module.AdminRaceCardRequest(race_date="2026-03-13")
+
+        self.assertEqual(request.llm_model, app_module.DEFAULT_ADMIN_LLM_MODEL)
 
     def test_create_admin_race_card_retries_missing_races_and_saves_merged_card(self):
         app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: [1, 2]
@@ -471,6 +477,8 @@ class AdminRaceCardRouteTests(unittest.TestCase):
                 "https://example.com/retry",
             ],
         )
+        self.assertEqual(first_call_kwargs["max_tokens"], app_module.ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS)
+        self.assertEqual(second_call_kwargs["max_tokens"], app_module.ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS)
         self.assertIn("exactly these races: 1, 2", first_call_kwargs["prompt"])
         self.assertIn("ONLY for these missing races: 2", second_call_kwargs["prompt"])
         self.assertEqual(second_call_kwargs["context"]["missing_race_numbers"], [2])
@@ -510,6 +518,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             {"Alpha", "Bravo", "Charlie"},
         )
         self.assertTrue(saved_results["race_analyses"][0]["field_complete"])
+        self.assertEqual(second_call_kwargs["max_tokens"], app_module.ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS)
         self.assertEqual(second_call_kwargs["context"]["missing_horses_by_race"], {1: ["Bravo", "Charlie"]})
         self.assertIn("Missing horses on retry: Race 1: Bravo, Charlie.", second_call_kwargs["prompt"])
 
