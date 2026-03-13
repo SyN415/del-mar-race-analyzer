@@ -132,7 +132,9 @@ class OpenRouterClient:
 
     async def call_model(self, model: str = None, prompt: str = "", context: Dict = None,
                         max_tokens: int = None, temperature: float = 0.7,
-                        task_type: str = "general", tier: ModelTier = None) -> str:
+                        task_type: str = "general", tier: ModelTier = None,
+                        plugins: Optional[List[Dict[str, Any]]] = None,
+                        return_metadata: bool = False) -> Union[str, Dict[str, Any]]:
         """
         Enhanced API call to OpenRouter model with intelligent model selection
 
@@ -144,20 +146,22 @@ class OpenRouterClient:
             temperature: Sampling temperature
             task_type: Type of task for optimal model selection
             tier: Preferred model tier
+            plugins: Optional OpenRouter plugins, such as [{"id": "web"}]
+            return_metadata: When True, return response content plus metadata
 
         Returns:
-            Model response text
+            Model response text or response metadata
         """
         if not self.api_key:
             logger.warning("OpenRouter API key not configured, returning fallback response")
-            return self._generate_fallback_response(prompt, context, task_type)
+            return self._build_fallback_result(prompt, context, task_type, model, tier, return_metadata)
 
         # Auto-select model if not specified
         if not model:
             model = self.get_optimal_model(task_type, tier)
 
         # Use model-specific defaults
-        model_config = self.MODELS.get(model)
+        model_config = self._get_model_config(model)
         if model_config and max_tokens is None:
             max_tokens = min(1000, model_config.max_tokens // 2)  # Conservative default
         elif max_tokens is None:
@@ -200,6 +204,9 @@ class OpenRouterClient:
                     "temperature": temperature
                 }
 
+                if plugins:
+                    payload["plugins"] = plugins
+
                 # Add context if provided
                 if context:
                     context_str = json.dumps(context, indent=2)
@@ -224,7 +231,8 @@ class OpenRouterClient:
 
                     if response.status == 200:
                         result = await response.json()
-                        response_text = result["choices"][0]["message"]["content"]
+                        parsed_response = self._parse_chat_completion_response(result, requested_model=model)
+                        response_text = parsed_response["content"]
 
                         # Track successful request
                         estimated_tokens = len(response_text.split()) * 1.3  # Rough estimate
@@ -232,6 +240,8 @@ class OpenRouterClient:
                         self.usage_tracker.record_request(int(estimated_tokens), estimated_cost, response_time, True)
 
                         logger.info(f"OpenRouter API call successful: {model} in {response_time:.2f}s")
+                        if return_metadata:
+                            return parsed_response
                         return response_text
 
                     elif response.status == 429:  # Rate limit
@@ -258,7 +268,7 @@ class OpenRouterClient:
                             await asyncio.sleep(delay)
                             continue
 
-                        return self._generate_fallback_response(prompt, context, task_type)
+                        return self._build_fallback_result(prompt, context, task_type, model, tier, return_metadata)
 
             except asyncio.TimeoutError:
                 logger.error(f"OpenRouter API timeout on attempt {attempt + 1}")
@@ -267,7 +277,7 @@ class OpenRouterClient:
                     await asyncio.sleep(delay)
                     continue
                 self.usage_tracker.record_request(0, 0, 0, False)
-                return self._generate_fallback_response(prompt, context, task_type)
+                return self._build_fallback_result(prompt, context, task_type, model, tier, return_metadata)
 
             except Exception as e:
                 logger.error(f"OpenRouter API call failed on attempt {attempt + 1}: {e}")
@@ -276,10 +286,84 @@ class OpenRouterClient:
                     await asyncio.sleep(delay)
                     continue
                 self.usage_tracker.record_request(0, 0, 0, False)
-                return self._generate_fallback_response(prompt, context, task_type)
+                return self._build_fallback_result(prompt, context, task_type, model, tier, return_metadata)
 
         # All retries exhausted
-        return self._generate_fallback_response(prompt, context, task_type)
+        return self._build_fallback_result(prompt, context, task_type, model, tier, return_metadata)
+
+    def _get_model_config(self, model: Optional[str]) -> Optional[ModelConfig]:
+        """Resolve model config even when the requested model has a suffix."""
+        base_model = (model or "").split(":", 1)[0]
+        return self.MODELS.get(base_model)
+
+    def _build_fallback_result(
+        self,
+        prompt: str,
+        context: Dict,
+        task_type: str,
+        model: Optional[str],
+        tier: Optional[ModelTier],
+        return_metadata: bool,
+    ) -> Union[str, Dict[str, Any]]:
+        fallback_response = self._generate_fallback_response(prompt, context, task_type)
+        if not return_metadata:
+            return fallback_response
+
+        return {
+            "content": fallback_response,
+            "annotations": [],
+            "usage": {},
+            "model": model or self.get_optimal_model(task_type, tier),
+            "provider": None,
+            "raw_response": {},
+        }
+
+    def _parse_chat_completion_response(self, result: Dict[str, Any], requested_model: str) -> Dict[str, Any]:
+        """Normalize OpenRouter chat completion responses for metadata-aware callers."""
+        choices = result.get("choices") or []
+        first_choice = choices[0] if choices else {}
+        message = first_choice.get("message") if isinstance(first_choice, dict) else {}
+        message = message if isinstance(message, dict) else {}
+
+        return {
+            "content": self._extract_message_content(message),
+            "annotations": self._extract_message_annotations(message),
+            "usage": result.get("usage") or {},
+            "model": result.get("model") or requested_model,
+            "provider": result.get("provider"),
+            "raw_response": result,
+        }
+
+    def _extract_message_content(self, message: Dict[str, Any]) -> str:
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                parts.append(item.get("text") or item.get("content") or "")
+            return "\n".join(part for part in parts if part).strip()
+        return str(content or "")
+
+    def _extract_message_annotations(self, message: Dict[str, Any]) -> List[Dict[str, Any]]:
+        annotations: List[Dict[str, Any]] = []
+
+        message_annotations = message.get("annotations")
+        if isinstance(message_annotations, list):
+            annotations.extend(item for item in message_annotations if isinstance(item, dict))
+
+        content = message.get("content")
+        if isinstance(content, list):
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                item_annotations = item.get("annotations")
+                if isinstance(item_annotations, list):
+                    annotations.extend(annotation for annotation in item_annotations if isinstance(annotation, dict))
+
+        return annotations
     
     def _generate_fallback_response(self, prompt: str, context: Dict = None, task_type: str = "general") -> str:
         """Generate intelligent fallback response when API is unavailable"""

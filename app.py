@@ -14,7 +14,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 import uvicorn
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
@@ -38,7 +38,7 @@ try:
     from services.openrouter_client import OpenRouterClient
     from services.gradient_boosting_predictor import GradientBoostingPredictor
     from services.kelly_optimizer import KellyCriterionOptimizer
-    from services.race_card_admin import extract_json_object, normalize_admin_results
+    from services.race_card_admin import extract_json_object, merge_source_urls, normalize_admin_results
 except ImportError as e:
     print(f"Some services not available: {e}")
     SessionManager = None
@@ -47,6 +47,7 @@ except ImportError as e:
     GradientBoostingPredictor = None
     KellyCriterionOptimizer = None
     extract_json_object = None
+    merge_source_urls = None
     normalize_admin_results = None
 
 # Configure logging
@@ -183,7 +184,8 @@ class AdminRaceCardRequest(BaseModel):
     race_date: str
     track_id: str = "DMR"
     llm_model: str = DEFAULT_LLM_MODEL
-    source_text: str
+    source_mode: Literal["web_search", "manual"] = "web_search"
+    source_text: str = ""
     source_urls: List[str] = Field(default_factory=list)
     admin_notes: str = ""
 
@@ -271,12 +273,12 @@ async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundT
 
 @app.post("/api/admin/race-cards")
 async def create_admin_race_card(request: AdminRaceCardRequest):
-    """Create a saved race card from pasted source material using OpenRouter."""
+    """Create a saved race card from manual notes or OpenRouter web search."""
     if not app_state.session_manager:
         raise HTTPException(status_code=503, detail="Session manager is not available")
     if not app_state.openrouter_client or not app_state.openrouter_client.api_key:
         raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured on the server")
-    if not extract_json_object or not normalize_admin_results:
+    if not extract_json_object or not merge_source_urls or not normalize_admin_results:
         raise HTTPException(status_code=503, detail="Admin race-card helpers are unavailable")
 
     _validate_track_id(request.track_id)
@@ -287,9 +289,9 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD") from exc
 
-    source_text = request.source_text.strip()
-    if not source_text:
-        raise HTTPException(status_code=400, detail="Source text is required")
+    source_text = (request.source_text or "").strip()
+    if request.source_mode == "manual" and not source_text:
+        raise HTTPException(status_code=400, detail="Source text is required in manual mode")
 
     started_at = time.perf_counter()
     session_id = await app_state.session_manager.create_session(
@@ -299,33 +301,40 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
     )
 
     try:
+        is_web_search_mode = request.source_mode == "web_search"
+        status_message = (
+            "Auto-gathering and structuring race card with OpenRouter web search"
+            if is_web_search_mode
+            else "Structuring race card from manual source material"
+        )
         await app_state.session_manager.update_session_status(
-            session_id, "running", 25, "admin_structuring", "Structuring race card with OpenRouter"
+            session_id, "running", 25, "admin_structuring", status_message
         )
 
-        raw_response = await app_state.openrouter_client.call_model(
+        openrouter_response = await app_state.openrouter_client.call_model(
             model=request.llm_model,
             task_type="analysis",
             prompt=_build_admin_structuring_prompt(request),
-            context={
-                "race_date": request.race_date,
-                "track_id": request.track_id,
-                "track_name": SUPPORTED_TRACKS[request.track_id],
-                "source_urls": request.source_urls,
-                "admin_notes": request.admin_notes,
-                "source_text": source_text,
-            },
-            max_tokens=2500,
+            context=_build_admin_structuring_context(request, source_text),
+            max_tokens=4000 if is_web_search_mode else 2500,
             temperature=0.2,
+            plugins=[{"id": "web"}] if is_web_search_mode else None,
+            return_metadata=True,
         )
-        structured_payload = extract_json_object(raw_response)
+        response_text = openrouter_response.get("content", "")
+        structured_payload = extract_json_object(response_text)
+        merged_urls = merge_source_urls(
+            source_urls=request.source_urls,
+            annotations=openrouter_response.get("annotations"),
+        )
         normalized_results = normalize_admin_results(
             structured_payload,
             race_date=request.race_date,
             track_id=request.track_id,
             llm_model=request.llm_model,
-            source_urls=request.source_urls,
+            source_urls=merged_urls,
             admin_notes=request.admin_notes,
+            workflow="admin_openrouter_web_search" if is_web_search_mode else "admin_openrouter_manual",
             analysis_duration_seconds=time.perf_counter() - started_at,
         )
 
@@ -528,11 +537,24 @@ async def _load_dashboard_cards(limit: int = 8) -> List[Dict]:
 
 
 def _build_admin_structuring_prompt(request: AdminRaceCardRequest) -> str:
+    source_strategy = (
+        "Use web search before answering. Prefer official or high-confidence racing sources for the selected card, and cross-check fields when needed."
+        if request.source_mode == "web_search"
+        else "Use only the supplied source material. Do not rely on outside knowledge or browse the web."
+    )
+    discovery_requirements = (
+        "Include every race you can identify for the selected track and date, with race type, distance, surface, and each horse's jockey and trainer."
+        if request.source_mode == "web_search"
+        else "Include every race you can identify from the supplied material."
+    )
+
     return f"""
 You are structuring a horse racing card for internal display.
 
 Track: {SUPPORTED_TRACKS[request.track_id]} ({request.track_id})
 Race date: {request.race_date}
+Source mode: {request.source_mode}
+{source_strategy}
 
 Return ONLY valid JSON with this shape:
 {{
@@ -566,12 +588,27 @@ Return ONLY valid JSON with this shape:
 
 Rules:
 - Do not wrap the JSON in markdown fences.
-- Include every race you can identify from the provided source material.
+- {discovery_requirements}
 - Order each race's predictions strongest to weakest.
-- Use only grounded details from the supplied material; leave uncertain text blank instead of inventing facts.
+- Use only grounded details; leave uncertain text blank instead of inventing facts.
 - `composite_rating` must be numeric on a 0-100 scale.
+- If evidence is limited, still provide a cautious strongest-to-weakest ordering and keep notes concise about uncertainty.
 - Keep notes concise.
 """.strip()
+
+
+def _build_admin_structuring_context(request: AdminRaceCardRequest, source_text: str) -> Dict[str, object]:
+    context: Dict[str, object] = {
+        "race_date": request.race_date,
+        "track_id": request.track_id,
+        "track_name": SUPPORTED_TRACKS[request.track_id],
+        "source_mode": request.source_mode,
+        "source_urls": request.source_urls,
+        "admin_notes": request.admin_notes,
+    }
+    if source_text:
+        context["source_text"] = source_text
+    return context
 
 @app.post("/api/validate")
 async def run_validation():

@@ -35,6 +35,26 @@ def extract_json_object(response_text: str) -> Dict[str, Any]:
     raise ValueError("OpenRouter response did not contain a valid JSON object")
 
 
+def merge_source_urls(
+    source_urls: Optional[List[str]] = None,
+    annotations: Optional[List[Dict[str, Any]]] = None,
+) -> List[str]:
+    """Merge explicit source URLs with OpenRouter citation annotations."""
+    merged_urls: List[str] = []
+
+    for url in source_urls or []:
+        normalized = _normalize_source_url(url)
+        if normalized and normalized not in merged_urls:
+            merged_urls.append(normalized)
+
+    for annotation in annotations or []:
+        normalized = _normalize_source_url(_extract_annotation_url(annotation))
+        if normalized and normalized not in merged_urls:
+            merged_urls.append(normalized)
+
+    return merged_urls
+
+
 def normalize_admin_results(
     structured_card: Dict[str, Any],
     *,
@@ -43,6 +63,7 @@ def normalize_admin_results(
     llm_model: str,
     source_urls: Optional[List[str]] = None,
     admin_notes: str = "",
+    workflow: str = "admin_openrouter",
     analysis_duration_seconds: float = 0.0,
 ) -> Dict[str, Any]:
     """Normalize admin-created card data into the existing results contract."""
@@ -83,7 +104,7 @@ def normalize_admin_results(
         "card_overview": structured_card.get("card_overview") or structured_card.get("overview") or "",
         "source_urls": source_urls or [],
         "admin_metadata": {
-            "workflow": "admin_openrouter",
+            "workflow": workflow,
             "model_used": llm_model,
             "notes": admin_notes.strip(),
             "source_urls": source_urls or [],
@@ -170,6 +191,27 @@ def _normalize_factors(factors: Any) -> Optional[Dict[str, float]]:
         "workout_rating": round(_to_float(factors.get("workout_rating") or factors.get("workout")), 1),
     }
     return normalized if any(value > 0 for value in normalized.values()) else None
+
+
+def _extract_annotation_url(annotation: Any) -> str:
+    if not isinstance(annotation, dict):
+        return ""
+
+    citation = annotation.get("url_citation")
+    if isinstance(citation, dict):
+        return str(citation.get("url") or "").strip()
+
+    return str(annotation.get("url") or "").strip()
+
+
+def _normalize_source_url(value: Any) -> str:
+    if not value:
+        return ""
+
+    url = str(value).strip()
+    if not url or not re.match(r"https?://", url, re.IGNORECASE):
+        return ""
+    return url
 
 
 def _to_float(value: Any, default: float = 0.0) -> float:
