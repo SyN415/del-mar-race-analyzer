@@ -7,6 +7,7 @@ import json
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
+from urllib import request as urllib_request
 
 
 def extract_json_object(response_text: str) -> Dict[str, Any]:
@@ -55,6 +56,83 @@ def merge_source_urls(
     return merged_urls
 
 
+def build_equibase_card_overview_url(track_id: str, race_date: str, country: str = "USA") -> str:
+    """Build the official Equibase card overview URL for a track/date."""
+    date_obj = datetime.strptime(race_date, "%Y-%m-%d")
+    formatted_date = date_obj.strftime("%m%d%y")
+    return f"https://www.equibase.com/static/entry/{track_id.upper()}{formatted_date}{country}-EQB.html?SAP=viewe2"
+
+
+def fetch_equibase_expected_race_numbers(
+    track_id: str,
+    race_date: str,
+    timeout_seconds: float = 12.0,
+) -> List[int]:
+    """Fetch the official Equibase overview page and infer race numbers on the card."""
+    overview_url = build_equibase_card_overview_url(track_id, race_date)
+    req = urllib_request.Request(
+        overview_url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+            )
+        },
+    )
+
+    try:
+        with urllib_request.urlopen(req, timeout=timeout_seconds) as response:
+            html = response.read().decode("utf-8", errors="ignore")
+    except Exception:
+        return []
+
+    return _extract_race_numbers_from_text(html)
+
+
+def extract_structured_race_numbers(structured_card: Dict[str, Any]) -> List[int]:
+    """Extract normalized race numbers from a structured card payload."""
+    raw_races = structured_card.get("race_analyses") or structured_card.get("races") or []
+    race_numbers: List[int] = []
+
+    for index, race in enumerate(raw_races, start=1):
+        race_number = _to_int(race.get("race_number") or race.get("number"), index)
+        if race_number > 0:
+            race_numbers.append(race_number)
+
+    return sorted(set(race_numbers))
+
+
+def find_missing_race_numbers(structured_card: Dict[str, Any], expected_race_numbers: List[int]) -> List[int]:
+    """Return expected race numbers that are missing from the structured payload."""
+    seen_numbers = set(extract_structured_race_numbers(structured_card))
+    return [race_number for race_number in expected_race_numbers if race_number not in seen_numbers]
+
+
+def merge_structured_race_cards(*structured_cards: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge multiple structured card payloads, keeping the strongest version of each race."""
+    merged_card: Dict[str, Any] = {"card_overview": "", "race_analyses": []}
+    merged_races: Dict[int, Dict[str, Any]] = {}
+
+    for structured_card in structured_cards:
+        if not isinstance(structured_card, dict):
+            continue
+
+        if not merged_card["card_overview"]:
+            merged_card["card_overview"] = (
+                structured_card.get("card_overview") or structured_card.get("overview") or ""
+            )
+
+        raw_races = structured_card.get("race_analyses") or structured_card.get("races") or []
+        for index, race in enumerate(raw_races, start=1):
+            race_number = _to_int(race.get("race_number") or race.get("number"), index)
+            current = merged_races.get(race_number)
+            if current is None or _race_payload_quality(race) >= _race_payload_quality(current):
+                merged_races[race_number] = race
+
+    merged_card["race_analyses"] = [merged_races[number] for number in sorted(merged_races)]
+    return merged_card
+
+
 def normalize_admin_results(
     structured_card: Dict[str, Any],
     *,
@@ -87,6 +165,8 @@ def normalize_admin_results(
             "exotic_suggestions": race.get("exotic_suggestions") if isinstance(race.get("exotic_suggestions"), dict) else {},
         }
         race_analyses.append(race_analysis)
+
+    race_analyses.sort(key=lambda race: race.get("race_number") or 0)
 
     if not race_analyses:
         raise ValueError("No race analyses with predictions were found in the model response")
@@ -180,6 +260,15 @@ def _normalize_predictions(raw_predictions: List[Dict[str, Any]]) -> List[Dict[s
     return normalized
 
 
+def _race_payload_quality(race: Dict[str, Any]) -> int:
+    predictions = race.get("predictions") or race.get("entries") or race.get("horses") or []
+    quality = len(predictions) * 10
+    for key in ("race_type", "type", "distance", "surface", "exotic_suggestions"):
+        if race.get(key):
+            quality += 1
+    return quality
+
+
 def _normalize_factors(factors: Any) -> Optional[Dict[str, float]]:
     if not isinstance(factors, dict):
         return None
@@ -202,6 +291,18 @@ def _extract_annotation_url(annotation: Any) -> str:
         return str(citation.get("url") or "").strip()
 
     return str(annotation.get("url") or "").strip()
+
+
+def _extract_race_numbers_from_text(text: str) -> List[int]:
+    if not text:
+        return []
+
+    matches = {int(value) for value in re.findall(r"\bRace\s*#?\s*([0-9]{1,2})\b", text, flags=re.IGNORECASE)}
+    if not matches:
+        return []
+    if min(matches) == 1:
+        return list(range(1, max(matches) + 1))
+    return sorted(matches)
 
 
 def _normalize_source_url(value: Any) -> str:

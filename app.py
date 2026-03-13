@@ -35,13 +35,25 @@ from config.config_manager import ConfigManager
 try:
     from services.session_manager import SessionManager
     from services.openrouter_client import OpenRouterClient
-    from services.race_card_admin import extract_json_object, merge_source_urls, normalize_admin_results
+    from services.race_card_admin import (
+        build_equibase_card_overview_url,
+        extract_json_object,
+        fetch_equibase_expected_race_numbers,
+        find_missing_race_numbers,
+        merge_source_urls,
+        merge_structured_race_cards,
+        normalize_admin_results,
+    )
 except ImportError as e:
     print(f"Some services not available: {e}")
     SessionManager = None
     OpenRouterClient = None
+    build_equibase_card_overview_url = None
     extract_json_object = None
+    fetch_equibase_expected_race_numbers = None
+    find_missing_race_numbers = None
     merge_source_urls = None
+    merge_structured_race_cards = None
     normalize_admin_results = None
 
 # Configure logging
@@ -315,7 +327,15 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
         raise HTTPException(status_code=503, detail="Session manager is not available")
     if not openrouter_client or not openrouter_client.api_key:
         raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured on the server")
-    if not extract_json_object or not merge_source_urls or not normalize_admin_results:
+    if (
+        not build_equibase_card_overview_url
+        or not extract_json_object
+        or not fetch_equibase_expected_race_numbers
+        or not find_missing_race_numbers
+        or not merge_source_urls
+        or not merge_structured_race_cards
+        or not normalize_admin_results
+    ):
         raise HTTPException(status_code=503, detail="Admin race-card helpers are unavailable")
 
     _validate_track_id(request.track_id)
@@ -339,6 +359,16 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
 
     try:
         is_web_search_mode = request.source_mode == "web_search"
+        official_card_url = (
+            build_equibase_card_overview_url(request.track_id, request.race_date)
+            if is_web_search_mode
+            else None
+        )
+        expected_race_numbers = (
+            fetch_equibase_expected_race_numbers(request.track_id, request.race_date)
+            if is_web_search_mode
+            else []
+        )
         status_message = (
             "Auto-gathering and structuring race card with OpenRouter web search"
             if is_web_search_mode
@@ -351,9 +381,18 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
         openrouter_response = await openrouter_client.call_model(
             model=request.llm_model,
             task_type="analysis",
-            prompt=_build_admin_structuring_prompt(request),
-            context=_build_admin_structuring_context(request, source_text),
-            max_tokens=4000 if is_web_search_mode else 2500,
+            prompt=_build_admin_structuring_prompt(
+                request,
+                expected_race_numbers=expected_race_numbers,
+                official_card_url=official_card_url,
+            ),
+            context=_build_admin_structuring_context(
+                request,
+                source_text,
+                expected_race_numbers=expected_race_numbers,
+                official_card_url=official_card_url,
+            ),
+            max_tokens=7000 if is_web_search_mode else 2500,
             temperature=0.2,
             plugins=[{"id": "web"}] if is_web_search_mode else None,
             return_metadata=True,
@@ -361,11 +400,61 @@ async def create_admin_race_card(request: AdminRaceCardRequest):
         response_text = openrouter_response.get("content", "")
         structured_payload = extract_json_object(response_text)
         merged_urls = merge_source_urls(
-            source_urls=request.source_urls,
+            source_urls=request.source_urls + ([official_card_url] if official_card_url else []),
             annotations=openrouter_response.get("annotations"),
         )
+
+        final_structured_payload = structured_payload
+        missing_race_numbers = (
+            find_missing_race_numbers(final_structured_payload, expected_race_numbers)
+            if expected_race_numbers
+            else []
+        )
+
+        if is_web_search_mode and missing_race_numbers:
+            await session_manager.update_session_status(
+                session_id,
+                "running",
+                60,
+                "admin_retry_missing_races",
+                f"Retrying missing races: {', '.join(str(number) for number in missing_race_numbers)}",
+            )
+
+            retry_response = await openrouter_client.call_model(
+                model=request.llm_model,
+                task_type="analysis",
+                prompt=_build_admin_structuring_prompt(
+                    request,
+                    expected_race_numbers=expected_race_numbers,
+                    missing_race_numbers=missing_race_numbers,
+                    official_card_url=official_card_url,
+                ),
+                context=_build_admin_structuring_context(
+                    request,
+                    source_text,
+                    expected_race_numbers=expected_race_numbers,
+                    missing_race_numbers=missing_race_numbers,
+                    official_card_url=official_card_url,
+                ),
+                max_tokens=4500,
+                temperature=0.2,
+                plugins=[{"id": "web"}],
+                return_metadata=True,
+            )
+            retry_payload = extract_json_object(retry_response.get("content", ""))
+            final_structured_payload = merge_structured_race_cards(structured_payload, retry_payload)
+            merged_urls = merge_source_urls(
+                source_urls=merged_urls,
+                annotations=retry_response.get("annotations"),
+            )
+            missing_race_numbers = find_missing_race_numbers(final_structured_payload, expected_race_numbers)
+
+        if expected_race_numbers and missing_race_numbers:
+            missing_labels = ", ".join(str(number) for number in missing_race_numbers)
+            raise ValueError(f"Model response was incomplete. Missing races: {missing_labels}")
+
         normalized_results = normalize_admin_results(
-            structured_payload,
+            final_structured_payload,
             race_date=request.race_date,
             track_id=request.track_id,
             llm_model=request.llm_model,
@@ -586,17 +675,37 @@ async def _safe_load_dashboard_cards(limit: int = 8) -> List[Dict]:
     return []
 
 
-def _build_admin_structuring_prompt(request: AdminRaceCardRequest) -> str:
+def _build_admin_structuring_prompt(
+    request: AdminRaceCardRequest,
+    *,
+    expected_race_numbers: Optional[List[int]] = None,
+    missing_race_numbers: Optional[List[int]] = None,
+    official_card_url: Optional[str] = None,
+) -> str:
     source_strategy = (
         "Use web search before answering. Prefer official or high-confidence racing sources for the selected card, and cross-check fields when needed."
         if request.source_mode == "web_search"
         else "Use only the supplied source material. Do not rely on outside knowledge or browse the web."
     )
-    discovery_requirements = (
-        "Include every race you can identify for the selected track and date, with race type, distance, surface, and each horse's jockey and trainer."
-        if request.source_mode == "web_search"
-        else "Include every race you can identify from the supplied material."
-    )
+    expected_race_numbers = expected_race_numbers or []
+    missing_race_numbers = missing_race_numbers or []
+
+    if missing_race_numbers:
+        discovery_requirements = (
+            f"This is a retry. Return race analyses ONLY for these missing races: {', '.join(str(number) for number in missing_race_numbers)}. "
+            "Do not repeat races that were already covered."
+        )
+    elif expected_race_numbers:
+        discovery_requirements = (
+            f"The official card expects exactly these races: {', '.join(str(number) for number in expected_race_numbers)}. "
+            "Return every one of those races exactly once."
+        )
+    elif request.source_mode == "web_search":
+        discovery_requirements = "Include every race you can identify for the selected track and date."
+    else:
+        discovery_requirements = "Include every race you can identify from the supplied material."
+
+    official_url_line = f"Official card URL: {official_card_url}" if official_card_url else ""
 
     return f"""
 You are structuring a horse racing card for internal display.
@@ -605,6 +714,7 @@ Track: {SUPPORTED_TRACKS[request.track_id]} ({request.track_id})
 Race date: {request.race_date}
 Source mode: {request.source_mode}
 {source_strategy}
+{official_url_line}
 
 Return ONLY valid JSON with this shape:
 {{
@@ -639,6 +749,8 @@ Return ONLY valid JSON with this shape:
 Rules:
 - Do not wrap the JSON in markdown fences.
 - {discovery_requirements}
+- Prioritize covering every race on the card over exhaustive writeups for a single race.
+- If space is limited, include the strongest 3-5 horses for a race rather than omitting the race.
 - Order each race's predictions strongest to weakest.
 - Use only grounded details; leave uncertain text blank instead of inventing facts.
 - `composite_rating` must be numeric on a 0-100 scale.
@@ -647,7 +759,14 @@ Rules:
 """.strip()
 
 
-def _build_admin_structuring_context(request: AdminRaceCardRequest, source_text: str) -> Dict[str, object]:
+def _build_admin_structuring_context(
+    request: AdminRaceCardRequest,
+    source_text: str,
+    *,
+    expected_race_numbers: Optional[List[int]] = None,
+    missing_race_numbers: Optional[List[int]] = None,
+    official_card_url: Optional[str] = None,
+) -> Dict[str, object]:
     context: Dict[str, object] = {
         "race_date": request.race_date,
         "track_id": request.track_id,
@@ -656,6 +775,12 @@ def _build_admin_structuring_context(request: AdminRaceCardRequest, source_text:
         "source_urls": request.source_urls,
         "admin_notes": request.admin_notes,
     }
+    if expected_race_numbers:
+        context["expected_race_numbers"] = expected_race_numbers
+    if missing_race_numbers:
+        context["missing_race_numbers"] = missing_race_numbers
+    if official_card_url:
+        context["official_card_url"] = official_card_url
     if source_text:
         context["source_text"] = source_text
     return context
