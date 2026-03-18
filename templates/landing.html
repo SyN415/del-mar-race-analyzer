@@ -3,86 +3,88 @@
 {% block title %}{{ title }}{% endblock %}
 
 {% block content %}
-<div class="row g-4">
-    <div class="col-12">
-        <div class="card shadow-lg border-0">
-            <div class="card-body p-4 p-lg-5">
-                <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-4">
-                    <div>
-                        <h1 class="display-5 fw-bold mb-3">
-                            <i class="fas fa-horse-head me-2"></i>
-                            Race Card Dashboard
-                        </h1>
-                        <p class="lead mb-3">
-                            Public view of the latest structured Del Mar and Santa Anita race cards.
-                        </p>
-                        <div class="d-flex gap-3 flex-wrap text-muted small">
-                            <span><i class="fas fa-layer-group me-1"></i>{{ card_count }} recent cards</span>
-                            <span><i class="fas fa-circle-check me-1"></i>{{ completed_count }} ready to review</span>
-                            <span>
-                                <i class="fas fa-robot me-1"></i>
-                                OpenRouter {{ 'configured' if openrouter_configured else 'not configured' }}
-                            </span>
-                        </div>
-                    </div>
-                    <div class="d-flex gap-2 flex-wrap">
-                        <a href="/admin" class="btn btn-primary btn-lg">
-                            <i class="fas fa-user-shield me-2"></i>Open Admin Workflow
-                        </a>
-                        <a href="/health" class="btn btn-outline-light btn-lg">
-                            <i class="fas fa-heartbeat me-2"></i>System Status
-                        </a>
-                    </div>
-                </div>
-            </div>
+<!-- Hero -->
+<section class="hero-section text-center px-3">
+    <div class="mx-auto" style="max-width: 720px;">
+        <div class="d-inline-block mb-3">
+            <span class="badge badge-pill-glow">AI-Powered Race Analysis</span>
+        </div>
+        <h1 class="display-4 fw-800 mb-3">Smarter race cards,<br>built in seconds.</h1>
+        <p class="lead text-secondary mb-4" style="max-width: 540px; margin: 0 auto;">
+            Del Mar Analyzer turns raw entries into structured, AI-enhanced race cards
+            with composite ratings, value picks, and confidence scores.
+        </p>
+        <div class="d-flex gap-2 justify-content-center flex-wrap">
+            {% if auth_enabled and user_role != 'admin' %}
+            <a href="/login" class="btn btn-primary btn-lg px-4">Get Started</a>
+            {% else %}
+            <a href="/admin" class="btn btn-primary btn-lg px-4">Open Workflow</a>
+            {% endif %}
+            <a href="/health" class="btn btn-outline-secondary btn-lg px-4">System Status</a>
         </div>
     </div>
+</section>
 
+<!-- Stats row -->
+<div class="row g-3 mb-4">
+    <div class="col-md-4">
+        <div class="stat-card text-center p-3">
+            <div class="stat-value">{{ card_count }}</div>
+            <div class="stat-label">Race Cards</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stat-card text-center p-3">
+            <div class="stat-value">{{ completed_count }}</div>
+            <div class="stat-label">Ready to Review</div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="stat-card text-center p-3">
+            <div class="stat-value {% if openrouter_configured %}text-success{% else %}text-warning{% endif %}">
+                {{ 'Active' if openrouter_configured else 'Offline' }}
+            </div>
+            <div class="stat-label">AI Engine</div>
+        </div>
+    </div>
+</div>
+
+<!-- Cards list -->
+<div class="row g-4">
     <div class="col-lg-8">
         <div class="d-flex justify-content-between align-items-center mb-3">
-            <h3 class="mb-0">Recent cards</h3>
-            <span class="text-muted small">Newest sessions first</span>
+            <h4 class="fw-bold mb-0">Recent Cards</h4>
+            <span class="text-muted small">Newest first</span>
         </div>
 
         {% if dashboard_cards %}
             {% for card in dashboard_cards %}
-            <div class="card shadow-sm mb-3 border-0">
+            <div class="card mb-3 card-hover">
                 <div class="card-body">
                     <div class="d-flex flex-column flex-md-row justify-content-between gap-3">
                         <div>
                             <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
-                                <h5 class="mb-0">{{ card.track_name }} · {{ card.race_date or 'Unknown date' }}</h5>
+                                <h5 class="mb-0 fw-semibold">{{ card.track_name }} · {{ card.race_date or 'Unknown date' }}</h5>
                                 <span class="badge bg-{{ card.status_class }}">{{ card.status|title }}</span>
                             </div>
-                            <div class="text-muted small mb-2">
+                            <div class="text-muted small mb-1">
                                 Session <code>{{ card.session_id }}</code>
                             </div>
                             <div class="small text-muted">
-                                <strong>Model:</strong> {{ card.model_label }}
-                                {% if card.generated_at %}
-                                · <strong>Saved:</strong> {{ card.generated_at }}
-                                {% elif card.updated_at %}
-                                · <strong>Updated:</strong> {{ card.updated_at }}
-                                {% endif %}
+                                {{ card.model_label }}
+                                {% if card.generated_at %} · {{ card.generated_at }}{% elif card.updated_at %} · {{ card.updated_at }}{% endif %}
                             </div>
                         </div>
-                        <div class="text-md-end">
+                        <div class="text-md-end d-flex flex-column align-items-md-end gap-1">
                             {% if card.status == 'completed' %}
-                            <div class="fw-semibold">{{ card.total_races }} races · {{ card.total_horses }} horses</div>
+                            <span class="fw-semibold small">{{ card.total_races }} races · {{ card.total_horses }} horses</span>
                             {% if card.best_bet %}
-                            <div class="small text-success mb-2">
-                                Top pick: <strong>{{ card.best_bet.horse_name }}</strong>
-                                (Race {{ card.best_bet.race_number }})
-                            </div>
+                            <span class="small text-success">Top: {{ card.best_bet.horse_name }} (R{{ card.best_bet.race_number }})</span>
                             {% endif %}
-                            <a href="/results/{{ card.session_id }}" class="btn btn-primary btn-sm">
-                                <i class="fas fa-chart-bar me-1"></i>View card
-                            </a>
+                            <a href="/results/{{ card.session_id }}" class="btn btn-primary btn-sm mt-1">View Card</a>
                             {% else %}
-                            <div class="small text-muted mb-2">Progress: {{ card.progress or 0 }}%</div>
-                            <a href="{% if card.status in ['running', 'created', 'interrupted'] %}/progress/{{ card.session_id }}{% else %}/results/{{ card.session_id }}{% endif %}" class="btn btn-outline-primary btn-sm">
-                                <i class="fas fa-arrow-up-right-from-square me-1"></i>Open session
-                            </a>
+                            <span class="small text-muted">{{ card.progress or 0 }}% complete</span>
+                            <a href="{% if card.status in ['running', 'created', 'interrupted'] %}/progress/{{ card.session_id }}{% else %}/results/{{ card.session_id }}{% endif %}" class="btn btn-outline-primary btn-sm mt-1">Open</a>
                             {% endif %}
                         </div>
                     </div>
@@ -90,42 +92,37 @@
             </div>
             {% endfor %}
         {% else %}
-        <div class="card shadow-sm border-0">
-            <div class="card-body p-4 text-center">
-                <h4>No race cards yet</h4>
-                <p class="text-muted mb-3">
-                    Use the admin workflow to paste your source material and save the next card.
-                </p>
-                <a href="/admin" class="btn btn-primary">
-                    <i class="fas fa-user-shield me-2"></i>Go to admin
-                </a>
+        <div class="card text-center p-5">
+            <h5 class="fw-semibold mb-2">No race cards yet</h5>
+            <p class="text-muted small mb-3">Create your first card using the admin workflow.</p>
+            <div>
+                <a href="{% if auth_enabled and user_role != 'admin' %}/login{% else %}/admin{% endif %}" class="btn btn-primary">Create Card</a>
             </div>
         </div>
         {% endif %}
     </div>
 
     <div class="col-lg-4">
-        <div class="card shadow-sm border-0 mb-3">
+        <div class="card mb-3">
             <div class="card-body">
-                <h5><i class="fas fa-user-shield me-2"></i>Admin workflow</h5>
-                <p class="text-muted small mb-3">
-                    Paste raw notes, web-search findings, or copied race-card text into the private admin page.
-                </p>
-                <ul class="small text-muted mb-3">
-                    <li>Select one of your three approved OpenRouter models.</li>
-                    <li>Have AI normalize the card into the app's stored results shape.</li>
-                    <li>Publish it here for quick review.</li>
-                </ul>
-                <a href="/admin" class="btn btn-outline-primary w-100">Open admin</a>
+                <h6 class="fw-bold mb-2">How it works</h6>
+                <ol class="small text-muted mb-0 ps-3">
+                    <li class="mb-1">Select a track and date in the admin workflow.</li>
+                    <li class="mb-1">AI gathers and structures the full race card.</li>
+                    <li class="mb-1">Review composite ratings and value picks here.</li>
+                </ol>
             </div>
         </div>
 
-        <div class="card shadow-sm border-0">
+        <div class="card">
             <div class="card-body">
-                <h5><i class="fas fa-lightbulb me-2"></i>Current direction</h5>
-                <p class="text-muted small mb-0">
-                    The public site is now focused on displaying structured race cards, while the AI-assisted work stays in the admin flow.
-                </p>
+                <h6 class="fw-bold mb-2">Features</h6>
+                <ul class="small text-muted mb-0 list-unstyled">
+                    <li class="mb-1">✦ OpenRouter multi-model AI analysis</li>
+                    <li class="mb-1">✦ Composite confidence scoring</li>
+                    <li class="mb-1">✦ Automated web-search gathering</li>
+                    <li class="mb-1">✦ Value opportunity detection</li>
+                </ul>
             </div>
         </div>
     </div>

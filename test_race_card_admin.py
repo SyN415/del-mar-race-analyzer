@@ -3,110 +3,143 @@ import types
 import unittest
 from unittest.mock import AsyncMock
 
+_ORIGINAL_MODULES = {}
+
 def _install_app_import_stubs():
-    if "fastapi" not in sys.modules:
-        fastapi = types.ModuleType("fastapi")
+    def _remember(name: str):
+        if name not in _ORIGINAL_MODULES:
+            _ORIGINAL_MODULES[name] = sys.modules.get(name)
 
-        class HTTPException(Exception):
-            def __init__(self, status_code: int, detail: str):
-                super().__init__(detail)
-                self.status_code = status_code
-                self.detail = detail
+    _remember("fastapi")
+    fastapi = types.ModuleType("fastapi")
 
-        class FastAPI:
-            def __init__(self, *args, **kwargs):
-                pass
+    class HTTPException(Exception):
+        def __init__(self, status_code: int, detail: str):
+            super().__init__(detail)
+            self.status_code = status_code
+            self.detail = detail
 
-            def mount(self, *args, **kwargs):
-                return None
+    class FastAPI:
+        def __init__(self, *args, **kwargs):
+            pass
 
-            def get(self, *args, **kwargs):
-                return lambda func: func
+        def mount(self, *args, **kwargs):
+            return None
 
-            def post(self, *args, **kwargs):
-                return lambda func: func
+        def get(self, *args, **kwargs):
+            return lambda func: func
 
-            def on_event(self, *args, **kwargs):
-                return lambda func: func
+        def post(self, *args, **kwargs):
+            return lambda func: func
 
-        fastapi.FastAPI = FastAPI
-        fastapi.Request = object
-        fastapi.BackgroundTasks = object
-        fastapi.HTTPException = HTTPException
-        sys.modules["fastapi"] = fastapi
+        def on_event(self, *args, **kwargs):
+            return lambda func: func
 
-        responses = types.ModuleType("fastapi.responses")
+    fastapi.FastAPI = FastAPI
+    fastapi.Request = object
+    fastapi.BackgroundTasks = object
+    fastapi.HTTPException = HTTPException
+    sys.modules["fastapi"] = fastapi
 
-        class JSONResponse:
-            def __init__(self, content=None, status_code=200):
-                self.content = content or {}
-                self.status_code = status_code
+    _remember("fastapi.responses")
+    responses = types.ModuleType("fastapi.responses")
 
-        responses.JSONResponse = JSONResponse
-        responses.HTMLResponse = object
-        sys.modules["fastapi.responses"] = responses
+    class JSONResponse:
+        def __init__(self, content=None, status_code=200):
+            self.content = content or {}
+            self.status_code = status_code
 
-        staticfiles = types.ModuleType("fastapi.staticfiles")
-        staticfiles.StaticFiles = type("StaticFiles", (), {"__init__": lambda self, *args, **kwargs: None})
-        sys.modules["fastapi.staticfiles"] = staticfiles
+    class RedirectResponse:
+        def __init__(self, url="/", status_code=302):
+            self.url = url
+            self.status_code = status_code
 
-        templating = types.ModuleType("fastapi.templating")
+        def set_cookie(self, *args, **kwargs):
+            pass
 
-        class Jinja2Templates:
-            def __init__(self, *args, **kwargs):
-                pass
+        def delete_cookie(self, *args, **kwargs):
+            pass
 
-            def TemplateResponse(self, *args, **kwargs):
-                return {"template": args[0] if args else None, "context": args[1] if len(args) > 1 else kwargs}
+    responses.JSONResponse = JSONResponse
+    responses.HTMLResponse = object
+    responses.RedirectResponse = RedirectResponse
+    sys.modules["fastapi.responses"] = responses
 
-        templating.Jinja2Templates = Jinja2Templates
-        sys.modules["fastapi.templating"] = templating
+    _remember("fastapi.staticfiles")
+    staticfiles = types.ModuleType("fastapi.staticfiles")
+    staticfiles.StaticFiles = type("StaticFiles", (), {"__init__": lambda self, *args, **kwargs: None})
+    sys.modules["fastapi.staticfiles"] = staticfiles
 
-    if "pydantic" not in sys.modules:
-        pydantic = types.ModuleType("pydantic")
+    _remember("fastapi.templating")
+    templating = types.ModuleType("fastapi.templating")
 
-        class _FieldDefault:
-            def __init__(self, default=None, default_factory=None):
-                self.default = default
-                self.default_factory = default_factory
+    class Jinja2Templates:
+        def __init__(self, *args, **kwargs):
+            pass
 
-        def Field(default=None, default_factory=None):
-            return _FieldDefault(default=default, default_factory=default_factory)
+        def TemplateResponse(self, *args, **kwargs):
+            return {"template": args[0] if args else None, "context": args[1] if len(args) > 1 else kwargs}
 
-        class BaseModel:
-            def __init__(self, **kwargs):
-                annotations = {}
-                for cls in reversed(self.__class__.mro()):
-                    annotations.update(getattr(cls, "__annotations__", {}))
+    templating.Jinja2Templates = Jinja2Templates
+    sys.modules["fastapi.templating"] = templating
 
-                for name in annotations:
-                    if name in kwargs:
-                        value = kwargs[name]
-                    elif hasattr(self.__class__, name):
-                        default = getattr(self.__class__, name)
-                        if isinstance(default, _FieldDefault):
-                            value = default.default_factory() if default.default_factory else default.default
-                        else:
-                            value = default
+    _remember("pydantic")
+    pydantic = types.ModuleType("pydantic")
+
+    class _FieldDefault:
+        def __init__(self, default=None, default_factory=None):
+            self.default = default
+            self.default_factory = default_factory
+
+    def Field(default=None, default_factory=None):
+        return _FieldDefault(default=default, default_factory=default_factory)
+
+    class BaseModel:
+        def __init__(self, **kwargs):
+            annotations = {}
+            for cls in reversed(self.__class__.mro()):
+                annotations.update(getattr(cls, "__annotations__", {}))
+
+            for name in annotations:
+                if name in kwargs:
+                    value = kwargs[name]
+                elif hasattr(self.__class__, name):
+                    default = getattr(self.__class__, name)
+                    if isinstance(default, _FieldDefault):
+                        value = default.default_factory() if default.default_factory else default.default
                     else:
-                        raise TypeError(f"Missing required field: {name}")
-                    setattr(self, name, value)
+                        value = default
+                else:
+                    raise TypeError(f"Missing required field: {name}")
+                setattr(self, name, value)
 
-        pydantic.BaseModel = BaseModel
-        pydantic.Field = Field
-        sys.modules["pydantic"] = pydantic
+    pydantic.BaseModel = BaseModel
+    pydantic.Field = Field
+    sys.modules["pydantic"] = pydantic
 
+    _remember("uvicorn")
     sys.modules.setdefault("uvicorn", types.ModuleType("uvicorn"))
 
+    _remember("race_prediction_engine")
     race_prediction_engine = types.ModuleType("race_prediction_engine")
     race_prediction_engine.RacePredictionEngine = type("RacePredictionEngine", (), {})
     sys.modules["race_prediction_engine"] = race_prediction_engine
 
+    _remember("config.config_manager")
     config_manager = types.ModuleType("config.config_manager")
 
     class ConfigManager:
         def load_config(self):
-            return types.SimpleNamespace(openrouter_api_key="test-key")
+            web = types.SimpleNamespace(admin_password=None, auth_secret=None)
+            ai = types.SimpleNamespace(
+                default_model="x-ai/grok-4.20-beta",
+                available_models=[
+                    "google/gemini-3.1-flash-lite-preview",
+                    "x-ai/grok-4.20-beta",
+                    "openai/gpt-5.4",
+                ],
+            )
+            return types.SimpleNamespace(openrouter_api_key="test-key", web=web, ai=ai)
 
     config_manager.ConfigManager = ConfigManager
     sys.modules["config.config_manager"] = config_manager
@@ -121,14 +154,25 @@ def _install_app_import_stubs():
         ("services.gradient_boosting_predictor", "GradientBoostingPredictor"),
         ("services.kelly_optimizer", "KellyCriterionOptimizer"),
     ]:
+        _remember(module_name)
         module = types.ModuleType(module_name)
         setattr(module, class_name, type(class_name, (), {}))
         sys.modules[module_name] = module
 
 
+def _restore_original_modules():
+    for module_name, original_module in _ORIGINAL_MODULES.items():
+        if original_module is None:
+            sys.modules.pop(module_name, None)
+        else:
+            sys.modules[module_name] = original_module
+
+
 _install_app_import_stubs()
 
 import app as app_module
+
+_restore_original_modules()
 
 from services.race_card_admin import (
     _parse_equibase_expected_horses_by_race,
@@ -440,7 +484,8 @@ class RaceCardAdminTests(unittest.TestCase):
         try:
             app_module._load_dashboard_cards = AsyncMock(side_effect=RuntimeError("dashboard unavailable"))
 
-            response = app_module.asyncio.run(app_module.landing_page(object()))
+            fake_request = types.SimpleNamespace(cookies={})
+            response = app_module.asyncio.run(app_module.landing_page(fake_request))
 
             self.assertEqual(response["template"], "landing.html")
             self.assertEqual(response["context"]["dashboard_cards"], [])
@@ -448,6 +493,18 @@ class RaceCardAdminTests(unittest.TestCase):
             self.assertEqual(response["context"]["completed_count"], 0)
         finally:
             app_module._load_dashboard_cards = original_loader
+
+    def test_admin_race_card_request_uses_configured_default_model(self):
+        original_default_model = app_module.app_state.config.ai.default_model
+
+        try:
+            app_module.app_state.config.ai.default_model = "openai/gpt-5.4"
+
+            request = app_module.AdminRaceCardRequest(race_date="2026-03-13")
+
+            self.assertEqual(request.llm_model, "openai/gpt-5.4")
+        finally:
+            app_module.app_state.config.ai.default_model = original_default_model
 
 
 class AdminRaceCardRouteTests(unittest.TestCase):
@@ -507,10 +564,55 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         )
         self.assertEqual(saved_results["admin_metadata"]["workflow"], "admin_openrouter_web_search")
 
-    def test_admin_race_card_request_defaults_to_fast_admin_model(self):
+    def test_create_admin_race_card_requires_admin_auth_when_enabled(self):
+        original_admin_password = app_module.app_state.config.web.admin_password
+
+        try:
+            app_module.app_state.config.web.admin_password = "super-secret"
+            request = app_module.AdminRaceCardRequest(
+                race_date="2026-03-13",
+                track_id="SA",
+                llm_model="x-ai/grok-4.20-beta",
+                source_mode="web_search",
+            )
+
+            with self.assertRaises(app_module.HTTPException) as exc:
+                app_module.asyncio.run(
+                    app_module.create_admin_race_card(request, types.SimpleNamespace(cookies={}))
+                )
+
+            self.assertEqual(exc.exception.status_code, 403)
+            self.session_manager.create_session.assert_not_awaited()
+            self.openrouter_client.call_model.assert_not_awaited()
+        finally:
+            app_module.app_state.config.web.admin_password = original_admin_password
+
+    def test_create_admin_race_card_allows_signed_admin_when_auth_enabled(self):
+        original_admin_password = app_module.app_state.config.web.admin_password
+
+        try:
+            app_module.app_state.config.web.admin_password = "super-secret"
+            request = app_module.AdminRaceCardRequest(
+                race_date="2026-03-13",
+                track_id="SA",
+                llm_model="x-ai/grok-4.20-beta",
+                source_mode="web_search",
+            )
+            admin_request = types.SimpleNamespace(
+                cookies={app_module.AUTH_COOKIE_NAME: app_module._sign_value("admin")}
+            )
+
+            response = app_module.asyncio.run(app_module.create_admin_race_card(request, admin_request))
+
+            self.assertEqual(response.status_code, 200)
+            self.session_manager.create_session.assert_awaited()
+        finally:
+            app_module.app_state.config.web.admin_password = original_admin_password
+
+    def test_admin_race_card_request_defaults_to_configured_model(self):
         request = app_module.AdminRaceCardRequest(race_date="2026-03-13")
 
-        self.assertEqual(request.llm_model, app_module.DEFAULT_ADMIN_LLM_MODEL)
+        self.assertEqual(request.llm_model, app_module.app_state.config.ai.default_model)
 
     def test_create_admin_race_card_retries_missing_races_and_saves_merged_card(self):
         app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: [1, 2]

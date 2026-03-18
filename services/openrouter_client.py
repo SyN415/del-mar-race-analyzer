@@ -14,7 +14,6 @@ from dataclasses import dataclass
 from enum import Enum
 
 import aiohttp
-from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +92,8 @@ class OpenRouterClient:
             "max_delay": 30.0,
             "backoff_factor": 2.0
         }
+        self.allowed_models = self._resolve_allowed_models()
+        self.default_model = self._resolve_default_model()
 
         # Model selection preferences aligned with the admin workflow
         self.preferred_models = {
@@ -102,11 +103,35 @@ class OpenRouterClient:
             "general": "x-ai/grok-4.20-beta",
             "fallback": "google/gemini-3.1-flash-lite-preview",
         }
+        if self.default_model:
+            for task_type in ("scraping", "analysis", "betting", "general"):
+                self.preferred_models[task_type] = self.default_model
         
     def _get_api_key_from_env(self) -> Optional[str]:
         """Get API key from environment variables"""
         import os
-        return os.getenv('OPENROUTER_API_KEY')
+        return os.getenv('DELMAR_OPENROUTER_API_KEY') or os.getenv('OPENROUTER_API_KEY')
+
+    def _get_ai_config(self):
+        return getattr(self.config, 'ai', None)
+
+    def _resolve_allowed_models(self) -> List[str]:
+        ai_config = self._get_ai_config()
+        configured_models = getattr(ai_config, 'available_models', None)
+        candidates = configured_models if isinstance(configured_models, list) and configured_models else list(self.MODELS.keys())
+        allowed_models = [model for model in candidates if self._get_model_config(model)]
+        return allowed_models or list(self.MODELS.keys())
+
+    def _resolve_default_model(self) -> str:
+        ai_config = self._get_ai_config()
+        configured_default = getattr(ai_config, 'default_model', None)
+        if configured_default and self._is_model_allowed(configured_default):
+            return configured_default
+        return self.allowed_models[0]
+
+    def _is_model_allowed(self, model: Optional[str]) -> bool:
+        base_model = (model or "").split(":", 1)[0]
+        return any(base_model == allowed.split(":", 1)[0] for allowed in self.allowed_models)
     
     async def __aenter__(self):
         """Async context manager entry"""
@@ -122,13 +147,18 @@ class OpenRouterClient:
         """Select optimal model based on task type and requirements"""
         if tier:
             # Filter models by tier
-            tier_models = [name for name, config in self.MODELS.items() if config.tier == tier]
+            tier_models = [
+                name for name in self.allowed_models
+                if (config := self._get_model_config(name)) and config.tier == tier
+            ]
             if tier_models:
                 return max(tier_models, key=lambda m: self.MODELS[m].reliability_score)
 
         # Use task-specific preferences
         preferred = self.preferred_models.get(task_type, "x-ai/grok-4.20-beta")
-        return preferred if preferred in self.MODELS else "x-ai/grok-4.20-beta"
+        if self._is_model_allowed(preferred):
+            return preferred
+        return self.default_model
 
     def _calculate_timeout_seconds(
         self,
@@ -192,6 +222,8 @@ class OpenRouterClient:
         # Auto-select model if not specified
         if not model:
             model = self.get_optimal_model(task_type, tier)
+        elif not self._is_model_allowed(model):
+            model = self.default_model
 
         # Use model-specific defaults
         model_config = self._get_model_config(model)
@@ -862,9 +894,9 @@ class OpenRouterClient:
 
         # Test different model tiers
         test_models = [
-            ("google/gemini-3.1-flash-lite-preview", "fast"),
-            ("x-ai/grok-4.20-beta", "balanced"),
-            ("openai/gpt-5.4", "premium")
+            (model, self._get_model_config(model).tier.value)
+            for model in self.allowed_models
+            if self._get_model_config(model)
         ]
 
         for model, tier in test_models:
@@ -909,7 +941,8 @@ class OpenRouterClient:
                 "avg_response_time": config.avg_response_time,
                 "reliability": config.reliability_score
             }
-            for name, config in self.MODELS.items()
+            for name in self.allowed_models
+            if (config := self._get_model_config(name))
         ]
 
     async def estimate_cost(self, prompt: str, model: str = None, max_tokens: int = 1000) -> Dict:
