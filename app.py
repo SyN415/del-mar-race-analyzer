@@ -8,8 +8,11 @@ with AI-powered enhancements and professional user interface.
 """
 
 import asyncio
+import hashlib
+import hmac
 import logging
 import os
+import secrets
 import sys
 import time
 from datetime import datetime
@@ -18,7 +21,7 @@ from typing import Dict, List, Literal, Optional
 
 import uvicorn
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -184,33 +187,122 @@ class AppState:
 # Global app state instance
 app_state = AppState()
 
+# ---------------------------------------------------------------------------
+# Auth helpers – lightweight HMAC-signed cookie auth (no DB needed)
+# ---------------------------------------------------------------------------
+AUTH_COOKIE_NAME = "delmar_auth"
+_AUTH_SECRET: str | None = None
+
+
+def _get_auth_secret() -> str:
+    """Return the auth secret, falling back to a per-process random value."""
+    global _AUTH_SECRET
+    if _AUTH_SECRET is None:
+        _AUTH_SECRET = (
+            app_state.config.web.auth_secret
+            or os.getenv("DELMAR_AUTH_SECRET")
+            or secrets.token_hex(32)
+        )
+    return _AUTH_SECRET
+
+
+def _get_admin_password() -> str | None:
+    return (
+        app_state.config.web.admin_password
+        or os.getenv("DELMAR_ADMIN_PASSWORD")
+    )
+
+
+def _sign_value(value: str) -> str:
+    secret = _get_auth_secret()
+    sig = hmac.new(secret.encode(), value.encode(), hashlib.sha256).hexdigest()
+    return f"{value}:{sig}"
+
+
+def _verify_signed(raw: str) -> str | None:
+    if ":" not in raw:
+        return None
+    value, sig = raw.rsplit(":", 1)
+    expected = hmac.new(
+        _get_auth_secret().encode(), value.encode(), hashlib.sha256
+    ).hexdigest()
+    if hmac.compare_digest(sig, expected):
+        return value
+    return None
+
+
+def _get_current_role(request: Request) -> str | None:
+    """Return 'admin' or 'user' from the signed auth cookie, or None."""
+    cookie = request.cookies.get(AUTH_COOKIE_NAME)
+    if not cookie:
+        return None
+    return _verify_signed(cookie)
+
+
+def _is_admin(request: Request) -> bool:
+    return _get_current_role(request) == "admin"
+
+
+def _auth_enabled() -> bool:
+    """Auth is active only when an admin password is configured."""
+    return bool(_get_admin_password())
+
+
+MODEL_CATALOG = {
+    "google/gemini-3.1-flash-lite-preview": {
+        "id": "google/gemini-3.1-flash-lite-preview",
+        "label": "Gemini 3.1 Flash Lite Preview",
+        "tier_label": "Cheap",
+        "description": "Fast, lower-cost option for first-pass structuring.",
+    },
+    "x-ai/grok-4.20-beta": {
+        "id": "x-ai/grok-4.20-beta",
+        "label": "Grok 4.20 Beta",
+        "tier_label": "Affordable",
+        "description": "Balanced option for race-card organization and ranking.",
+    },
+    "openai/gpt-5.4": {
+        "id": "openai/gpt-5.4",
+        "label": "GPT-5.4",
+        "tier_label": "Best",
+        "description": "Highest-quality option for the strongest reasoning pass.",
+    },
+}
+
+
+def _get_ai_config():
+    return getattr(app_state.config, "ai", None)
+
+
+def _get_configured_model_ids() -> List[str]:
+    ai_config = _get_ai_config()
+    configured_models = getattr(ai_config, "available_models", None)
+    if isinstance(configured_models, list) and configured_models:
+        valid_models = [model_id for model_id in configured_models if model_id in MODEL_CATALOG]
+        if valid_models:
+            return valid_models
+    return list(MODEL_CATALOG.keys())
+
+
+def _get_default_model(fallback: str) -> str:
+    ai_config = _get_ai_config()
+    configured_default = getattr(ai_config, "default_model", None)
+    available_models = _get_configured_model_ids()
+    if configured_default in available_models:
+        return configured_default
+    if fallback in available_models:
+        return fallback
+    return available_models[0]
+
+
 # Supported tracks
 SUPPORTED_TRACKS = {
     "DMR": "Del Mar",
     "SA": "Santa Anita"
 }
 
-MODEL_OPTIONS = [
-    {
-        "id": "google/gemini-3.1-flash-lite-preview",
-        "label": "Gemini 3.1 Flash Lite Preview",
-        "tier_label": "Cheap",
-        "description": "Fast, lower-cost option for first-pass structuring.",
-    },
-    {
-        "id": "x-ai/grok-4.20-beta",
-        "label": "Grok 4.20 Beta",
-        "tier_label": "Affordable",
-        "description": "Balanced option for race-card organization and ranking.",
-    },
-    {
-        "id": "openai/gpt-5.4",
-        "label": "GPT-5.4",
-        "tier_label": "Best",
-        "description": "Highest-quality option for the strongest reasoning pass.",
-    },
-]
-MODEL_LOOKUP = {model["id"]: model for model in MODEL_OPTIONS}
+MODEL_OPTIONS = [MODEL_CATALOG[model_id] for model_id in MODEL_CATALOG]
+MODEL_LOOKUP = MODEL_CATALOG
 DEFAULT_LLM_MODEL = "x-ai/grok-4.20-beta"
 DEFAULT_ADMIN_LLM_MODEL = "google/gemini-3.1-flash-lite-preview"
 ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS = 3500
@@ -228,14 +320,14 @@ STATUS_BADGE_CLASSES = {
 # Pydantic models for API requests
 class AnalysisRequest(BaseModel):
     date: str  # Format: YYYY-MM-DD
-    llm_model: str = DEFAULT_LLM_MODEL
+    llm_model: str = Field(default_factory=lambda: _get_default_model(DEFAULT_LLM_MODEL))
     track_id: str = "DMR"  # DMR (Del Mar) or SA (Santa Anita)
 
 
 class AdminRaceCardRequest(BaseModel):
     race_date: str
     track_id: str = "DMR"
-    llm_model: str = DEFAULT_ADMIN_LLM_MODEL
+    llm_model: str = Field(default_factory=lambda: _get_default_model(DEFAULT_ADMIN_LLM_MODEL))
     source_mode: Literal["web_search", "manual"] = "web_search"
     source_text: str = ""
     source_urls: List[str] = Field(default_factory=list)
@@ -254,27 +346,84 @@ class AnalysisStatus(BaseModel):
 async def landing_page(request: Request):
     """Public dashboard for recent race cards."""
     dashboard_cards = await _safe_load_dashboard_cards(limit=8)
+    role = _get_current_role(request)
     return templates.TemplateResponse("landing.html", {
         "request": request,
-        "title": "Race Card Dashboard",
+        "title": "Del Mar Race Analyzer",
         "dashboard_cards": dashboard_cards,
         "card_count": len(dashboard_cards),
         "completed_count": len([card for card in dashboard_cards if card["status"] == "completed"]),
         "openrouter_configured": bool(app_state.ensure_openrouter_client() and app_state.openrouter_client.api_key),
+        "auth_enabled": _auth_enabled(),
+        "user_role": role,
     })
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Login page for admin access."""
+    if not _auth_enabled():
+        return RedirectResponse("/admin", status_code=302)
+    if _is_admin(request):
+        return RedirectResponse("/admin", status_code=302)
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "title": "Sign In",
+        "error": None,
+    })
+
+
+@app.post("/login")
+async def login_submit(request: Request):
+    """Handle login form submission."""
+    form = await request.form()
+    password = form.get("password", "")
+    admin_pw = _get_admin_password()
+
+    if not admin_pw:
+        return RedirectResponse("/admin", status_code=302)
+
+    if hmac.compare_digest(password, admin_pw):
+        response = RedirectResponse("/admin", status_code=302)
+        response.set_cookie(
+            AUTH_COOKIE_NAME,
+            _sign_value("admin"),
+            httponly=True,
+            samesite="lax",
+            max_age=60 * 60 * 24,  # 24 hours
+        )
+        return response
+
+    return templates.TemplateResponse("login.html", {
+        "request": request,
+        "title": "Sign In",
+        "error": "Invalid password. Please try again.",
+    })
+
+
+@app.get("/logout")
+async def logout(request: Request):
+    """Clear auth cookie and redirect home."""
+    response = RedirectResponse("/", status_code=302)
+    response.delete_cookie(AUTH_COOKIE_NAME)
+    return response
 
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request):
     """Admin workflow for saving structured race cards with OpenRouter."""
+    if _auth_enabled() and not _is_admin(request):
+        return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse("admin.html", {
         "request": request,
         "title": "Admin Race Card Workflow",
-        "model_options": MODEL_OPTIONS,
-        "default_model": DEFAULT_ADMIN_LLM_MODEL,
+        "model_options": [MODEL_CATALOG[model_id] for model_id in _get_configured_model_ids()],
+        "default_model": _get_default_model(DEFAULT_ADMIN_LLM_MODEL),
         "available_tracks": [{"id": track_id, "name": track_name} for track_id, track_name in SUPPORTED_TRACKS.items()],
         "default_date": datetime.now().strftime("%Y-%m-%d"),
         "openrouter_configured": bool(app_state.ensure_openrouter_client() and app_state.openrouter_client.api_key),
+        "auth_enabled": _auth_enabled(),
+        "user_role": _get_current_role(request),
     })
 
 @app.post("/api/analyze")
@@ -326,8 +475,11 @@ async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundT
 
 
 @app.post("/api/admin/race-cards")
-async def create_admin_race_card(request: AdminRaceCardRequest):
+async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Request = None):
     """Create a saved race card from manual notes or OpenRouter web search."""
+    if _auth_enabled() and (http_request is None or not _is_admin(http_request)):
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+
     session_manager = await app_state.ensure_session_manager()
     openrouter_client = app_state.ensure_openrouter_client()
 
@@ -701,7 +853,7 @@ def _validate_track_id(track_id: str):
 
 
 def _validate_llm_model(llm_model: str):
-    if llm_model not in MODEL_LOOKUP:
+    if llm_model not in _get_configured_model_ids():
         raise HTTPException(
             status_code=400,
             detail="Invalid LLM model. Use one of the configured OpenRouter models.",

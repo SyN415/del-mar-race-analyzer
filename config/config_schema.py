@@ -42,6 +42,8 @@ class WebConfig(BaseModel):
     debug: bool = False
     secret_key: Optional[str] = None
     cors_origins: list = Field(default_factory=list)
+    admin_password: Optional[str] = None
+    auth_secret: Optional[str] = None
 
 class AIConfig(BaseModel):
     """AI/LLM configuration settings"""
