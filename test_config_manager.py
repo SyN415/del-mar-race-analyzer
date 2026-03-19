@@ -93,6 +93,25 @@ class ConfigManagerEnvTests(unittest.TestCase):
             ["x-ai/grok-4.20-beta", "openai/gpt-5.4"],
         )
 
+    def test_load_environment_config_reads_openrouter_model_aliases(self):
+        manager = ConfigManager()
+
+        with patch.dict(
+            os.environ,
+            {
+                "TRACKSTAR_OPENROUTER_DEFAULT_MODEL": "anthropic/claude-sonnet-4",
+                "TRACKSTAR_OPENROUTER_MODELS": "anthropic/claude-sonnet-4, openai/gpt-5.4",
+            },
+            clear=True,
+        ):
+            env_config = manager._load_environment_config()
+
+        self.assertEqual(env_config["ai"]["default_model"], "anthropic/claude-sonnet-4")
+        self.assertEqual(
+            env_config["ai"]["available_models"],
+            ["anthropic/claude-sonnet-4", "openai/gpt-5.4"],
+        )
+
     def test_load_environment_config_falls_back_to_legacy_app_env(self):
         manager = ConfigManager()
 

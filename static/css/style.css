@@ -353,14 +353,48 @@ main.container {
     font-size: 0.9rem;
     transition: border-color 0.2s, box-shadow 0.2s;
     background-color: var(--bg-tertiary);
-    color: var(--text-primary);
+    color: var(--text-primary) !important;
+    caret-color: var(--text-primary);
+    -webkit-text-fill-color: var(--text-primary);
+    color-scheme: dark;
 }
 
 .form-control:focus, .form-select:focus {
     border-color: var(--accent-primary);
     box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
     background-color: var(--bg-tertiary);
+    color: var(--text-primary) !important;
+    caret-color: var(--text-primary);
+    -webkit-text-fill-color: var(--text-primary);
     outline: none;
+}
+
+.form-control::placeholder,
+.form-select::placeholder {
+    color: var(--text-muted) !important;
+    opacity: 1;
+}
+
+.form-control:disabled,
+.form-control[readonly],
+.form-select:disabled {
+    color: var(--text-secondary) !important;
+    -webkit-text-fill-color: var(--text-secondary);
+    opacity: 1;
+}
+
+input.form-control:-webkit-autofill,
+input.form-control:-webkit-autofill:hover,
+input.form-control:-webkit-autofill:focus,
+textarea.form-control:-webkit-autofill,
+textarea.form-control:-webkit-autofill:hover,
+textarea.form-control:-webkit-autofill:focus,
+select.form-select:-webkit-autofill,
+select.form-select:-webkit-autofill:hover,
+select.form-select:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--text-primary);
+    box-shadow: 0 0 0 1000px var(--bg-tertiary) inset;
+    transition: background-color 9999s ease-in-out 0s;
 }
 
 .form-label { font-weight: 600; color: var(--text-primary); margin-bottom: 0.4rem; font-size: 0.85rem; }

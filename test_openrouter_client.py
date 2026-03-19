@@ -105,6 +105,23 @@ class OpenRouterClientModelSelectionTests(unittest.TestCase):
 
         self.assertEqual([model["name"] for model in available_models], ["google/gemini-3.1-flash-lite-preview"])
 
+    def test_get_available_models_includes_custom_configured_model_ids(self):
+        client = OpenRouterClient(
+            types.SimpleNamespace(
+                openrouter_api_key="test-key",
+                ai=types.SimpleNamespace(
+                    default_model="anthropic/claude-sonnet-4",
+                    available_models=["anthropic/claude-sonnet-4", "openai/gpt-5.4"],
+                ),
+            )
+        )
+
+        available_models = asyncio.run(client.get_available_models())
+
+        self.assertEqual([model["name"] for model in available_models], ["anthropic/claude-sonnet-4", "openai/gpt-5.4"])
+        self.assertEqual(available_models[0]["tier"], "custom")
+        self.assertIsNone(available_models[0]["max_tokens"])
+
 
 if __name__ == "__main__":
     unittest.main()

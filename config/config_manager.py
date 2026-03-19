@@ -114,8 +114,18 @@ class ConfigManager:
             env_config['web'] = web_config
 
         ai_config: Dict[str, Any] = {}
-        default_model = self._get_first_env_value('TRACKSTAR_AI_DEFAULT_MODEL', 'DELMAR_AI_DEFAULT_MODEL')
-        available_models = self._parse_env_list('TRACKSTAR_AI_AVAILABLE_MODELS', 'DELMAR_AI_AVAILABLE_MODELS')
+        default_model = self._get_first_env_value(
+            'TRACKSTAR_OPENROUTER_DEFAULT_MODEL',
+            'TRACKSTAR_AI_DEFAULT_MODEL',
+            'DELMAR_OPENROUTER_DEFAULT_MODEL',
+            'DELMAR_AI_DEFAULT_MODEL',
+        )
+        available_models = self._parse_env_list(
+            'TRACKSTAR_OPENROUTER_MODELS',
+            'TRACKSTAR_AI_AVAILABLE_MODELS',
+            'DELMAR_OPENROUTER_MODELS',
+            'DELMAR_AI_AVAILABLE_MODELS',
+        )
         if default_model:
             ai_config['default_model'] = default_model.strip()
         if available_models is not None:

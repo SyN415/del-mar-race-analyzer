@@ -506,6 +506,30 @@ class RaceCardAdminTests(unittest.TestCase):
         finally:
             app_module.app_state.config.ai.default_model = original_default_model
 
+    def test_configured_model_ids_preserve_custom_env_models(self):
+        original_models = list(app_module.app_state.config.ai.available_models)
+
+        try:
+            app_module.app_state.config.ai.available_models = [
+                "anthropic/claude-sonnet-4",
+                "openai/gpt-5.4",
+                "anthropic/claude-sonnet-4",
+            ]
+
+            self.assertEqual(
+                app_module._get_configured_model_ids(),
+                ["anthropic/claude-sonnet-4", "openai/gpt-5.4"],
+            )
+        finally:
+            app_module.app_state.config.ai.available_models = original_models
+
+    def test_build_model_option_creates_generic_metadata_for_custom_models(self):
+        option = app_module._build_model_option("anthropic/claude-sonnet-4")
+
+        self.assertEqual(option["id"], "anthropic/claude-sonnet-4")
+        self.assertEqual(option["tier_label"], "Custom")
+        self.assertIn("Configured via environment variable", option["description"])
+
     def test_auth_requires_both_admin_password_and_auth_secret(self):
         original_admin_password = app_module.app_state.config.web.admin_password
         original_auth_secret = app_module.app_state.config.web.auth_secret

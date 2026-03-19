@@ -123,7 +123,11 @@ class OpenRouterClient:
         ai_config = self._get_ai_config()
         configured_models = getattr(ai_config, 'available_models', None)
         candidates = configured_models if isinstance(configured_models, list) and configured_models else list(self.MODELS.keys())
-        allowed_models = [model for model in candidates if self._get_model_config(model)]
+        allowed_models: List[str] = []
+        for candidate in candidates:
+            model = str(candidate).strip()
+            if model and model not in allowed_models:
+                allowed_models.append(model)
         return allowed_models or list(self.MODELS.keys())
 
     def _resolve_default_model(self) -> str:
@@ -939,14 +943,14 @@ class OpenRouterClient:
         return [
             {
                 "name": name,
-                "tier": config.tier.value,
-                "max_tokens": config.max_tokens,
-                "cost_per_1k": config.cost_per_1k_tokens,
-                "avg_response_time": config.avg_response_time,
-                "reliability": config.reliability_score
+                "tier": config.tier.value if config else "custom",
+                "max_tokens": config.max_tokens if config else None,
+                "cost_per_1k": config.cost_per_1k_tokens if config else None,
+                "avg_response_time": config.avg_response_time if config else None,
+                "reliability": config.reliability_score if config else None
             }
             for name in self.allowed_models
-            if (config := self._get_model_config(name))
+            for config in [self._get_model_config(name)]
         ]
 
     async def estimate_cost(self, prompt: str, model: str = None, max_tokens: int = 1000) -> Dict:

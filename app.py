@@ -320,6 +320,25 @@ MODEL_CATALOG = {
 }
 
 
+def _humanize_model_id(model_id: str) -> str:
+    normalized = (model_id or "").split("/", 1)[-1].replace("-", " ").replace("_", " ").strip()
+    if not normalized:
+        return model_id or "Custom model"
+    return " ".join(part.capitalize() for part in normalized.split())
+
+
+def _build_model_option(model_id: str) -> Dict[str, str]:
+    catalog_entry = MODEL_CATALOG.get(model_id)
+    if catalog_entry:
+        return dict(catalog_entry)
+    return {
+        "id": model_id,
+        "label": _humanize_model_id(model_id),
+        "tier_label": "Custom",
+        "description": f"Configured via environment variable for OpenRouter routing ({model_id}).",
+    }
+
+
 def _get_ai_config():
     return getattr(app_state.config, "ai", None)
 
@@ -328,10 +347,18 @@ def _get_configured_model_ids() -> List[str]:
     ai_config = _get_ai_config()
     configured_models = getattr(ai_config, "available_models", None)
     if isinstance(configured_models, list) and configured_models:
-        valid_models = [model_id for model_id in configured_models if model_id in MODEL_CATALOG]
-        if valid_models:
-            return valid_models
+        normalized_models: List[str] = []
+        for configured_model in configured_models:
+            model_id = str(configured_model).strip()
+            if model_id and model_id not in normalized_models:
+                normalized_models.append(model_id)
+        if normalized_models:
+            return normalized_models
     return list(MODEL_CATALOG.keys())
+
+
+def _get_configured_model_options() -> List[Dict[str, str]]:
+    return [_build_model_option(model_id) for model_id in _get_configured_model_ids()]
 
 
 def _get_default_model(fallback: str) -> str:
@@ -466,7 +493,7 @@ async def admin_page(request: Request):
         _template_context(
             request,
             f"{BRAND_NAME} Admin Workflow",
-            model_options=[MODEL_CATALOG[model_id] for model_id in _get_configured_model_ids()],
+            model_options=_get_configured_model_options(),
             default_model=_get_default_model(DEFAULT_ADMIN_LLM_MODEL),
             available_tracks=[{"id": track_id, "name": track_name} for track_id, track_name in SUPPORTED_TRACKS.items()],
             default_date=datetime.now().strftime("%Y-%m-%d"),
@@ -939,7 +966,7 @@ async def _load_dashboard_cards(limit: int = 8) -> List[Dict]:
             "track_id": session.get("track_id"),
             "track_name": SUPPORTED_TRACKS.get(session.get("track_id"), session.get("track_id")),
             "llm_model": session.get("llm_model"),
-            "model_label": MODEL_LOOKUP.get(session.get("llm_model"), {}).get("label", session.get("llm_model")),
+            "model_label": _build_model_option(session.get("llm_model") or "").get("label", session.get("llm_model")),
             "status": session.get("status", "unknown"),
             "status_class": STATUS_BADGE_CLASSES.get(session.get("status"), "secondary"),
             "progress": session.get("progress", 0),
