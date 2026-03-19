@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: del-mar-race-analyzer
+    name: trackstarai
     env: python
     buildCommand: ./build.sh
     startCommand: ./start.sh
@@ -13,13 +13,13 @@ services:
         value: "info"
       - key: OPENROUTER_API_KEY
         sync: false
-      - key: DELMAR_AI_DEFAULT_MODEL
+      - key: TRACKSTAR_AI_DEFAULT_MODEL
         value: "x-ai/grok-4.20-beta"
-      - key: DELMAR_AI_AVAILABLE_MODELS
+      - key: TRACKSTAR_AI_AVAILABLE_MODELS
         value: "google/gemini-3.1-flash-lite-preview,x-ai/grok-4.20-beta,openai/gpt-5.4"
-      - key: DELMAR_ADMIN_PASSWORD
+      - key: TRACKSTAR_ADMIN_PASSWORD
         sync: false
-      - key: DELMAR_AUTH_SECRET
+      - key: TRACKSTAR_AUTH_SECRET
         sync: false
       - key: TWOCAPTCHA_API_KEY
         sync: false
@@ -28,6 +28,6 @@ services:
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: "/opt/render/project/.cache/ms-playwright"
     disk:
-      name: del-mar-data
+      name: trackstar-data
       mountPath: /opt/render/project/src/data
       sizeGB: 1

@@ -506,6 +506,40 @@ class RaceCardAdminTests(unittest.TestCase):
         finally:
             app_module.app_state.config.ai.default_model = original_default_model
 
+    def test_auth_requires_both_admin_password_and_auth_secret(self):
+        original_admin_password = app_module.app_state.config.web.admin_password
+        original_auth_secret = app_module.app_state.config.web.auth_secret
+
+        try:
+            app_module.app_state.config.web.admin_password = "super-secret"
+            app_module.app_state.config.web.auth_secret = None
+
+            self.assertFalse(app_module._auth_enabled())
+        finally:
+            app_module.app_state.config.web.admin_password = original_admin_password
+            app_module.app_state.config.web.auth_secret = original_auth_secret
+
+    def test_login_submit_shows_setup_required_when_auth_secret_is_missing(self):
+        original_admin_password = app_module.app_state.config.web.admin_password
+        original_auth_secret = app_module.app_state.config.web.auth_secret
+
+        try:
+            app_module.app_state.config.web.admin_password = "super-secret"
+            app_module.app_state.config.web.auth_secret = None
+
+            request = types.SimpleNamespace(
+                cookies={},
+                form=AsyncMock(return_value={"password": "super-secret"}),
+            )
+
+            response = app_module.asyncio.run(app_module.login_submit(request))
+
+            self.assertEqual(response["template"], "login.html")
+            self.assertIn("TRACKSTAR_AUTH_SECRET", response["context"]["configuration_hint"])
+        finally:
+            app_module.app_state.config.web.admin_password = original_admin_password
+            app_module.app_state.config.web.auth_secret = original_auth_secret
+
 
 class AdminRaceCardRouteTests(unittest.TestCase):
     def setUp(self):
@@ -513,6 +547,9 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         self.original_openrouter_client = app_module.app_state.openrouter_client
         self.original_fetch_expected_horses_by_race = app_module.fetch_equibase_expected_horses_by_race
         self.original_fetch_expected_race_numbers = app_module.fetch_equibase_expected_race_numbers
+        self.original_admin_password = app_module.app_state.config.web.admin_password
+        self.original_auth_secret = app_module.app_state.config.web.auth_secret
+        self.original_cached_auth_secret = app_module._AUTH_SECRET
 
         self.session_manager = type("SessionManagerStub", (), {})()
         self.session_manager.create_session = AsyncMock(return_value="session-123")
@@ -530,12 +567,21 @@ class AdminRaceCardRouteTests(unittest.TestCase):
 
         app_module.app_state.session_manager = self.session_manager
         app_module.app_state.openrouter_client = self.openrouter_client
+        app_module.app_state.config.web.admin_password = "super-secret"
+        app_module.app_state.config.web.auth_secret = "signing-secret"
+        app_module._AUTH_SECRET = None
+        self.admin_request = types.SimpleNamespace(
+            cookies={app_module.AUTH_COOKIE_NAME: app_module._sign_value("admin")}
+        )
         app_module.fetch_equibase_expected_horses_by_race = lambda *args, **kwargs: {}
         app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: []
 
     def tearDown(self):
         app_module.app_state.session_manager = self.original_session_manager
         app_module.app_state.openrouter_client = self.original_openrouter_client
+        app_module.app_state.config.web.admin_password = self.original_admin_password
+        app_module.app_state.config.web.auth_secret = self.original_auth_secret
+        app_module._AUTH_SECRET = self.original_cached_auth_secret
         app_module.fetch_equibase_expected_horses_by_race = self.original_fetch_expected_horses_by_race
         app_module.fetch_equibase_expected_race_numbers = self.original_fetch_expected_race_numbers
 
@@ -548,7 +594,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             source_urls=["https://example.com/hint"],
         )
 
-        response = app_module.asyncio.run(app_module.create_admin_race_card(request))
+        response = app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
         saved_results = self.session_manager.save_session_results.await_args.args[1]
         call_kwargs = self.openrouter_client.call_model.await_args.kwargs
         official_card_url = build_equibase_card_overview_url("SA", "2026-03-13")
@@ -566,9 +612,11 @@ class AdminRaceCardRouteTests(unittest.TestCase):
 
     def test_create_admin_race_card_requires_admin_auth_when_enabled(self):
         original_admin_password = app_module.app_state.config.web.admin_password
+        original_auth_secret = app_module.app_state.config.web.auth_secret
 
         try:
             app_module.app_state.config.web.admin_password = "super-secret"
+            app_module.app_state.config.web.auth_secret = "signing-secret"
             request = app_module.AdminRaceCardRequest(
                 race_date="2026-03-13",
                 track_id="SA",
@@ -586,12 +634,15 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             self.openrouter_client.call_model.assert_not_awaited()
         finally:
             app_module.app_state.config.web.admin_password = original_admin_password
+            app_module.app_state.config.web.auth_secret = original_auth_secret
 
     def test_create_admin_race_card_allows_signed_admin_when_auth_enabled(self):
         original_admin_password = app_module.app_state.config.web.admin_password
+        original_auth_secret = app_module.app_state.config.web.auth_secret
 
         try:
             app_module.app_state.config.web.admin_password = "super-secret"
+            app_module.app_state.config.web.auth_secret = "signing-secret"
             request = app_module.AdminRaceCardRequest(
                 race_date="2026-03-13",
                 track_id="SA",
@@ -608,6 +659,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             self.session_manager.create_session.assert_awaited()
         finally:
             app_module.app_state.config.web.admin_password = original_admin_password
+            app_module.app_state.config.web.auth_secret = original_auth_secret
 
     def test_admin_race_card_request_defaults_to_configured_model(self):
         request = app_module.AdminRaceCardRequest(race_date="2026-03-13")
@@ -634,7 +686,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             source_mode="web_search",
         )
 
-        response = app_module.asyncio.run(app_module.create_admin_race_card(request))
+        response = app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
         saved_results = self.session_manager.save_session_results.await_args.args[1]
         first_call_kwargs = self.openrouter_client.call_model.await_args_list[0].kwargs
         second_call_kwargs = self.openrouter_client.call_model.await_args_list[1].kwargs
@@ -680,7 +732,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             source_mode="web_search",
         )
 
-        response = app_module.asyncio.run(app_module.create_admin_race_card(request))
+        response = app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
         saved_results = self.session_manager.save_session_results.await_args.args[1]
         second_call_kwargs = self.openrouter_client.call_model.await_args_list[1].kwargs
 
@@ -716,7 +768,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         )
 
         with self.assertRaises(app_module.HTTPException) as exc:
-            app_module.asyncio.run(app_module.create_admin_race_card(request))
+            app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
 
         self.assertEqual(exc.exception.status_code, 422)
         self.assertIn("Missing races: 3", exc.exception.detail)
@@ -747,7 +799,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         )
 
         with self.assertRaises(app_module.HTTPException) as exc:
-            app_module.asyncio.run(app_module.create_admin_race_card(request))
+            app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
 
         self.assertEqual(exc.exception.status_code, 422)
         self.assertIn("Missing horses: Race 1: Bravo", exc.exception.detail)
@@ -774,7 +826,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         )
 
         with self.assertRaises(app_module.HTTPException) as exc:
-            app_module.asyncio.run(app_module.create_admin_race_card(request))
+            app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
 
         self.assertEqual(exc.exception.status_code, 503)
         self.assertIn("timed out", exc.exception.detail)
@@ -795,7 +847,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         )
 
         with self.assertRaises(app_module.HTTPException) as exc:
-            app_module.asyncio.run(app_module.create_admin_race_card(request))
+            app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
 
         self.assertEqual(exc.exception.status_code, 400)
         self.assertIn("manual mode", exc.exception.detail)

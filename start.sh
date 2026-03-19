@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Production startup script for Del Mar Race Analyzer
+# Production startup script for TrackStarAI
 set -e
 
-echo "🚀 Starting Del Mar Race Analyzer..."
+echo "🚀 Starting TrackStarAI..."
 
 # Set environment variables for production
 export ENVIRONMENT=${ENVIRONMENT:-production}

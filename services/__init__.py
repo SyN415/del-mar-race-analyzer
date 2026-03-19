@@ -1,4 +1,4 @@
-# Services package for Del Mar Race Analysis Application
+# Services package for TrackStarAI
 
 # Version tracking for prediction components
 __version__ = "1.0.0"

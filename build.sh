@@ -3,7 +3,7 @@
 # Build script for Render.com deployment
 set -e
 
-echo "🚀 Starting Del Mar Race Analyzer build..."
+echo "🚀 Starting TrackStarAI build..."
 
 # Upgrade pip
 echo "📦 Upgrading pip..."

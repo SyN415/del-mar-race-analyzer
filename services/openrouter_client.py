@@ -110,7 +110,11 @@ class OpenRouterClient:
     def _get_api_key_from_env(self) -> Optional[str]:
         """Get API key from environment variables"""
         import os
-        return os.getenv('DELMAR_OPENROUTER_API_KEY') or os.getenv('OPENROUTER_API_KEY')
+        return (
+            os.getenv('TRACKSTAR_OPENROUTER_API_KEY')
+            or os.getenv('DELMAR_OPENROUTER_API_KEY')
+            or os.getenv('OPENROUTER_API_KEY')
+        )
 
     def _get_ai_config(self):
         return getattr(self.config, 'ai', None)
@@ -240,8 +244,8 @@ class OpenRouterClient:
                 headers = {
                     "Authorization": f"Bearer {self.api_key}",
                     "Content-Type": "application/json",
-                    "HTTP-Referer": "https://del-mar-analyzer.local",
-                    "X-Title": "Del Mar Race Analyzer"
+                    "HTTP-Referer": "https://trackstarai.local",
+                    "X-Title": "TrackStarAI"
                 }
 
                 # Enhanced system prompt based on task type

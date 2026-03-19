@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Validation Framework for Del Mar Race Analyzer
+Validation Framework for TrackStarAI
 Implements automated backtesting, accuracy tracking, and performance monitoring
 """
 

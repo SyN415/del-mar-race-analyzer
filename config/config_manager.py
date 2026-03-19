@@ -70,6 +70,7 @@ class ConfigManager:
         return [item.strip() for item in value.split(",") if item.strip()]
 
     def _load_environment_config(self) -> Dict[str, Any]:
+        environment = self._get_first_env_value('ENVIRONMENT', 'APP_ENV') or 'development'
         env_config = {
             'api': {
                 'equibase_key': os.getenv('EQUIBASE_API_KEY'),
@@ -78,8 +79,8 @@ class ConfigManager:
             'database': {
                 'host': os.getenv('DB_HOST') or 'localhost',
                 'port': int(os.getenv('DB_PORT', 5432)),
-                'database': os.getenv('DB_NAME') or 'delmar_races',
-                'username': os.getenv('DB_USER') or 'delmar_user',
+                'database': os.getenv('DB_NAME') or 'trackstar_races',
+                'username': os.getenv('DB_USER') or 'trackstar_user',
                 'password': os.getenv('DB_PASSWORD'),
                 'supabase_url': os.getenv('SUPABASE_URL'),
                 'supabase_rest_url': os.getenv('SUPABASE_REST_URL'),
@@ -90,17 +91,21 @@ class ConfigManager:
             'scraping': {
                 'browser_timeout': int(os.getenv('BROWSER_TIMEOUT', 30)),
             },
-            'environment': os.getenv('APP_ENV', 'development'),
+            'environment': environment,
             'debug': os.getenv('DEBUG', '0') in ('1', 'true', 'True'),
         }
 
-        openrouter_api_key = self._get_first_env_value('DELMAR_OPENROUTER_API_KEY', 'OPENROUTER_API_KEY')
+        openrouter_api_key = self._get_first_env_value(
+            'TRACKSTAR_OPENROUTER_API_KEY',
+            'DELMAR_OPENROUTER_API_KEY',
+            'OPENROUTER_API_KEY',
+        )
         if openrouter_api_key:
             env_config['openrouter_api_key'] = openrouter_api_key
 
         web_config: Dict[str, Any] = {}
-        admin_password = self._get_first_env_value('DELMAR_ADMIN_PASSWORD')
-        auth_secret = self._get_first_env_value('DELMAR_AUTH_SECRET')
+        admin_password = self._get_first_env_value('TRACKSTAR_ADMIN_PASSWORD', 'DELMAR_ADMIN_PASSWORD')
+        auth_secret = self._get_first_env_value('TRACKSTAR_AUTH_SECRET', 'DELMAR_AUTH_SECRET')
         if admin_password is not None:
             web_config['admin_password'] = admin_password
         if auth_secret is not None:
@@ -109,8 +114,8 @@ class ConfigManager:
             env_config['web'] = web_config
 
         ai_config: Dict[str, Any] = {}
-        default_model = self._get_first_env_value('DELMAR_AI_DEFAULT_MODEL')
-        available_models = self._parse_env_list('DELMAR_AI_AVAILABLE_MODELS')
+        default_model = self._get_first_env_value('TRACKSTAR_AI_DEFAULT_MODEL', 'DELMAR_AI_DEFAULT_MODEL')
+        available_models = self._parse_env_list('TRACKSTAR_AI_AVAILABLE_MODELS', 'DELMAR_AI_AVAILABLE_MODELS')
         if default_model:
             ai_config['default_model'] = default_model.strip()
         if available_models is not None:

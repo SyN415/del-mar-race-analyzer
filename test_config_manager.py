@@ -27,6 +27,32 @@ from config.config_manager import ConfigManager
 
 
 class ConfigManagerEnvTests(unittest.TestCase):
+    def test_load_environment_config_reads_trackstar_ai_auth_and_environment_settings(self):
+        manager = ConfigManager()
+
+        with patch.dict(
+            os.environ,
+            {
+                "TRACKSTAR_AI_DEFAULT_MODEL": "openai/gpt-5.4",
+                "TRACKSTAR_AI_AVAILABLE_MODELS": "google/gemini-3.1-flash-lite-preview, openai/gpt-5.4",
+                "TRACKSTAR_ADMIN_PASSWORD": "secret-password",
+                "TRACKSTAR_AUTH_SECRET": "secret-signing-key",
+                "ENVIRONMENT": "production",
+                "APP_ENV": "development",
+            },
+            clear=True,
+        ):
+            env_config = manager._load_environment_config()
+
+        self.assertEqual(env_config["environment"], "production")
+        self.assertEqual(env_config["ai"]["default_model"], "openai/gpt-5.4")
+        self.assertEqual(
+            env_config["ai"]["available_models"],
+            ["google/gemini-3.1-flash-lite-preview", "openai/gpt-5.4"],
+        )
+        self.assertEqual(env_config["web"]["admin_password"], "secret-password")
+        self.assertEqual(env_config["web"]["auth_secret"], "secret-signing-key")
+
     def test_load_environment_config_reads_delmar_ai_and_auth_settings(self):
         manager = ConfigManager()
 
@@ -66,6 +92,20 @@ class ConfigManagerEnvTests(unittest.TestCase):
             env_config["ai"]["available_models"],
             ["x-ai/grok-4.20-beta", "openai/gpt-5.4"],
         )
+
+    def test_load_environment_config_falls_back_to_legacy_app_env(self):
+        manager = ConfigManager()
+
+        with patch.dict(
+            os.environ,
+            {
+                "APP_ENV": "production",
+            },
+            clear=True,
+        ):
+            env_config = manager._load_environment_config()
+
+        self.assertEqual(env_config["environment"], "production")
 
 
 if __name__ == "__main__":

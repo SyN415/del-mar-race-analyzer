@@ -3,23 +3,30 @@
 {% block title %}{{ title }}{% endblock %}
 
 {% block content %}
-<div class="login-page d-flex align-items-center justify-content-center" style="min-height: 70vh;">
-    <div class="login-card" style="max-width: 420px; width: 100%;">
-        <div class="card border-0 shadow-lg" style="background: rgba(21, 27, 46, 0.85); backdrop-filter: blur(24px); border: 1px solid rgba(255,255,255,0.06) !important;">
+<div class="login-shell d-flex align-items-center justify-content-center">
+    <div class="login-card-shell w-100">
+        <div class="card border-0 shadow-lg">
             <div class="card-body p-4 p-md-5">
                 <div class="text-center mb-4">
-                    <div class="login-icon mb-3">
-                        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                            <rect width="48" height="48" rx="12" fill="url(#loginGrad)"/>
-                            <path d="M16 24l6 6 10-12" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-                            <defs><linearGradient id="loginGrad" x1="0" y1="0" x2="48" y2="48"><stop stop-color="#3b82f6"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs>
-                        </svg>
-                    </div>
-                    <h2 class="fw-bold mb-1">Admin Access</h2>
-                    <p class="text-muted small mb-0">Enter your password to access the admin workflow.</p>
+                    <img src="/static/img/trackstar-mark.svg" alt="{{ brand_name }}" class="login-logo mb-3">
+                    <div class="badge badge-pill-glow mb-3">Admin access</div>
+                    <h2 class="fw-bold mb-1">{{ brand_name }} Sign In</h2>
+                    <p class="text-muted small mb-0">
+                        {% if configuration_hint %}
+                        This deployment needs admin secrets before sign-in can be enabled.
+                        {% else %}
+                        Enter your password to access the admin workflow.
+                        {% endif %}
+                    </p>
                 </div>
 
-                {% if error %}
+                {% if configuration_hint %}
+                <div class="alert alert-warning py-2 px-3 small mb-3" role="alert">
+                    <i class="fas fa-wrench me-1"></i>{{ configuration_hint }}
+                </div>
+                {% endif %}
+
+                {% if error and error != configuration_hint %}
                 <div class="alert alert-danger py-2 px-3 small mb-3" role="alert">
                     <i class="fas fa-exclamation-circle me-1"></i>{{ error }}
                 </div>
@@ -30,16 +37,16 @@
                         <label for="password" class="form-label small fw-semibold">Password</label>
                         <input type="password" class="form-control form-control-lg" id="password" name="password"
                                placeholder="Enter admin password" required autofocus
-                               style="background: rgba(26, 31, 53, 0.9); border-color: rgba(255,255,255,0.1);">
+                               {% if configuration_hint %}disabled{% endif %}>
                     </div>
-                    <button type="submit" class="btn btn-primary btn-lg w-100 fw-semibold">
-                        Sign In
+                    <button type="submit" class="btn btn-primary btn-lg w-100 fw-semibold" {% if configuration_hint %}disabled{% endif %}>
+                        {% if configuration_hint %}Setup Required{% else %}Sign In{% endif %}
                     </button>
                 </form>
 
                 <div class="text-center mt-4">
                     <a href="/" class="text-muted small text-decoration-none">
-                        <i class="fas fa-arrow-left me-1"></i>Back to dashboard
+                        <i class="fas fa-arrow-left me-1"></i>Back to platform
                     </a>
                 </div>
             </div>

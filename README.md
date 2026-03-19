@@ -1,11 +1,11 @@
-# 🏇 Del Mar Race Analyzer - Production Ready
+# ✨ TrackStarAI - Production Ready
 
 [![Deploy to Render](https://img.shields.io/badge/Deploy-Render-4A90E2)](https://render.com)
 ![Python Version](https://img.shields.io/badge/python-3.11-blue.svg)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/status-Production%20Ready-brightgreen)
 
-**AI-Powered Horse Racing Scraper, Analyzer & Prediction Platform**
+**AI-native horse racing scraper, analyzer, and curated card platform**
 
 Transform racing data into profitable insights with advanced machine learning algorithms, sophisticated web scraping, and professional betting recommendations.
 
@@ -50,7 +50,7 @@ Horse Race Analyzer/
 
 ### 📁 **Project Structure**
 ```bash
-del-mar-race-analyzer/
+trackstarai/
 ├── app.py                              # Main FastAPI application
 ├── race_prediction_engine.py          # Advanced prediction algorithms
 ├── scrapers/                          # Web scraping infrastructure
@@ -90,8 +90,8 @@ del-mar-race-analyzer/
 ### **Local Development**
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/del-mar-analyzer.git
-cd del-mar-analyzer
+git clone https://github.com/your-username/trackstarai.git
+cd trackstarai
 
 # Install dependencies
 pip install -r requirements.txt
@@ -107,8 +107,12 @@ python app.py
 ### **Production Deployment (Render.com)**
 1. **Click Deploy**: [Deploy to Render](https://render.com)
 2. **Configure Environment Variables**:
-   - `OPENROUTER_API_KEY`: Your OpenRouter API key
+   - `TRACKSTAR_OPENROUTER_API_KEY` or `OPENROUTER_API_KEY`: Your OpenRouter API key
    - `ENVIRONMENT`: production
+   - `TRACKSTAR_AI_DEFAULT_MODEL`: default OpenRouter model for the app/admin flow
+   - `TRACKSTAR_AI_AVAILABLE_MODELS`: comma-separated allow-list of selectable models
+   - `TRACKSTAR_ADMIN_PASSWORD`: enables admin sign-in
+   - `TRACKSTAR_AUTH_SECRET`: signs admin auth cookies
    - `LOG_LEVEL`: INFO
 3. **Deploy**: Application is live with full production features
 
@@ -117,13 +121,17 @@ python app.py
 ### **Environment Variables**
 ```bash
 # Required
-OPENROUTER_API_KEY=your_openrouter_api_key_here
+TRACKSTAR_OPENROUTER_API_KEY=your_openrouter_api_key_here
 TWOCAPTCHA_API_KEY=your_2captcha_api_key_here  # Required for SmartPick scraping
 
 # Optional
 ENVIRONMENT=production          # development/production
 LOG_LEVEL=INFO                  # DEBUG/INFO/WARNING/ERROR
-DATABASE_URL=sqlite:///./del_mar_analyzer.db
+TRACKSTAR_AI_DEFAULT_MODEL=x-ai/grok-4.20-beta
+TRACKSTAR_AI_AVAILABLE_MODELS=google/gemini-3.1-flash-lite-preview,x-ai/grok-4.20-beta,openai/gpt-5.4
+TRACKSTAR_ADMIN_PASSWORD=change-me
+TRACKSTAR_AUTH_SECRET=change-me-too
+DATABASE_URL=sqlite:///./trackstarai.db
 SCRAPER_HEADLESS=true           # false for debugging
 SCRAPER_TIMEOUT=30              # scraping timeout in seconds
 SECRET_KEY=your_secret_key      # for secure sessions

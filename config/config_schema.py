@@ -17,8 +17,8 @@ class DatabaseConfig(BaseModel):
     """Database configuration settings"""
     host: str = "localhost"
     port: int = 5432
-    database: str = "delmar_races"
-    username: str = "delmar_user"
+    database: str = "trackstar_races"
+    username: str = "trackstar_user"
     password: Optional[str] = None
     supabase_url: Optional[str] = None
     supabase_rest_url: Optional[str] = None
@@ -76,5 +76,5 @@ class ApplicationConfig(BaseModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
     class Config:
-        env_prefix = "DELMAR_"
+        env_prefix = "TRACKSTAR_"
         case_sensitive = False

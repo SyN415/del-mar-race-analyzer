@@ -3,29 +3,65 @@
 {% block title %}{{ title }}{% endblock %}
 
 {% block content %}
-<!-- Hero -->
-<section class="hero-section text-center px-3">
-    <div class="mx-auto" style="max-width: 720px;">
-        <div class="d-inline-block mb-3">
-            <span class="badge badge-pill-glow">AI-Powered Race Analysis</span>
+<section class="hero-section px-2 px-lg-0">
+    <div class="row align-items-center g-4 hero-grid">
+        <div class="col-lg-7">
+            <div class="hero-copy">
+                <span class="badge badge-pill-glow mb-3">Track intelligence engine</span>
+                <h1 class="display-4 fw-800 mb-3">From resilient scrape to curated betting card.</h1>
+                <p class="lead text-secondary mb-4">
+                    {{ brand_name }} turns deep field coverage, structured race-day data points, and AI-powered synthesis
+                    into premium race cards built to feel deliberate—not generic.
+                </p>
+                <div class="d-flex gap-2 flex-wrap mb-4">
+                    {% if user_role == 'admin' %}
+                    <a href="/admin" class="btn btn-primary btn-lg px-4">Open Admin Workflow</a>
+                    {% elif auth_enabled %}
+                    <a href="/login" class="btn btn-primary btn-lg px-4">Admin Sign In</a>
+                    {% else %}
+                    <a href="/login" class="btn btn-primary btn-lg px-4">Setup Required</a>
+                    {% endif %}
+                    <a href="/health" class="btn btn-outline-secondary btn-lg px-4">System Status</a>
+                </div>
+                <div class="d-flex gap-2 flex-wrap">
+                    <span class="feature-chip">Resilient web scraping</span>
+                    <span class="feature-chip">Structured race signals</span>
+                    <span class="feature-chip">AI-curated betting cards</span>
+                </div>
+            </div>
         </div>
-        <h1 class="display-4 fw-800 mb-3">Smarter race cards,<br>built in seconds.</h1>
-        <p class="lead text-secondary mb-4" style="max-width: 540px; margin: 0 auto;">
-            Del Mar Analyzer turns raw entries into structured, AI-enhanced race cards
-            with composite ratings, value picks, and confidence scores.
-        </p>
-        <div class="d-flex gap-2 justify-content-center flex-wrap">
-            {% if auth_enabled and user_role != 'admin' %}
-            <a href="/login" class="btn btn-primary btn-lg px-4">Get Started</a>
-            {% else %}
-            <a href="/admin" class="btn btn-primary btn-lg px-4">Open Workflow</a>
-            {% endif %}
-            <a href="/health" class="btn btn-outline-secondary btn-lg px-4">System Status</a>
+        <div class="col-lg-5">
+            <div class="hero-panel">
+                <div class="d-flex align-items-center gap-3 mb-4">
+                    <img src="/static/img/trackstar-mark.svg" alt="{{ brand_name }}" class="hero-logo">
+                    <div>
+                        <div class="section-eyebrow">Signal stack</div>
+                        <h3 class="h5 mb-0">Curated card pipeline</h3>
+                    </div>
+                </div>
+                <div class="hero-signal">
+                    <span>Scrape integrity</span>
+                    <strong>Multi-source capture</strong>
+                </div>
+                <div class="hero-signal">
+                    <span>Field coverage</span>
+                    <strong>Structured horse-by-race mapping</strong>
+                </div>
+                <div class="hero-signal">
+                    <span>AI reasoning</span>
+                    <strong>Curated rankings, value, and confidence</strong>
+                </div>
+                {% if setup_required %}
+                <div class="alert alert-warning mt-4 mb-0 small">
+                    Admin workflow is locked until <code>TRACKSTAR_ADMIN_PASSWORD</code> and
+                    <code>TRACKSTAR_AUTH_SECRET</code> are configured.
+                </div>
+                {% endif %}
+            </div>
         </div>
     </div>
 </section>
 
-<!-- Stats row -->
 <div class="row g-3 mb-4">
     <div class="col-md-4">
         <div class="stat-card text-center p-3">
@@ -42,18 +78,20 @@
     <div class="col-md-4">
         <div class="stat-card text-center p-3">
             <div class="stat-value {% if openrouter_configured %}text-success{% else %}text-warning{% endif %}">
-                {{ 'Active' if openrouter_configured else 'Offline' }}
+                {{ 'Active' if openrouter_configured else 'Needs Key' }}
             </div>
             <div class="stat-label">AI Engine</div>
         </div>
     </div>
 </div>
 
-<!-- Cards list -->
 <div class="row g-4">
     <div class="col-lg-8">
-        <div class="d-flex justify-content-between align-items-center mb-3">
-            <h4 class="fw-bold mb-0">Recent Cards</h4>
+        <div class="d-flex justify-content-between align-items-center mb-3 section-header">
+            <div>
+                <div class="section-eyebrow">Recent output</div>
+                <h4 class="fw-bold mb-0">Curated race cards</h4>
+            </div>
             <span class="text-muted small">Newest first</span>
         </div>
 
@@ -92,11 +130,19 @@
             </div>
             {% endfor %}
         {% else %}
-        <div class="card text-center p-5">
-            <h5 class="fw-semibold mb-2">No race cards yet</h5>
-            <p class="text-muted small mb-3">Create your first card using the admin workflow.</p>
+        <div class="card text-center p-5 empty-state-card">
+            <h5 class="fw-semibold mb-2">No curated cards yet</h5>
+            <p class="text-muted small mb-3">
+                {% if setup_required %}
+                Configure admin access first, then launch the workflow to generate your first TrackStarAI card.
+                {% else %}
+                Sign in to the admin workflow and create your first race card.
+                {% endif %}
+            </p>
             <div>
-                <a href="{% if auth_enabled and user_role != 'admin' %}/login{% else %}/admin{% endif %}" class="btn btn-primary">Create Card</a>
+                <a href="{% if user_role == 'admin' %}/admin{% else %}/login{% endif %}" class="btn btn-primary">
+                    {% if setup_required %}View Setup{% elif user_role == 'admin' %}Create Card{% else %}Sign In{% endif %}
+                </a>
             </div>
         </div>
         {% endif %}
@@ -105,23 +151,25 @@
     <div class="col-lg-4">
         <div class="card mb-3">
             <div class="card-body">
-                <h6 class="fw-bold mb-2">How it works</h6>
+                <div class="section-eyebrow">Workflow</div>
+                <h6 class="fw-bold mb-2">How {{ brand_name }} works</h6>
                 <ol class="small text-muted mb-0 ps-3">
-                    <li class="mb-1">Select a track and date in the admin workflow.</li>
-                    <li class="mb-1">AI gathers and structures the full race card.</li>
-                    <li class="mb-1">Review composite ratings and value picks here.</li>
+                    <li class="mb-1">Collect race-day inputs with resilient scraping and source hints.</li>
+                    <li class="mb-1">Structure the full field into race-by-race machine-readable data.</li>
+                    <li class="mb-1">Layer AI analysis into a curated card built for review.</li>
                 </ol>
             </div>
         </div>
 
         <div class="card">
             <div class="card-body">
-                <h6 class="fw-bold mb-2">Features</h6>
+                <div class="section-eyebrow">Why it feels premium</div>
+                <h6 class="fw-bold mb-2">Platform signals</h6>
                 <ul class="small text-muted mb-0 list-unstyled">
-                    <li class="mb-1">✦ OpenRouter multi-model AI analysis</li>
-                    <li class="mb-1">✦ Composite confidence scoring</li>
-                    <li class="mb-1">✦ Automated web-search gathering</li>
-                    <li class="mb-1">✦ Value opportunity detection</li>
+                    <li class="mb-1">✦ Multi-model OpenRouter analysis with configurable model policy</li>
+                    <li class="mb-1">✦ Field-completeness checks before a card is accepted</li>
+                    <li class="mb-1">✦ Structured source tracking across automated gathering and retry passes</li>
+                    <li class="mb-1">✦ Confidence, value, and ranking signals surfaced in one review flow</li>
                 </ul>
             </div>
         </div>

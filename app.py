@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-Del Mar Race Analysis Application
-Main FastAPI application entry point
+TrackStarAI horse racing intelligence application.
 
-Transforms existing horse racing analysis tools into a unified web application
-with AI-powered enhancements and professional user interface.
+Main FastAPI application entry point for the branded web experience,
+protected admin workflow, and AI-assisted race-card analysis pipeline.
 """
 
 import asyncio
@@ -84,10 +83,14 @@ except ImportError as e:
     from scrapers.smartpick_scraper import SmartPickRaceScraper
     logger.warning(f"⚠️  Using fallback SmartPick scraper (may not work with Angular pages): {e}")
 
+# Brand constants
+BRAND_NAME = "TrackStarAI"
+AUTH_COOKIE_NAME = "trackstar_auth"
+
 # Initialize FastAPI app
 app = FastAPI(
-    title="Del Mar Race Analyzer",
-    description="AI-Powered Multi-Track Horse Racing Scraper, Analyzer & Prediction Platform",
+    title=BRAND_NAME,
+    description="AI-native horse racing intelligence with resilient scraping, structured data, and curated race-card analysis.",
     version="1.0.0"
 )
 
@@ -190,7 +193,6 @@ app_state = AppState()
 # ---------------------------------------------------------------------------
 # Auth helpers – lightweight HMAC-signed cookie auth (no DB needed)
 # ---------------------------------------------------------------------------
-AUTH_COOKIE_NAME = "delmar_auth"
 _AUTH_SECRET: str | None = None
 
 
@@ -200,6 +202,7 @@ def _get_auth_secret() -> str:
     if _AUTH_SECRET is None:
         _AUTH_SECRET = (
             app_state.config.web.auth_secret
+            or os.getenv("TRACKSTAR_AUTH_SECRET")
             or os.getenv("DELMAR_AUTH_SECRET")
             or secrets.token_hex(32)
         )
@@ -209,7 +212,16 @@ def _get_auth_secret() -> str:
 def _get_admin_password() -> str | None:
     return (
         app_state.config.web.admin_password
+        or os.getenv("TRACKSTAR_ADMIN_PASSWORD")
         or os.getenv("DELMAR_ADMIN_PASSWORD")
+    )
+
+
+def _has_auth_secret() -> bool:
+    return bool(
+        app_state.config.web.auth_secret
+        or os.getenv("TRACKSTAR_AUTH_SECRET")
+        or os.getenv("DELMAR_AUTH_SECRET")
     )
 
 
@@ -244,8 +256,46 @@ def _is_admin(request: Request) -> bool:
 
 
 def _auth_enabled() -> bool:
-    """Auth is active only when an admin password is configured."""
-    return bool(_get_admin_password())
+    """Auth is active only when both the password and signing secret are configured."""
+    return bool(_get_admin_password() and _has_auth_secret())
+
+
+def _admin_access_message() -> str:
+    return (
+        "Admin access is not configured on this deployment yet. "
+        "Set TRACKSTAR_ADMIN_PASSWORD and TRACKSTAR_AUTH_SECRET to enable it."
+    )
+
+
+def _template_context(request: Request, title: str, **extra):
+    context = {
+        "request": request,
+        "title": title,
+        "brand_name": BRAND_NAME,
+        "auth_enabled": _auth_enabled(),
+        "setup_required": not _auth_enabled(),
+        "admin_access_message": _admin_access_message(),
+        "user_role": _get_current_role(request),
+    }
+    context.update(extra)
+    return context
+
+
+def _render_login_page(
+    request: Request,
+    *,
+    error: str | None = None,
+    title: str = "TrackStarAI Admin Sign In",
+):
+    return templates.TemplateResponse(
+        "login.html",
+        _template_context(
+            request,
+            title,
+            error=error,
+            configuration_hint=None if _auth_enabled() else _admin_access_message(),
+        ),
+    )
 
 
 MODEL_CATALOG = {
@@ -346,31 +396,25 @@ class AnalysisStatus(BaseModel):
 async def landing_page(request: Request):
     """Public dashboard for recent race cards."""
     dashboard_cards = await _safe_load_dashboard_cards(limit=8)
-    role = _get_current_role(request)
-    return templates.TemplateResponse("landing.html", {
-        "request": request,
-        "title": "Del Mar Race Analyzer",
-        "dashboard_cards": dashboard_cards,
-        "card_count": len(dashboard_cards),
-        "completed_count": len([card for card in dashboard_cards if card["status"] == "completed"]),
-        "openrouter_configured": bool(app_state.ensure_openrouter_client() and app_state.openrouter_client.api_key),
-        "auth_enabled": _auth_enabled(),
-        "user_role": role,
-    })
+    return templates.TemplateResponse(
+        "landing.html",
+        _template_context(
+            request,
+            BRAND_NAME,
+            dashboard_cards=dashboard_cards,
+            card_count=len(dashboard_cards),
+            completed_count=len([card for card in dashboard_cards if card["status"] == "completed"]),
+            openrouter_configured=bool(app_state.ensure_openrouter_client() and app_state.openrouter_client.api_key),
+        ),
+    )
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Login page for admin access."""
-    if not _auth_enabled():
-        return RedirectResponse("/admin", status_code=302)
     if _is_admin(request):
         return RedirectResponse("/admin", status_code=302)
-    return templates.TemplateResponse("login.html", {
-        "request": request,
-        "title": "Sign In",
-        "error": None,
-    })
+    return _render_login_page(request)
 
 
 @app.post("/login")
@@ -380,8 +424,8 @@ async def login_submit(request: Request):
     password = form.get("password", "")
     admin_pw = _get_admin_password()
 
-    if not admin_pw:
-        return RedirectResponse("/admin", status_code=302)
+    if not _auth_enabled() or not admin_pw:
+        return _render_login_page(request, error=_admin_access_message())
 
     if hmac.compare_digest(password, admin_pw):
         response = RedirectResponse("/admin", status_code=302)
@@ -390,15 +434,12 @@ async def login_submit(request: Request):
             _sign_value("admin"),
             httponly=True,
             samesite="lax",
+            secure=str(getattr(app_state.config, "environment", "")).lower() == "production",
             max_age=60 * 60 * 24,  # 24 hours
         )
         return response
 
-    return templates.TemplateResponse("login.html", {
-        "request": request,
-        "title": "Sign In",
-        "error": "Invalid password. Please try again.",
-    })
+    return _render_login_page(request, error="Invalid password. Please try again.")
 
 
 @app.get("/logout")
@@ -412,19 +453,26 @@ async def logout(request: Request):
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request):
     """Admin workflow for saving structured race cards with OpenRouter."""
-    if _auth_enabled() and not _is_admin(request):
+    if not _auth_enabled():
+        return _render_login_page(
+            request,
+            error=_admin_access_message(),
+            title="Admin Access Unavailable",
+        )
+    if not _is_admin(request):
         return RedirectResponse("/login", status_code=302)
-    return templates.TemplateResponse("admin.html", {
-        "request": request,
-        "title": "Admin Race Card Workflow",
-        "model_options": [MODEL_CATALOG[model_id] for model_id in _get_configured_model_ids()],
-        "default_model": _get_default_model(DEFAULT_ADMIN_LLM_MODEL),
-        "available_tracks": [{"id": track_id, "name": track_name} for track_id, track_name in SUPPORTED_TRACKS.items()],
-        "default_date": datetime.now().strftime("%Y-%m-%d"),
-        "openrouter_configured": bool(app_state.ensure_openrouter_client() and app_state.openrouter_client.api_key),
-        "auth_enabled": _auth_enabled(),
-        "user_role": _get_current_role(request),
-    })
+    return templates.TemplateResponse(
+        "admin.html",
+        _template_context(
+            request,
+            f"{BRAND_NAME} Admin Workflow",
+            model_options=[MODEL_CATALOG[model_id] for model_id in _get_configured_model_ids()],
+            default_model=_get_default_model(DEFAULT_ADMIN_LLM_MODEL),
+            available_tracks=[{"id": track_id, "name": track_name} for track_id, track_name in SUPPORTED_TRACKS.items()],
+            default_date=datetime.now().strftime("%Y-%m-%d"),
+            openrouter_configured=bool(app_state.ensure_openrouter_client() and app_state.openrouter_client.api_key),
+        ),
+    )
 
 @app.post("/api/analyze")
 async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundTasks):
@@ -477,7 +525,9 @@ async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundT
 @app.post("/api/admin/race-cards")
 async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Request = None):
     """Create a saved race card from manual notes or OpenRouter web search."""
-    if _auth_enabled() and (http_request is None or not _is_admin(http_request)):
+    if not _auth_enabled():
+        raise HTTPException(status_code=503, detail="Admin access is not configured on the server")
+    if http_request is None or not _is_admin(http_request):
         raise HTTPException(status_code=403, detail="Admin authentication required")
 
     session_manager = await app_state.ensure_session_manager()
@@ -1217,14 +1267,14 @@ async def run_analysis_pipeline(session_id: str, date: str, llm_model: str, trac
 @app.on_event("startup")
 async def startup_event():
     """Initialize application on startup"""
-    logger.info("Starting Del Mar Race Analysis Application")
+    logger.info(f"Starting {BRAND_NAME}")
     await app_state.initialize()
     logger.info("Application startup complete")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on application shutdown"""
-    logger.info("Shutting down Del Mar Race Analysis Application")
+    logger.info(f"Shutting down {BRAND_NAME}")
 
     # Cancel all active tasks
     for session_id, task in list(app_state.active_tasks.items()):

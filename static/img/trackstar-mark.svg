@@ -1,0 +1,36 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="256" height="256" rx="64" fill="#08111F"/>
+  <circle cx="128" cy="128" r="92" stroke="url(#orbitA)" stroke-width="2" opacity="0.55"/>
+  <path d="M56 154C75 93 123 62 192 70" stroke="url(#orbitB)" stroke-width="2" stroke-linecap="round" opacity="0.8"/>
+  <path d="M69 194C101 125 152 94 207 101" stroke="url(#orbitC)" stroke-width="2" stroke-linecap="round" opacity="0.55"/>
+  <circle cx="185" cy="76" r="7" fill="#7DD3FC"/>
+  <circle cx="72" cy="153" r="6" fill="#C4B5FD"/>
+  <circle cx="204" cy="101" r="5" fill="#FDE68A"/>
+  <path d="M128 58L141 102L184 115L141 128L128 172L115 128L72 115L115 102L128 58Z" fill="url(#starGlow)"/>
+  <path d="M128 82L136 107L161 115L136 123L128 148L120 123L95 115L120 107L128 82Z" fill="#F8FAFC"/>
+  <rect x="92" y="185" width="72" height="12" rx="6" fill="url(#dataBar)" opacity="0.95"/>
+  <rect x="79" y="203" width="98" height="8" rx="4" fill="#172554" opacity="0.9"/>
+  <defs>
+    <linearGradient id="orbitA" x1="36" y1="46" x2="210" y2="206" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#A78BFA"/>
+    </linearGradient>
+    <linearGradient id="orbitB" x1="56" y1="70" x2="192" y2="154" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#22D3EE"/>
+      <stop offset="1" stop-color="#F5D56B"/>
+    </linearGradient>
+    <linearGradient id="orbitC" x1="69" y1="101" x2="207" y2="194" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#818CF8"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </linearGradient>
+    <radialGradient id="starGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(128 115) rotate(90) scale(57)">
+      <stop stop-color="#F8FAFC"/>
+      <stop offset="0.5" stop-color="#C4B5FD"/>
+      <stop offset="1" stop-color="#38BDF8"/>
+    </radialGradient>
+    <linearGradient id="dataBar" x1="92" y1="191" x2="164" y2="191" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38BDF8"/>
+      <stop offset="1" stop-color="#A78BFA"/>
+    </linearGradient>
+  </defs>
+</svg>

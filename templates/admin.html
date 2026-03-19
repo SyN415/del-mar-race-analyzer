@@ -5,23 +5,24 @@
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-xl-10">
-        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-4">
+        <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-4 admin-toolbar">
             <div>
-                <h1 class="mb-2 fw-bold">Admin Workflow</h1>
-                <p class="text-muted mb-0">Auto-gather a race card with OpenRouter web search, or paste manual source material.</p>
+                <div class="section-eyebrow">Control room</div>
+                <h1 class="mb-2 fw-bold">{{ brand_name }} Admin Workflow</h1>
+                <p class="text-muted mb-0">Assemble a race card with resilient source gathering, structured parsing, and AI synthesis.</p>
             </div>
             <div class="d-flex gap-2">
                 {% if auth_enabled is defined and auth_enabled %}
                 <a href="/logout" class="btn btn-outline-secondary">Sign Out</a>
                 {% endif %}
-                <a href="/" class="btn btn-outline-light">Back to Dashboard</a>
+                <a href="/" class="btn btn-outline-light">Back to Platform</a>
             </div>
         </div>
 
         {% if not openrouter_configured %}
         <div class="alert alert-warning">
             <strong>OpenRouter is not configured on the server.</strong>
-            Set <code>OPENROUTER_API_KEY</code> in the environment before using this workflow.
+            Set <code>TRACKSTAR_OPENROUTER_API_KEY</code> or <code>OPENROUTER_API_KEY</code> before using this workflow.
         </div>
         {% endif %}
 
@@ -85,7 +86,7 @@
                     <div class="row g-3 mb-4">
                         {% for model in model_options %}
                         <div class="col-md-4">
-                            <div class="card h-100 border-0 bg-dark-subtle">
+                            <div class="card h-100 border-0 bg-dark-subtle model-card">
                                 <div class="card-body">
                                     <div class="d-flex justify-content-between align-items-center mb-2">
                                         <strong>{{ model.label }}</strong>

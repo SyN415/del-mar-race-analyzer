@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: del-mar-analyzer-docker
+    name: trackstarai-docker
     runtime: docker
     dockerfilePath: render-deploy/Dockerfile
     dockerContext: ./
@@ -20,13 +20,13 @@ services:
       - key: ENVIRONMENT
         value: production
       - key: DATABASE_URL
-        value: sqlite:///./del_mar_analyzer.db
+        value: sqlite:///./trackstarai.db
       - key: OPENROUTER_API_KEY
         fromSecret: openrouter-api-key
       - key: SECRET_KEY
         generateSecret: true
       - key: SCRAPER_USER_AGENT
-        value: "Mozilla/5.0 (compatible; DelMar-Analyzer/1.0; +https://delmar-analyzer.onrender.com)"
+        value: "Mozilla/5.0 (compatible; TrackStarAI/1.0; +https://trackstarai.onrender.com)"
       - key: SCRAPER_HEADLESS
         value: "true"
       - key: SCRAPER_TIMEOUT
@@ -40,6 +40,6 @@ services:
       - key: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD
         value: "0"
     disk:
-      name: del-mar-data
+      name: trackstar-data
       mountPath: /app/data
       sizeGB: 1

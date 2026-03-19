@@ -1,2 +1,2 @@
-# Config package for Del Mar Race Analyzer
+# Config package for TrackStarAI
 
