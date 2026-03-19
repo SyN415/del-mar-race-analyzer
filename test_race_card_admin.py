@@ -175,6 +175,7 @@ import app as app_module
 _restore_original_modules()
 
 from services.race_card_admin import (
+    AdminRaceCardJSONError,
     _parse_equibase_expected_horses_by_race,
     build_equibase_card_overview_url,
     extract_json_object,
@@ -197,6 +198,24 @@ class RaceCardAdminTests(unittest.TestCase):
         )
 
         self.assertEqual(payload["race_analyses"][0]["race_number"], 1)
+
+    def test_extract_json_object_handles_prose_wrapped_json_with_trailing_commas(self):
+        payload = extract_json_object(
+            """Here is the structured card:\n```json
+            {"race_analyses": [{"race_number": 1, "predictions": [{"horse_name": "Alpha",},],}],}
+            ```\nUse this payload only."""
+        )
+
+        self.assertEqual(payload["race_analyses"][0]["predictions"][0]["horse_name"], "Alpha")
+
+    def test_extract_json_object_raises_diagnostic_error_for_malformed_json(self):
+        with self.assertRaises(AdminRaceCardJSONError) as exc:
+            extract_json_object(
+                '{"race_analyses": [{"race_number": 1 "predictions": [{"horse_name": "Alpha"}]}]}'
+            )
+
+        self.assertIn("Expecting ',' delimiter", exc.exception.public_message)
+        self.assertIn("Context near error", exc.exception.diagnostic_message)
 
     def test_normalize_admin_results_maps_predictions_summary_and_field_metadata(self):
         structured = {
@@ -628,6 +647,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         self.assertEqual(call_kwargs["plugins"], [{"id": "web"}])
         self.assertEqual(call_kwargs["max_tokens"], app_module.ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS)
         self.assertTrue(call_kwargs["return_metadata"])
+        self.assertEqual(call_kwargs["response_format"], {"type": "json_object"})
         self.assertEqual(
             saved_results["source_urls"],
             ["https://example.com/hint", official_card_url, "https://example.com/search"],
@@ -860,6 +880,30 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             args.args[4] == exc.exception.detail
             for args in self.session_manager.update_session_status.await_args_list
         ))
+
+    def test_create_admin_race_card_surfaces_malformed_json_with_model_context(self):
+        self.openrouter_client.call_model = AsyncMock(return_value={
+            "content": '{"race_analyses": [{"race_number": 1 "predictions": [{"horse_name": "Alpha"}]}]}',
+            "annotations": [],
+            "usage": {},
+            "model": "z-ai/glm-5-turbo",
+        })
+
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="x-ai/grok-4.20-beta",
+            source_mode="web_search",
+        )
+
+        with self.assertRaises(app_module.HTTPException) as exc:
+            app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
+
+        self.assertEqual(exc.exception.status_code, 422)
+        self.assertIn("malformed structured data", exc.exception.detail)
+        self.assertIn("z-ai/glm-5-turbo", exc.exception.detail)
+        self.assertIn("Expecting ',' delimiter", exc.exception.detail)
+        self.session_manager.save_session_results.assert_not_awaited()
 
     def test_create_admin_race_card_requires_text_in_manual_mode(self):
         request = app_module.AdminRaceCardRequest(

@@ -10,30 +10,180 @@ from typing import Any, Dict, List, Optional
 from urllib import request as urllib_request
 
 
+class AdminRaceCardJSONError(ValueError):
+    """Raised when admin race-card structured output cannot be parsed safely."""
+
+    def __init__(
+        self,
+        public_message: str,
+        *,
+        diagnostic_message: Optional[str] = None,
+        position: int = -1,
+    ) -> None:
+        super().__init__(public_message)
+        self.public_message = public_message
+        self.diagnostic_message = diagnostic_message or public_message
+        self.position = position
+
+
 def extract_json_object(response_text: str) -> Dict[str, Any]:
     """Extract a JSON object from raw model output."""
     text = (response_text or "").strip()
     if not text:
-        raise ValueError("OpenRouter returned an empty response")
+        raise AdminRaceCardJSONError("OpenRouter returned an empty response.")
 
-    fence_match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
-    if fence_match:
-        text = fence_match.group(1).strip()
+    parse_error: Optional[AdminRaceCardJSONError] = None
+    for candidate in _collect_json_candidates(text):
+        for variant in _build_json_candidate_variants(candidate):
+            try:
+                payload = json.loads(variant)
+            except json.JSONDecodeError as exc:
+                candidate_error = _build_json_decode_error(variant, exc)
+                if parse_error is None or candidate_error.position > parse_error.position:
+                    parse_error = candidate_error
+                continue
 
-    try:
-        payload = json.loads(text)
-        if isinstance(payload, dict):
-            return payload
-    except json.JSONDecodeError:
-        pass
+            if isinstance(payload, dict):
+                return payload
 
-    json_match = re.search(r"\{.*\}", text, re.DOTALL)
-    if json_match:
-        payload = json.loads(json_match.group(0))
-        if isinstance(payload, dict):
-            return payload
+            candidate_error = AdminRaceCardJSONError(
+                "OpenRouter returned JSON, but the top-level value was not an object.",
+                diagnostic_message="Parsed JSON content successfully, but the root value was not an object.",
+                position=len(variant),
+            )
+            if parse_error is None or candidate_error.position > parse_error.position:
+                parse_error = candidate_error
 
-    raise ValueError("OpenRouter response did not contain a valid JSON object")
+    if parse_error is not None:
+        raise parse_error
+
+    raise AdminRaceCardJSONError("OpenRouter response did not contain a JSON object.")
+
+
+def _collect_json_candidates(text: str) -> List[str]:
+    candidates: List[str] = []
+    _append_unique_candidate(candidates, text)
+
+    for fenced_block in re.findall(r"```(?:json)?\s*([\s\S]*?)```", text, flags=re.IGNORECASE):
+        _append_unique_candidate(candidates, fenced_block)
+
+    for json_object in _extract_brace_balanced_objects(text):
+        _append_unique_candidate(candidates, json_object)
+
+    return candidates
+
+
+def _append_unique_candidate(candidates: List[str], candidate: str) -> None:
+    normalized = (candidate or "").strip()
+    if normalized and normalized not in candidates:
+        candidates.append(normalized)
+
+
+def _build_json_candidate_variants(candidate: str) -> List[str]:
+    variants = [candidate.strip()]
+    without_trailing_commas = _remove_trailing_commas(variants[0])
+    if without_trailing_commas != variants[0]:
+        variants.append(without_trailing_commas)
+    return variants
+
+
+def _extract_brace_balanced_objects(text: str) -> List[str]:
+    objects: List[str] = []
+    start_index: Optional[int] = None
+    depth = 0
+    in_string = False
+    escape_next = False
+
+    for index, char in enumerate(text):
+        if start_index is None:
+            if char == "{":
+                start_index = index
+                depth = 1
+                in_string = False
+                escape_next = False
+            continue
+
+        if in_string:
+            if escape_next:
+                escape_next = False
+            elif char == "\\":
+                escape_next = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            continue
+
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                objects.append(text[start_index:index + 1].strip())
+                start_index = None
+
+    return objects
+
+
+def _remove_trailing_commas(text: str) -> str:
+    result: List[str] = []
+    in_string = False
+    escape_next = False
+    index = 0
+
+    while index < len(text):
+        char = text[index]
+        if in_string:
+            result.append(char)
+            if escape_next:
+                escape_next = False
+            elif char == "\\":
+                escape_next = True
+            elif char == '"':
+                in_string = False
+            index += 1
+            continue
+
+        if char == '"':
+            in_string = True
+            result.append(char)
+            index += 1
+            continue
+
+        if char == ",":
+            look_ahead = index + 1
+            while look_ahead < len(text) and text[look_ahead].isspace():
+                look_ahead += 1
+            if look_ahead < len(text) and text[look_ahead] in "]}":
+                index += 1
+                continue
+
+        result.append(char)
+        index += 1
+
+    return "".join(result)
+
+
+def _build_json_decode_error(text: str, exc: json.JSONDecodeError) -> AdminRaceCardJSONError:
+    location = f"{exc.msg} at line {exc.lineno} column {exc.colno}"
+    return AdminRaceCardJSONError(
+        f"OpenRouter returned malformed JSON ({location}).",
+        diagnostic_message=f"{location}. Context near error: {_extract_error_excerpt(text, exc.pos)}",
+        position=exc.pos,
+    )
+
+
+def _extract_error_excerpt(text: str, position: int, radius: int = 80) -> str:
+    start = max(0, position - radius)
+    end = min(len(text), position + radius)
+    excerpt = text[start:end].replace("\n", "\\n")
+    if start > 0:
+        excerpt = f"…{excerpt}"
+    if end < len(text):
+        excerpt = f"{excerpt}…"
+    return excerpt
 
 
 def merge_source_urls(

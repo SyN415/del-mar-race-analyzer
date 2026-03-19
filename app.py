@@ -38,6 +38,7 @@ try:
     from services.session_manager import SessionManager
     from services.openrouter_client import OpenRouterClient
     from services.race_card_admin import (
+        AdminRaceCardJSONError,
         build_equibase_card_overview_url,
         extract_json_object,
         fetch_equibase_expected_horses_by_race,
@@ -52,6 +53,7 @@ except ImportError as e:
     print(f"Some services not available: {e}")
     SessionManager = None
     OpenRouterClient = None
+    AdminRaceCardJSONError = ValueError
     build_equibase_card_overview_url = None
     extract_json_object = None
     fetch_equibase_expected_horses_by_race = None
@@ -628,10 +630,27 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
 
             raise HTTPException(status_code=503, detail=detail)
 
-        return extract_json_object(openrouter_response.get("content", ""))
+        try:
+            return extract_json_object(openrouter_response.get("content", ""))
+        except AdminRaceCardJSONError as exc:
+            model_name = str(openrouter_response.get("model") or request.llm_model)
+            logger.error(
+                "Admin race-card JSON parse failed while %s using %s: %s",
+                phase_label,
+                model_name,
+                exc.diagnostic_message,
+            )
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"OpenRouter returned malformed structured data while {phase_label} using {model_name}. "
+                    f"{exc.public_message} Try again or choose a model with stronger JSON support."
+                ),
+            ) from exc
 
     try:
         is_web_search_mode = request.source_mode == "web_search"
+        admin_response_format = {"type": "json_object"}
         official_card_url = (
             build_equibase_card_overview_url(request.track_id, request.race_date)
             if is_web_search_mode
@@ -682,6 +701,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
             temperature=0.2,
             plugins=[{"id": "web"}] if is_web_search_mode else None,
             return_metadata=True,
+            response_format=admin_response_format,
         )
         structured_payload = extract_admin_openrouter_payload(
             openrouter_response,
@@ -743,6 +763,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                 temperature=0.2,
                 plugins=[{"id": "web"}],
                 return_metadata=True,
+                response_format=admin_response_format,
             )
             retry_payload = extract_admin_openrouter_payload(
                 retry_response,

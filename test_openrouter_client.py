@@ -39,6 +39,35 @@ MODULE_SPEC.loader.exec_module(openrouter_client_module)
 OpenRouterClient = openrouter_client_module.OpenRouterClient
 
 
+class _FakeResponse:
+    def __init__(self, status, *, json_data=None, text_data=""):
+        self.status = status
+        self._json_data = json_data
+        self._text_data = text_data
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def json(self):
+        return self._json_data
+
+    async def text(self):
+        return self._text_data
+
+
+class _FakeSession:
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.posts = []
+
+    def post(self, url, *, headers=None, json=None, timeout=None):
+        self.posts.append({"url": url, "headers": headers, "json": json, "timeout": timeout})
+        return self._responses.pop(0)
+
+
 class OpenRouterClientTimeoutTests(unittest.TestCase):
     def setUp(self):
         self.client = OpenRouterClient(types.SimpleNamespace(openrouter_api_key="test-key"))
@@ -121,6 +150,64 @@ class OpenRouterClientModelSelectionTests(unittest.TestCase):
         self.assertEqual([model["name"] for model in available_models], ["anthropic/claude-sonnet-4", "openai/gpt-5.4"])
         self.assertEqual(available_models[0]["tier"], "custom")
         self.assertIsNone(available_models[0]["max_tokens"])
+
+
+class OpenRouterClientStructuredOutputTests(unittest.TestCase):
+    def setUp(self):
+        self.client = OpenRouterClient(types.SimpleNamespace(openrouter_api_key="test-key"))
+
+    def test_call_model_includes_response_format_in_payload(self):
+        self.client.session = _FakeSession([
+            _FakeResponse(
+                200,
+                json_data={
+                    "choices": [{"message": {"content": '{"ok": true}'}}],
+                    "model": "x-ai/grok-4.20-beta",
+                },
+            )
+        ])
+
+        result = asyncio.run(
+            self.client.call_model(
+                model="x-ai/grok-4.20-beta",
+                prompt="Return JSON",
+                response_format={"type": "json_object"},
+            )
+        )
+
+        self.assertEqual(result, '{"ok": true}')
+        self.assertEqual(
+            self.client.session.posts[0]["json"]["response_format"],
+            {"type": "json_object"},
+        )
+
+    def test_call_model_retries_without_response_format_when_provider_rejects_it(self):
+        self.client.session = _FakeSession([
+            _FakeResponse(
+                400,
+                text_data='{"error":{"message":"response_format json_object is not supported by this provider"}}',
+            ),
+            _FakeResponse(
+                200,
+                json_data={
+                    "choices": [{"message": {"content": '{"ok": true}'}}],
+                    "model": "minimax/minimax-m2.7",
+                },
+            ),
+        ])
+
+        result = asyncio.run(
+            self.client.call_model(
+                model="minimax/minimax-m2.7",
+                prompt="Return JSON",
+                response_format={"type": "json_object"},
+            )
+        )
+
+        self.assertEqual(result, '{"ok": true}')
+        self.assertEqual(len(self.client.session.posts), 2)
+        self.assertIn("response_format", self.client.session.posts[0]["json"])
+        self.assertNotIn("response_format", self.client.session.posts[1]["json"])
 
 
 if __name__ == "__main__":

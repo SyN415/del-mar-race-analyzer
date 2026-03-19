@@ -196,7 +196,8 @@ class OpenRouterClient:
                         max_tokens: int = None, temperature: float = 0.7,
                         task_type: str = "general", tier: ModelTier = None,
                         plugins: Optional[List[Dict[str, Any]]] = None,
-                        return_metadata: bool = False) -> Union[str, Dict[str, Any]]:
+                        return_metadata: bool = False,
+                        response_format: Optional[Dict[str, Any]] = None) -> Union[str, Dict[str, Any]]:
         """
         Enhanced API call to OpenRouter model with intelligent model selection
 
@@ -210,6 +211,7 @@ class OpenRouterClient:
             tier: Preferred model tier
             plugins: Optional OpenRouter plugins, such as [{"id": "web"}]
             return_metadata: When True, return response content plus metadata
+            response_format: Optional structured-output request payload for OpenRouter
 
         Returns:
             Model response text or response metadata
@@ -240,6 +242,8 @@ class OpenRouterClient:
         elif max_tokens is None:
             max_tokens = 1000
         
+        response_format_disabled = False
+
         # Implement retry logic with exponential backoff
         for attempt in range(self.retry_config["max_retries"] + 1):
             try:
@@ -276,6 +280,10 @@ class OpenRouterClient:
                     "max_tokens": max_tokens,
                     "temperature": temperature
                 }
+
+                active_response_format = None if response_format_disabled else response_format
+                if active_response_format:
+                    payload["response_format"] = active_response_format
 
                 context_str = ""
                 if context:
@@ -350,6 +358,18 @@ class OpenRouterClient:
                         error_text = await response.text()
                         logger.error(f"OpenRouter API error {response.status}: {error_text}")
 
+                        if active_response_format and self._should_retry_without_response_format(
+                            response.status,
+                            error_text,
+                            active_response_format,
+                        ):
+                            logger.warning(
+                                "OpenRouter model %s rejected response_format; retrying without structured output enforcement",
+                                model,
+                            )
+                            response_format_disabled = True
+                            continue
+
                         # Track failed request
                         self.usage_tracker.record_request(0, 0, response_time, False)
 
@@ -422,6 +442,41 @@ class OpenRouterClient:
             failure_reason="retry_exhausted",
             failure_detail="OpenRouter request failed after all retry attempts",
             attempts=self.retry_config["max_retries"] + 1,
+        )
+
+    def _should_retry_without_response_format(
+        self,
+        status_code: int,
+        error_text: str,
+        response_format: Optional[Dict[str, Any]],
+    ) -> bool:
+        if not response_format or status_code not in {400, 404, 415, 422}:
+            return False
+
+        normalized_error = (error_text or "").lower()
+        response_format_terms = (
+            "response_format",
+            "json_object",
+            "json schema",
+            "json_schema",
+            "structured output",
+            "structured outputs",
+        )
+        rejection_terms = (
+            "unsupported",
+            "not supported",
+            "does not support",
+            "only supported",
+            "invalid",
+            "unknown",
+            "unrecognized",
+            "not available",
+            "not allowed",
+            "cannot",
+        )
+
+        return any(term in normalized_error for term in response_format_terms) and any(
+            term in normalized_error for term in rejection_terms
         )
 
     def _get_model_config(self, model: Optional[str]) -> Optional[ModelConfig]:
