@@ -85,7 +85,7 @@ main.container {
     position: relative;
     isolation: isolate;
     overflow: hidden;
-    padding: 4.5rem clamp(1rem, 2vw, 1.5rem) 2.75rem;
+    padding: 3.5rem clamp(1rem, 2vw, 1.5rem) 2.25rem;
     border-radius: calc(var(--radius-lg) + 4px);
     background: transparent;
     animation: fadeUp 0.7s ease-out;
@@ -114,7 +114,7 @@ main.container {
 }
 
 .hero-grid {
-    min-height: 28rem;
+    min-height: 24rem;
     margin: 0;
 }
 
@@ -192,10 +192,17 @@ main.container {
 }
 
 /* ── Stat Cards ── */
+.landing-stats-row {
+    margin-top: 1.25rem;
+    --bs-gutter-x: 1.25rem;
+    --bs-gutter-y: 1.25rem;
+}
+
 .stat-card {
     background: var(--glass);
     border: 1px solid var(--glass-border);
     border-radius: var(--radius);
+    height: 100%;
     backdrop-filter: blur(12px);
     box-shadow: 0 10px 26px rgba(5, 10, 20, 0.2);
 }
@@ -414,6 +421,12 @@ main.container {
     .hero-section {
         padding: 2.5rem 1rem 1.5rem;
         border-radius: 20px;
+    }
+    .hero-grid { min-height: auto; }
+    .landing-stats-row {
+        margin-top: 1rem;
+        --bs-gutter-x: 1rem;
+        --bs-gutter-y: 1rem;
     }
     .display-4 { font-size: 1.75rem; }
     .btn-lg { padding: 0.6rem 1.5rem; font-size: 0.9rem; }
