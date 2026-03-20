@@ -60,8 +60,20 @@ class OrchestrationService:
         self.prediction_engine = prediction_engine
         self.config_manager = config_manager
 
-        # Initialize AI services
-        self.ai_client = OpenRouterClient(config_manager) if config_manager else None
+        # Resolve the actual config object from ConfigManager (or accept a raw config)
+        config_obj = None
+        if config_manager is not None:
+            if hasattr(config_manager, "config"):
+                # config_manager is a ConfigManager instance – pull the loaded config
+                config_obj = config_manager.config
+                logger.info("OrchestrationService: resolved config via ConfigManager.config")
+            else:
+                # Caller passed the config object directly – use as-is
+                config_obj = config_manager
+                logger.info("OrchestrationService: using raw config object")
+
+        # Initialize AI services with the resolved config
+        self.ai_client = OpenRouterClient(config_obj) if config_obj else None
         self.ai_scraping_assistant = AIScrapingAssistant(self.ai_client) if self.ai_client else None
         self.ai_analysis_enhancer = AIAnalysisEnhancer(self.ai_client) if self.ai_client else None
 
@@ -104,18 +116,25 @@ class OrchestrationService:
 
         return self.validation_framework
         
-    async def analyze_race_card(self, session_id: str, race_date: str, track_id: str = "DMR") -> Dict:
+    async def analyze_race_card(self, session_id: str, race_date: str, track_id: str = "DMR",
+                               llm_model: Optional[str] = None) -> Dict:
         """
         Complete race card analysis workflow
-        
+
         Args:
             session_id: Session identifier
             race_date: Race date in YYYY-MM-DD format
             track_id: Track identifier (default: DMR for Del Mar)
-            
+            llm_model: User-selected LLM model for AI enhancement
+
         Returns:
             Complete analysis results
         """
+        logger.info(
+            "🏁 OrchestrationService.analyze_race_card | session=%s | date=%s | "
+            "track=%s | llm_model=%s",
+            session_id, race_date, track_id, llm_model or "(default)",
+        )
         start_time = datetime.now()
         
         try:
@@ -156,7 +175,7 @@ class OrchestrationService:
             
             # Step 5: Run predictions for all races
             race_analyses = await self._analyze_all_races(
-                session_id, race_card, enhanced_horse_data
+                session_id, race_card, enhanced_horse_data, llm_model=llm_model
             )
             
             await self.session_manager.update_session_status(
@@ -174,6 +193,7 @@ class OrchestrationService:
                 "session_id": session_id,
                 "race_date": race_date,
                 "track_id": track_id,
+                "llm_model": llm_model,
                 "analysis_duration_seconds": analysis_duration,
                 "total_races": len(race_card['races']),
                 "total_horses": len(enhanced_horse_data),
@@ -185,7 +205,8 @@ class OrchestrationService:
                 "ai_services_used": {
                     "openrouter_client": self.ai_client is not None,
                     "scraping_assistant": self.ai_scraping_assistant is not None,
-                    "analysis_enhancer": self.ai_analysis_enhancer is not None
+                    "analysis_enhancer": self.ai_analysis_enhancer is not None,
+                    "llm_model_requested": llm_model,
                 }
             }
             
@@ -332,7 +353,8 @@ class OrchestrationService:
             # Return original data if SmartPick enhancement fails
             return enhanced_data
     
-    async def _analyze_all_races(self, session_id: str, race_card: Dict, horse_data: Dict) -> List[Dict]:
+    async def _analyze_all_races(self, session_id: str, race_card: Dict, horse_data: Dict,
+                                llm_model: Optional[str] = None) -> List[Dict]:
         """Run prediction analysis for all races with AI enhancement"""
         race_analyses = []
 
@@ -411,9 +433,10 @@ class OrchestrationService:
                                 if horse_name in horse_data:
                                     race_horse_data.append(horse_data[horse_name])
 
-                            # AI enhancement
+                            # AI enhancement (with user's model selection)
                             ai_enhancement = await self.ai_analysis_enhancer.enhance_race_analysis(
-                                race, predictions.get('predictions', []), {"horse_data": race_horse_data}
+                                race, predictions.get('predictions', []), {"horse_data": race_horse_data},
+                                model_override=llm_model,
                             )
 
                             # Merge AI insights with predictions

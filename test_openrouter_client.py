@@ -180,6 +180,36 @@ class OpenRouterClientStructuredOutputTests(unittest.TestCase):
             self.client.session.posts[0]["json"]["response_format"],
             {"type": "json_object"},
         )
+        self.assertEqual(
+            self.client.session.posts[0]["json"]["plugins"],
+            [{"id": "response-healing"}],
+        )
+
+    def test_call_model_appends_response_healing_to_existing_plugins(self):
+        self.client.session = _FakeSession([
+            _FakeResponse(
+                200,
+                json_data={
+                    "choices": [{"message": {"content": '{"ok": true}'}}],
+                    "model": "minimax/minimax-m2.7",
+                },
+            )
+        ])
+
+        result = asyncio.run(
+            self.client.call_model(
+                model="minimax/minimax-m2.7",
+                prompt="Return JSON",
+                plugins=[{"id": "web"}],
+                response_format={"type": "json_object"},
+            )
+        )
+
+        self.assertEqual(result, '{"ok": true}')
+        self.assertEqual(
+            self.client.session.posts[0]["json"]["plugins"],
+            [{"id": "web"}, {"id": "response-healing"}],
+        )
 
     def test_call_model_retries_without_response_format_when_provider_rejects_it(self):
         self.client.session = _FakeSession([

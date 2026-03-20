@@ -905,6 +905,44 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         self.assertIn("Expecting ',' delimiter", exc.exception.detail)
         self.session_manager.save_session_results.assert_not_awaited()
 
+    def test_create_admin_race_card_retries_malformed_minimax_json_with_compact_prompt(self):
+        self.openrouter_client.call_model = AsyncMock(side_effect=[
+            {
+                "content": '{"race_analyses": [{"race_number": 1 "predictions": [{"horse_name": "Alpha"}]}]}',
+                "annotations": [{"type": "url_citation", "url": "https://example.com/initial"}],
+                "usage": {},
+                "model": "minimax/minimax-m2.7:free",
+            },
+            {
+                "content": '{"card_overview":"Compact retry succeeded","race_analyses":[{"race_number":1,"race_type":"Allowance","distance":"6f","surface":"Dirt","predictions":[{"horse_name":"Alpha","post_position":1,"jockey":"A. Rider","trainer":"T. One","composite_rating":90}]}]}',
+                "annotations": [{"type": "url_citation", "url": "https://example.com/retry"}],
+                "usage": {},
+                "model": "minimax/minimax-m2.7:free",
+            },
+        ])
+
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="minimax/minimax-m2.7",
+            source_mode="web_search",
+        )
+
+        response = app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
+        saved_results = self.session_manager.save_session_results.await_args.args[1]
+        second_call_kwargs = self.openrouter_client.call_model.await_args_list[1].kwargs
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.openrouter_client.call_model.await_count, 2)
+        self.assertEqual(second_call_kwargs["max_tokens"], app_module.ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS)
+        self.assertIn("compact retry", second_call_kwargs["prompt"])
+        self.assertIn("omit `factors` and `exotic_suggestions`", second_call_kwargs["prompt"])
+        self.assertEqual(saved_results["race_analyses"][0]["predictions"][0]["horse_name"], "Alpha")
+        self.assertTrue(any(
+            args.args[3] == "admin_retry_malformed_json"
+            for args in self.session_manager.update_session_status.await_args_list
+        ))
+
     def test_create_admin_race_card_requires_text_in_manual_mode(self):
         request = app_module.AdminRaceCardRequest(
             race_date="2026-03-13",

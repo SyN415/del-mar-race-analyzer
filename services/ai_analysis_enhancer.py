@@ -51,16 +51,18 @@ class AIAnalysisEnhancer:
         self.track_biases: Dict[str, Dict] = {}
         self.jockey_trainer_insights: Dict[str, Dict] = {}
         
-    async def enhance_race_analysis(self, race_data: Dict, horse_predictions: List[Dict], 
-                                  historical_data: Dict = None) -> Dict:
+    async def enhance_race_analysis(self, race_data: Dict, horse_predictions: List[Dict],
+                                  historical_data: Dict = None,
+                                  model_override: Optional[str] = None) -> Dict:
         """
         Enhance race analysis with AI insights and confidence scoring
-        
+
         Args:
             race_data: Race information (distance, surface, conditions, etc.)
             horse_predictions: Initial algorithmic predictions
             historical_data: Historical performance data if available
-            
+            model_override: Explicit model to use for AI calls (user selection)
+
         Returns:
             Enhanced analysis with AI insights and confidence scores
         """
@@ -73,11 +75,16 @@ class AIAnalysisEnhancer:
             "track_conditions": self._extract_track_conditions(race_data)
         }
         
-        # Get AI-powered enhancement
+        # Get AI-powered enhancement (with user's model selection)
+        logger.info(
+            "🤖 AI enhance_race_analysis | model_override=%s",
+            model_override or "(auto-select)",
+        )
         ai_enhancement = await self.ai_client.enhance_predictions(
-            race_data, 
-            horse_predictions, 
-            horse_predictions
+            race_data,
+            horse_predictions,
+            horse_predictions,
+            model_override=model_override,
         )
         
         # Generate confidence scores

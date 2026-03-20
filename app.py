@@ -386,6 +386,7 @@ DEFAULT_LLM_MODEL = "x-ai/grok-4.20-beta"
 DEFAULT_ADMIN_LLM_MODEL = "google/gemini-3.1-flash-lite-preview"
 ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS = 3500
 ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS = 2200
+ADMIN_COMPACT_JSON_RETRY_MODEL_PREFIXES = ("minimax/",)
 ADMIN_MANUAL_MAX_TOKENS = 2500
 STATUS_BADGE_CLASSES = {
     "completed": "success",
@@ -507,6 +508,14 @@ async def admin_page(request: Request):
 async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundTasks):
     """Start race analysis for specified date and track"""
     try:
+        logger.info(
+            "📥 ENDPOINT HIT: /api/analyze | date=%s | track=%s | llm_model=%s | "
+            "web_search=%s",
+            request.date,
+            request.track_id,
+            request.llm_model or "(none)",
+            getattr(request, "web_search", "(not in request)"),
+        )
         _validate_track_id(request.track_id)
         _validate_llm_model(request.llm_model)
 
@@ -579,6 +588,16 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
     ):
         raise HTTPException(status_code=503, detail="Admin race-card helpers are unavailable")
 
+    logger.info(
+        "📥 ENDPOINT HIT: /api/admin/race-cards | date=%s | track=%s | llm_model=%s | "
+        "source_mode=%s | web_search=%s",
+        request.race_date,
+        request.track_id,
+        request.llm_model or "(none)",
+        request.source_mode,
+        getattr(request, "web_search", "(not in request)"),
+    )
+
     _validate_track_id(request.track_id)
     _validate_llm_model(request.llm_model)
 
@@ -640,13 +659,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                 model_name,
                 exc.diagnostic_message,
             )
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    f"OpenRouter returned malformed structured data while {phase_label} using {model_name}. "
-                    f"{exc.public_message} Try again or choose a model with stronger JSON support."
-                ),
-            ) from exc
+            raise
 
     try:
         is_web_search_mode = request.source_mode == "web_search"
@@ -703,14 +716,75 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
             return_metadata=True,
             response_format=admin_response_format,
         )
-        structured_payload = extract_admin_openrouter_payload(
-            openrouter_response,
-            phase_label="structuring the admin race card",
-        )
         merged_urls = merge_source_urls(
             source_urls=request.source_urls + ([official_card_url] if official_card_url else []),
             annotations=openrouter_response.get("annotations"),
         )
+        try:
+            structured_payload = extract_admin_openrouter_payload(
+                openrouter_response,
+                phase_label="structuring the admin race card",
+            )
+        except AdminRaceCardJSONError as exc:
+            model_name = (
+                str(openrouter_response.get("model") or request.llm_model)
+                if isinstance(openrouter_response, dict)
+                else request.llm_model
+            )
+            if not _should_retry_admin_json_with_compact_prompt(request, model_name):
+                raise _build_admin_json_http_exception(
+                    request,
+                    openrouter_response,
+                    phase_label="structuring the admin race card",
+                    exc=exc,
+                ) from exc
+
+            await session_manager.update_session_status(
+                session_id,
+                "running",
+                45,
+                "admin_retry_malformed_json",
+                f"Retrying malformed JSON from {model_name} with a compact schema",
+            )
+            retry_response = await openrouter_client.call_model(
+                model=request.llm_model,
+                task_type="analysis",
+                prompt=_build_admin_structuring_prompt(
+                    request,
+                    expected_race_numbers=expected_race_numbers,
+                    expected_horses_by_race=expected_horses_by_race,
+                    official_card_url=official_card_url,
+                    compact_response=True,
+                ),
+                context=_build_admin_structuring_context(
+                    request,
+                    source_text,
+                    expected_race_numbers=expected_race_numbers,
+                    expected_horses_by_race=expected_horses_by_race,
+                    official_card_url=official_card_url,
+                ),
+                max_tokens=ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS,
+                temperature=0.2,
+                plugins=[{"id": "web"}],
+                return_metadata=True,
+                response_format=admin_response_format,
+            )
+            merged_urls = merge_source_urls(
+                source_urls=merged_urls,
+                annotations=retry_response.get("annotations"),
+            )
+            try:
+                structured_payload = extract_admin_openrouter_payload(
+                    retry_response,
+                    phase_label="retrying malformed admin race-card JSON",
+                )
+            except AdminRaceCardJSONError as retry_exc:
+                raise _build_admin_json_http_exception(
+                    request,
+                    retry_response,
+                    phase_label="retrying malformed admin race-card JSON",
+                    exc=retry_exc,
+                ) from retry_exc
 
         final_structured_payload = structured_payload
         missing_race_numbers = (
@@ -1019,6 +1093,7 @@ def _build_admin_structuring_prompt(
     expected_horses_by_race: Optional[Dict[int, List[str]]] = None,
     missing_horses_by_race: Optional[Dict[int, List[str]]] = None,
     official_card_url: Optional[str] = None,
+    compact_response: bool = False,
 ) -> str:
     source_strategy = (
         "Use web search before answering. Prefer official or high-confidence racing sources for the selected card, and cross-check fields when needed."
@@ -1058,6 +1133,72 @@ def _build_admin_structuring_prompt(
 
     official_url_line = f"Official card URL: {official_card_url}" if official_card_url else ""
     official_field_summary = _format_expected_field_summary(expected_horses_by_race)
+    compact_retry_line = (
+        "This is a compact retry because the previous answer was malformed or truncated JSON. "
+        "Keep the payload lean so the full card fits in one valid JSON object."
+        if compact_response
+        else ""
+    )
+    response_shape = (
+        """{
+  "card_overview": "short summary",
+  "race_analyses": [
+    {
+      "race_number": 1,
+      "race_type": "Allowance Optional Claiming",
+      "distance": "6f",
+      "surface": "Dirt",
+      "predictions": [
+        {
+          "horse_name": "Horse Name",
+          "post_position": 1,
+          "jockey": "Jockey Name",
+          "trainer": "Trainer Name",
+          "composite_rating": 88.5
+        }
+      ]
+    }
+  ]
+}"""
+        if compact_response
+        else """{
+  "card_overview": "short summary",
+  "race_analyses": [
+    {
+      "race_number": 1,
+      "race_type": "Allowance Optional Claiming",
+      "distance": "6f",
+      "surface": "Dirt",
+      "predictions": [
+        {
+          "horse_name": "Horse Name",
+          "post_position": 1,
+          "jockey": "Jockey Name",
+          "trainer": "Trainer Name",
+          "composite_rating": 88.5,
+          "factors": {
+            "speed_rating": 88,
+            "form_rating": 84,
+            "class_rating": 82,
+            "workout_rating": 80
+          },
+          "notes": "brief grounded note"
+        }
+      ],
+      "exotic_suggestions": {"exacta": "1-4", "trifecta": "1-4-6"}
+    }
+  ]
+}"""
+    )
+    compact_rules = (
+        "- Compact retry mode: omit `factors` and `exotic_suggestions`.\n"
+        "- Omit per-horse `notes` unless absolutely necessary.\n"
+        if compact_response
+        else (
+            "- If evidence is limited, still rank the full field strongest to weakest and keep notes concise about uncertainty.\n"
+            "- Keep notes concise.\n"
+        )
+    )
 
     return f"""
 You are structuring a horse racing card for internal display.
@@ -1068,36 +1209,10 @@ Source mode: {request.source_mode}
 {source_strategy}
 {official_url_line}
 {official_field_summary}
+{compact_retry_line}
 
 Return ONLY valid JSON with this shape:
-{{
-  "card_overview": "short summary",
-  "race_analyses": [
-    {{
-      "race_number": 1,
-      "race_type": "Allowance Optional Claiming",
-      "distance": "6f",
-      "surface": "Dirt",
-      "predictions": [
-        {{
-          "horse_name": "Horse Name",
-          "post_position": 1,
-          "jockey": "Jockey Name",
-          "trainer": "Trainer Name",
-          "composite_rating": 88.5,
-          "factors": {{
-            "speed_rating": 88,
-            "form_rating": 84,
-            "class_rating": 82,
-            "workout_rating": 80
-          }},
-          "notes": "brief grounded note"
-        }}
-      ],
-      "exotic_suggestions": {{"exacta": "1-4", "trifecta": "1-4-6"}}
-    }}
-  ]
-}}
+{response_shape}
 
 Rules:
 - Do not wrap the JSON in markdown fences.
@@ -1108,9 +1223,39 @@ Rules:
 - Order each race's predictions strongest to weakest.
 - Use only grounded details; leave uncertain text blank instead of inventing facts.
 - `composite_rating` must be numeric on a 0-100 scale.
-- If evidence is limited, still rank the full field strongest to weakest and keep notes concise about uncertainty.
-- Keep notes concise.
-""".strip()
+{compact_rules}""".strip()
+
+
+def _should_retry_admin_json_with_compact_prompt(
+    request: AdminRaceCardRequest,
+    model_name: Optional[str],
+) -> bool:
+    if request.source_mode != "web_search":
+        return False
+
+    base_model = str(model_name or request.llm_model or "").split(":", 1)[0].lower()
+    return any(base_model.startswith(prefix) for prefix in ADMIN_COMPACT_JSON_RETRY_MODEL_PREFIXES)
+
+
+def _build_admin_json_http_exception(
+    request: AdminRaceCardRequest,
+    openrouter_response: object,
+    *,
+    phase_label: str,
+    exc: AdminRaceCardJSONError,
+) -> HTTPException:
+    model_name = (
+        str(openrouter_response.get("model") or request.llm_model)
+        if isinstance(openrouter_response, dict)
+        else request.llm_model
+    )
+    return HTTPException(
+        status_code=422,
+        detail=(
+            f"OpenRouter returned malformed structured data while {phase_label} using {model_name}. "
+            f"{exc.public_message} Try again or choose a model with stronger JSON support."
+        ),
+    )
 
 
 def _build_admin_structuring_context(
@@ -1212,87 +1357,48 @@ async def run_validation():
 
 # Background task functions
 async def run_analysis_pipeline(session_id: str, date: str, llm_model: str, track_id: str):
-    """Background task to run the complete analysis pipeline"""
+    """Background task to run the complete analysis pipeline via OrchestrationService.
+
+    Previous implementation used the legacy ``run_playwright_full_card.main()``
+    which bypasses OpenRouter entirely.  This version routes through
+    ``OrchestrationService.analyze_race_card`` so the user-selected LLM model
+    and AI services are actually used.
+    """
     try:
-        logger.info(f"Starting analysis pipeline for session {session_id}")
+        logger.info(
+            "🚀 ANALYZE PIPELINE START | session=%s | date=%s | track=%s | llm_model=%s",
+            session_id, date, track_id, llm_model,
+        )
 
         # Check for cancellation before starting
         if session_id not in app_state.active_tasks:
             logger.info(f"Session {session_id} was cancelled before starting")
             return
-        
-        # Update session status
-        if app_state.session_manager:
-            await app_state.session_manager.update_session_status(
-                session_id, "running", 10, "Initializing scraping", "Setting up scrapers..."
+
+        # Ensure orchestration service is ready (creates OpenRouterClient etc.)
+        orchestration_service = await app_state.ensure_orchestration_service()
+        if not orchestration_service:
+            raise RuntimeError(
+                "OrchestrationService could not be initialized. "
+                "Check session manager and config availability."
             )
-        
-        # Step 1: Initialize scrapers
-        playwright_scraper = None
-        smartpick_scraper = None
-        
-        try:
-            # Get session details to set environment variables
-            session_details = None
-            race_date = date
-            if app_state.session_manager:
-                session_details = await app_state.session_manager.get_session_status(session_id)
 
-            # Set environment variables for the pipeline
-            if session_details and 'race_date' in session_details:
-                race_date = session_details['race_date']
-            os.environ['RACE_DATE_STR'] = race_date
-            logger.info(f"Set RACE_DATE_STR to {race_date}")
+        # Delegate to the model-aware orchestration pipeline
+        results = await orchestration_service.analyze_race_card(
+            session_id=session_id,
+            race_date=date,
+            track_id=track_id,
+            llm_model=llm_model,
+        )
 
-            # Set track ID environment variable
-            if track_id:
-                os.environ['TRACK_ID'] = track_id
-                logger.info(f"Set TRACK_ID to {track_id}")
-
-            # This will be replaced with proper orchestration service
-            # For now, use existing pipeline logic
-            from run_playwright_full_card import main as run_existing_pipeline
-
-            # Update status
-            if app_state.session_manager:
-                await app_state.session_manager.update_session_status(
-                    session_id, "running", 50, "Running analysis", "Executing analysis pipeline..."
-                )
-
-            # Run existing pipeline (temporary integration)
-            results = await run_existing_pipeline()
-
-            if not isinstance(results, dict):
-                raise RuntimeError("Analysis pipeline returned an invalid result payload")
-            if results.get("error"):
-                raise RuntimeError(results["error"])
-            if not results.get("race_analyses"):
-                raise RuntimeError("Analysis pipeline completed without race analyses")
-
-            results.setdefault("race_date", race_date)
-            results.setdefault("track_id", track_id)
-            
-            # Update final status
-            if app_state.session_manager:
-                await app_state.session_manager.update_session_status(
-                    session_id, "completed", 100, "Analysis complete", "Results ready"
-                )
-                await app_state.session_manager.save_session_results(session_id, results)
-            
-            logger.info(f"Analysis pipeline completed for session {session_id}")
-            
-        except Exception as e:
-            logger.error(f"Analysis pipeline failed for session {session_id}: {e}")
-            if app_state.session_manager:
-                await app_state.session_manager.update_session_status(
-                    session_id, "failed", 0, "Analysis failed", str(e)
-                )
-        finally:
-            # Cleanup resources
-            if playwright_scraper:
-                await playwright_scraper.close()
-            if smartpick_scraper:
-                smartpick_scraper.close()
+        logger.info(
+            "✅ ANALYZE PIPELINE COMPLETE | session=%s | races=%d | llm_model=%s | "
+            "ai_services=%s",
+            session_id,
+            results.get("total_races", 0),
+            llm_model,
+            results.get("ai_services_used", {}),
+        )
 
     except asyncio.CancelledError:
         logger.info(f"Analysis pipeline cancelled for session {session_id}")
@@ -1304,6 +1410,13 @@ async def run_analysis_pipeline(session_id: str, date: str, llm_model: str, trac
 
     except Exception as e:
         logger.error(f"Critical error in analysis pipeline for session {session_id}: {e}")
+        if app_state.session_manager:
+            try:
+                await app_state.session_manager.update_session_status(
+                    session_id, "failed", 0, "Analysis failed", str(e)
+                )
+            except Exception:
+                pass
 
     finally:
         # Remove task from active tasks

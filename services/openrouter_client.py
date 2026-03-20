@@ -282,6 +282,10 @@ class OpenRouterClient:
                 }
 
                 active_response_format = None if response_format_disabled else response_format
+                active_plugins = self._build_request_plugins(
+                    plugins=plugins,
+                    response_format=active_response_format,
+                )
                 if active_response_format:
                     payload["response_format"] = active_response_format
 
@@ -289,12 +293,25 @@ class OpenRouterClient:
                 if context:
                     context_str = json.dumps(context, indent=2)
 
-                if plugins:
-                    payload["plugins"] = plugins
+                if active_plugins:
+                    payload["plugins"] = active_plugins
 
                 # Add context if provided
                 if context_str:
                     payload["messages"][0]["content"] += f"\n\nContext data:\n{context_str}"
+
+                # ── TRACE LOGGING: exact outbound payload ──
+                logger.info(
+                    "🔵 OPENROUTER REQUEST TRACE | model=%s | task_type=%s | "
+                    "plugins=%s | response_format=%s | max_tokens=%d | temp=%.2f | attempt=%d",
+                    model,
+                    task_type,
+                    json.dumps(active_plugins) if active_plugins else "none",
+                    json.dumps(active_response_format) if active_response_format else "none",
+                    max_tokens,
+                    temperature,
+                    attempt + 1,
+                )
 
                 if not self.session:
                     self.session = aiohttp.ClientSession()
@@ -302,7 +319,7 @@ class OpenRouterClient:
                 timeout_seconds = self._calculate_timeout_seconds(
                     model_config=model_config,
                     max_tokens=max_tokens,
-                    plugins=plugins,
+                    plugins=active_plugins,
                     context_size_chars=len(context_str),
                 )
 
@@ -325,7 +342,29 @@ class OpenRouterClient:
                         estimated_cost = (estimated_tokens / 1000) * (model_config.cost_per_1k_tokens if model_config else 0.02)
                         self.usage_tracker.record_request(int(estimated_tokens), estimated_cost, response_time, True)
 
-                        logger.info(f"OpenRouter API call successful: {model} in {response_time:.2f}s")
+                        # ── TRACE LOGGING: response metadata ──
+                        logger.info(
+                            "🟢 OPENROUTER RESPONSE TRACE | requested_model=%s | "
+                            "actual_model=%s | provider=%s | response_time=%.2fs | "
+                            "usage=%s | annotations_count=%d | content_length=%d",
+                            model,
+                            parsed_response.get("model", "unknown"),
+                            parsed_response.get("provider") or "unknown",
+                            response_time,
+                            json.dumps(parsed_response.get("usage", {})),
+                            len(parsed_response.get("annotations", [])),
+                            len(response_text),
+                        )
+                        if parsed_response.get("annotations"):
+                            logger.info(
+                                "🔗 OPENROUTER CITATIONS | count=%d | urls=%s",
+                                len(parsed_response["annotations"]),
+                                json.dumps(
+                                    [a.get("url", a.get("url_citation", {}).get("url", "?"))
+                                     for a in parsed_response["annotations"][:10]]
+                                ),
+                            )
+
                         if return_metadata:
                             return parsed_response
                         return response_text
@@ -443,6 +482,23 @@ class OpenRouterClient:
             failure_detail="OpenRouter request failed after all retry attempts",
             attempts=self.retry_config["max_retries"] + 1,
         )
+
+    def _build_request_plugins(
+        self,
+        *,
+        plugins: Optional[List[Dict[str, Any]]],
+        response_format: Optional[Dict[str, Any]],
+    ) -> Optional[List[Dict[str, Any]]]:
+        active_plugins = [
+            dict(plugin)
+            for plugin in (plugins or [])
+            if isinstance(plugin, dict) and plugin.get("id")
+        ]
+
+        if response_format and not any(plugin.get("id") == "response-healing" for plugin in active_plugins):
+            active_plugins.append({"id": "response-healing"})
+
+        return active_plugins or None
 
     def _should_retry_without_response_format(
         self,
@@ -715,7 +771,8 @@ class OpenRouterClient:
             }
     
     async def enhance_predictions(self, race_data: Dict, horse_data: List[Dict],
-                                initial_predictions: List[Dict]) -> Dict:
+                                initial_predictions: List[Dict],
+                                model_override: Optional[str] = None) -> Dict:
         """AI refines predictions with contextual analysis and confidence scoring"""
 
         # Prepare comprehensive race context
@@ -751,6 +808,7 @@ class OpenRouterClient:
 
         try:
             response = await self.call_model(
+                model=model_override,
                 task_type="analysis",
                 prompt=prompt,
                 context=race_context,
