@@ -5,13 +5,16 @@
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-xl-10">
+
+        <!-- Page header -->
         <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-center gap-3 mb-4 admin-toolbar">
             <div>
                 <div class="section-eyebrow">Control room</div>
                 <h1 class="mb-2 fw-bold">{{ brand_name }} Admin Workflow</h1>
-                <p class="text-muted mb-0">Assemble a race card with resilient source gathering, structured parsing, and AI synthesis.</p>
+                <p class="text-muted mb-0">Build race cards and deep-dive individual races for maximum data coverage.</p>
             </div>
-            <div class="d-flex gap-2">
+            <div class="d-flex gap-2 align-items-center flex-wrap">
+                <span class="badge bg-success fs-6 px-3 py-2">⚡ Grok 4.20 Beta</span>
                 {% if auth_enabled is defined and auth_enabled %}
                 <a href="/logout" class="btn btn-outline-secondary">Sign Out</a>
                 {% endif %}
@@ -26,160 +29,331 @@
         </div>
         {% endif %}
 
-        <div class="card shadow-lg border-0">
-            <div class="card-body p-4">
-                <form id="adminCardForm">
-                    <div class="row">
-                        <div class="col-md-4 mb-3">
-                            <label for="raceDate" class="form-label">Race date</label>
-                            <input type="date" class="form-control" id="raceDate" value="{{ default_date }}" required>
-                        </div>
-                        <div class="col-md-4 mb-3">
-                            <label for="trackId" class="form-label">Track</label>
-                            <select class="form-select" id="trackId" required>
-                                {% for track in available_tracks %}
-                                <option value="{{ track.id }}">{{ track.name }} ({{ track.id }})</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="col-md-4 mb-3">
-                            <label for="llmModel" class="form-label">OpenRouter model</label>
-                            <select class="form-select" id="llmModel" required>
-                                {% for model in model_options %}
-                                <option value="{{ model.id }}" {% if model.id == default_model %}selected{% endif %}>
-                                    {{ model.label }} — {{ model.tier_label }}
-                                </option>
-                                {% endfor %}
-                            </select>
-                            <div class="form-text">Manage this list with the Render env var <code>TRACKSTAR_OPENROUTER_MODELS</code> (comma-separated or JSON array).</div>
-                        </div>
-                    </div>
+        <!-- Tab nav -->
+        <ul class="nav nav-tabs mb-4" id="adminTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="build-tab" data-bs-toggle="tab"
+                        data-bs-target="#build-card" type="button" role="tab">
+                    📋 Build Card
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="deepdive-tab" data-bs-toggle="tab"
+                        data-bs-target="#deep-dives" type="button" role="tab"
+                        onclick="initDeepDiveTab()">
+                    🔍 Race Deep-Dives
+                </button>
+            </li>
+        </ul>
 
-                    <div class="mb-4">
-                        <label class="form-label d-block">Workflow mode</label>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="radio" name="sourceMode" id="sourceModeWeb" value="web_search" checked>
-                            <label class="form-check-label" for="sourceModeWeb">Auto-gather with OpenRouter web search</label>
-                        </div>
-                        <div class="form-check form-check-inline">
-                            <input class="form-check-input" type="radio" name="sourceMode" id="sourceModeManual" value="manual">
-                            <label class="form-check-label" for="sourceModeManual">Manual paste / override</label>
-                        </div>
-                        <div class="form-text">Use web search as the primary path. Manual source material remains available as a fallback.</div>
-                    </div>
+        <div class="tab-content">
 
-                    <div class="mb-3">
-                        <label for="sourceUrls" class="form-label">Source URLs</label>
-                        <textarea class="form-control" id="sourceUrls" rows="2" placeholder="Optional hints or known URLs, one per line"></textarea>
-                    </div>
-
-                    <div class="mb-3" id="manualSourceSection">
-                        <label for="sourceText" class="form-label">Raw source material</label>
-                        <textarea class="form-control" id="sourceText" rows="12" placeholder="Paste race-card notes, copied entries, web-search findings, or manually gathered data here."></textarea>
-                        <div class="form-text">Only required in manual mode. In web-search mode, the backend will ask OpenRouter to discover and structure the card automatically.</div>
-                    </div>
-
-                    <div class="mb-4">
-                        <label for="adminNotes" class="form-label">Admin notes</label>
-                        <textarea class="form-control" id="adminNotes" rows="3" placeholder="Optional notes about source quality, assumptions, or follow-up work."></textarea>
-                    </div>
-
-                    <div class="row g-3 mb-4">
-                        {% for model in model_options %}
-                        <div class="col-md-4">
-                            <div class="card h-100 border-0 bg-dark-subtle model-card">
-                                <div class="card-body">
-                                    <div class="d-flex justify-content-between align-items-center mb-2">
-                                        <strong>{{ model.label }}</strong>
-                                        <span class="badge bg-primary">{{ model.tier_label }}</span>
-                                    </div>
-                                    <p class="small text-muted mb-0">{{ model.description }}</p>
+            <!-- ===== BUILD CARD TAB ===== -->
+            <div class="tab-pane fade show active" id="build-card" role="tabpanel">
+                <div class="card shadow-lg border-0">
+                    <div class="card-body p-4">
+                        <form id="adminCardForm">
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label for="raceDate" class="form-label">Race date</label>
+                                    <input type="date" class="form-control" id="raceDate" value="{{ default_date }}" required>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label for="trackId" class="form-label">Track</label>
+                                    <select class="form-select" id="trackId" required>
+                                        {% for track in available_tracks %}
+                                        <option value="{{ track.id }}">{{ track.name }} ({{ track.id }})</option>
+                                        {% endfor %}
+                                    </select>
                                 </div>
                             </div>
-                        </div>
-                        {% endfor %}
-                    </div>
 
-                    <div class="d-flex gap-2 flex-wrap">
-                        <button type="submit" class="btn btn-primary btn-lg" id="saveCardBtn" {% if not openrouter_configured %}disabled{% endif %}>
-                            Auto-gather and save card
-                        </button>
-                        <a href="/" class="btn btn-outline-secondary btn-lg">Cancel</a>
+                            <div class="mb-4">
+                                <label class="form-label d-block">Workflow mode</label>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="sourceMode" id="sourceModeWeb" value="web_search" checked>
+                                    <label class="form-check-label" for="sourceModeWeb">Auto-gather with OpenRouter web search</label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="sourceMode" id="sourceModeManual" value="manual">
+                                    <label class="form-check-label" for="sourceModeManual">Manual paste / override</label>
+                                </div>
+                                <div class="form-text">Web search is the primary path. Manual source material remains available as a fallback.</div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="sourceUrls" class="form-label">Source URLs <span class="text-muted">(optional hints)</span></label>
+                                <textarea class="form-control" id="sourceUrls" rows="2" placeholder="One URL per line — leave blank to let Grok discover them automatically"></textarea>
+                            </div>
+
+                            <div class="mb-3" id="manualSourceSection">
+                                <label for="sourceText" class="form-label">Raw source material</label>
+                                <textarea class="form-control" id="sourceText" rows="12"
+                                    placeholder="Paste race-card notes, copied entries, web-search findings, or manually gathered data here."></textarea>
+                                <div class="form-text">Only required in manual mode. In web-search mode the backend asks Grok to discover and structure the card automatically.</div>
+                            </div>
+
+                            <div class="mb-4">
+                                <label for="adminNotes" class="form-label">Admin notes</label>
+                                <textarea class="form-control" id="adminNotes" rows="3"
+                                    placeholder="Optional notes about source quality, assumptions, or follow-up work."></textarea>
+                            </div>
+
+                            <div class="d-flex gap-3 flex-wrap align-items-center">
+                                <button type="submit" class="btn btn-primary btn-lg" id="saveCardBtn" {% if not openrouter_configured %}disabled{% endif %}>
+                                    Auto-gather and save card
+                                </button>
+                                <a href="/" class="btn btn-outline-secondary btn-lg">Cancel</a>
+                                <span class="text-muted small">Powered by <strong>Grok 4.20 Beta</strong> with live web search</span>
+                            </div>
+                        </form>
                     </div>
-                </form>
+                </div>
             </div>
-        </div>
+
+            <!-- ===== RACE DEEP-DIVES TAB ===== -->
+            <div class="tab-pane fade" id="deep-dives" role="tabpanel">
+                <div class="card shadow-lg border-0 mb-4">
+                    <div class="card-body p-4">
+                        <h5 class="fw-bold mb-1">Race Deep-Dive</h5>
+                        <p class="text-muted mb-4">
+                            Select a saved race-card session, then click a race to let Grok search for
+                            <strong>workouts, recent form, jockey stats, and trainer stats</strong> for every horse.
+                            Results are cached directly into the database for use during analysis.
+                        </p>
+
+                        <div class="row mb-3 align-items-end">
+                            <div class="col-md-9 mb-2 mb-md-0">
+                                <label for="sessionSelect" class="form-label">Session</label>
+                                <select class="form-select" id="sessionSelect">
+                                    <option value="">— click Refresh to load sessions —</option>
+                                </select>
+                            </div>
+                            <div class="col-md-3">
+                                <button class="btn btn-outline-secondary w-100" onclick="loadSessions()">↻ Refresh</button>
+                            </div>
+                        </div>
+
+                        <div id="raceButtonsContainer" class="mb-3" style="display:none">
+                            <label class="form-label fw-semibold">Select a race to deep-dive</label>
+                            <div id="raceButtons" class="d-flex flex-wrap gap-2"></div>
+                        </div>
+
+                        <div id="deepDiveStatus" class="alert mt-3" style="display:none"></div>
+                    </div>
+                </div>
+
+                <div id="deepDiveResults"></div>
+            </div>
+
+        </div><!-- /tab-content -->
     </div>
 </div>
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
+// ── BUILD CARD TAB ────────────────────────────────────────────────────────────
 function getSelectedSourceMode() {
     return document.querySelector('input[name="sourceMode"]:checked').value;
 }
-
 function getSubmitLabel() {
     return getSelectedSourceMode() === 'web_search'
         ? 'Auto-gather and save card'
         : 'Structure and save race card';
 }
-
 function updateAdminModeUI() {
     const manualSection = document.getElementById('manualSourceSection');
-    const sourceText = document.getElementById('sourceText');
-    const saveButton = document.getElementById('saveCardBtn');
-    const isManual = getSelectedSourceMode() === 'manual';
-
+    const sourceText    = document.getElementById('sourceText');
+    const saveButton    = document.getElementById('saveCardBtn');
+    const isManual      = getSelectedSourceMode() === 'manual';
     manualSection.style.display = isManual ? 'block' : 'none';
     sourceText.required = isManual;
     saveButton.innerHTML = getSubmitLabel();
 }
+document.querySelectorAll('input[name="sourceMode"]').forEach(i => i.addEventListener('change', updateAdminModeUI));
 
-document.querySelectorAll('input[name="sourceMode"]').forEach(input => {
-    input.addEventListener('change', updateAdminModeUI);
-});
-
-document.getElementById('adminCardForm').addEventListener('submit', async function(event) {
-    event.preventDefault();
-
+document.getElementById('adminCardForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
     const saveButton = document.getElementById('saveCardBtn');
     const payload = {
-        race_date: document.getElementById('raceDate').value,
-        track_id: document.getElementById('trackId').value,
-        llm_model: document.getElementById('llmModel').value,
+        race_date:   document.getElementById('raceDate').value,
+        track_id:    document.getElementById('trackId').value,
+        llm_model:   'x-ai/grok-4.20-beta',
         source_mode: getSelectedSourceMode(),
         source_text: document.getElementById('sourceText').value,
         admin_notes: document.getElementById('adminNotes').value,
         source_urls: document.getElementById('sourceUrls').value
-            .split(/\n|,/)
-            .map(value => value.trim())
-            .filter(Boolean)
+            .split(/\n|,/).map(v => v.trim()).filter(Boolean)
     };
-
     saveButton.disabled = true;
     saveButton.innerHTML = 'Working\u2026';
-
     try {
-        const response = await fetch('/api/admin/race-cards', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const result = await response.json();
-
-        if (!response.ok) {
-            throw new Error(result.detail || 'Failed to save race card');
-        }
-
+        const resp   = await fetch('/api/admin/race-cards', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        const result = await resp.json();
+        if (!resp.ok) throw new Error(result.detail || 'Failed to save race card');
         window.location.href = result.redirect_url;
-    } catch (error) {
-        alert(error.message);
+    } catch (err) {
+        alert(err.message);
         saveButton.disabled = false;
         saveButton.innerHTML = getSubmitLabel();
     }
 });
-
 updateAdminModeUI();
+
+// ── RACE DEEP-DIVES TAB ───────────────────────────────────────────────────────
+let deepDiveTabInited = false;
+function initDeepDiveTab() {
+    if (!deepDiveTabInited) { loadSessions(); deepDiveTabInited = true; }
+}
+
+async function loadSessions() {
+    const sel = document.getElementById('sessionSelect');
+    sel.innerHTML = '<option value="">Loading…</option>';
+    try {
+        const resp = await fetch('/api/admin/sessions');
+        if (!resp.ok) throw new Error('Could not load sessions');
+        const sessions = await resp.json();
+        if (!sessions.length) { sel.innerHTML = '<option value="">No sessions found</option>'; return; }
+        sel.innerHTML = '<option value="">— select a session —</option>';
+        sessions.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.session_id;
+            opt.textContent = `${s.race_date}  ·  ${s.track_id}  ·  ${s.status}  ·  ${s.session_id.slice(0,8)}…`;
+            sel.appendChild(opt);
+        });
+    } catch (err) {
+        sel.innerHTML = `<option value="">Error: ${err.message}</option>`;
+    }
+}
+
+document.getElementById('sessionSelect').addEventListener('change', async function() {
+    const sessionId = this.value;
+    const container  = document.getElementById('raceButtonsContainer');
+    const buttonsDiv = document.getElementById('raceButtons');
+    document.getElementById('deepDiveResults').innerHTML  = '';
+    document.getElementById('deepDiveStatus').style.display = 'none';
+    if (!sessionId) { container.style.display = 'none'; return; }
+    try {
+        const resp = await fetch(`/api/results-json/${sessionId}`);
+        if (!resp.ok) throw new Error('Cannot load session results');
+        const results = await resp.json();
+        const races   = results.race_analyses || [];
+        buttonsDiv.innerHTML = '';
+        races.forEach(race => {
+            const btn = document.createElement('button');
+            btn.className        = 'btn btn-outline-primary';
+            btn.textContent      = `Race ${race.race_number}`;
+            btn.dataset.raceNum  = race.race_number;
+            btn.dataset.raceDate = results.race_date || '';
+            btn.dataset.trackId  = results.track_id  || '';
+            btn.onclick = () => runDeepDive(sessionId, race.race_number, results.race_date, results.track_id, btn);
+            buttonsDiv.appendChild(btn);
+        });
+        container.style.display = races.length ? 'block' : 'none';
+    } catch (err) {
+        container.style.display = 'none';
+        showDeepDiveStatus('danger', `Could not load races: ${err.message}`);
+    }
+});
+
+async function runDeepDive(sessionId, raceNumber, raceDate, trackId, clickedBtn) {
+    // highlight active button
+    document.querySelectorAll('#raceButtons button').forEach(b => {
+        b.classList.remove('btn-primary'); b.classList.add('btn-outline-primary'); b.disabled = false;
+    });
+    clickedBtn.classList.remove('btn-outline-primary');
+    clickedBtn.classList.add('btn-primary');
+    clickedBtn.disabled  = true;
+    clickedBtn.innerHTML = `Race ${raceNumber} ⏳`;
+
+    document.getElementById('deepDiveResults').innerHTML = '';
+    showDeepDiveStatus('info', `🔍 Running deep-dive on Race ${raceNumber}… Grok is searching for workouts, recent form, and jockey/trainer stats. This may take 30–60 seconds.`);
+
+    try {
+        const resp   = await fetch('/api/admin/race-deep-dive', {
+            method: 'POST',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ session_id: sessionId, race_number: raceNumber, race_date: raceDate, track_id: trackId })
+        });
+        const result = await resp.json();
+        if (!resp.ok) throw new Error(result.detail || 'Deep-dive failed');
+        showDeepDiveStatus('success', `✅ Deep-dive complete — enriched data collected for <strong>${result.horses_enriched}</strong> horses and cached.`);
+        renderDeepDiveResults(result.deep_dive, result.source_urls || []);
+    } catch (err) {
+        showDeepDiveStatus('danger', `❌ Deep-dive failed: ${err.message}`);
+    }
+    clickedBtn.disabled  = false;
+    clickedBtn.innerHTML = `Race ${raceNumber} ✓`;
+}
+
+function showDeepDiveStatus(type, html) {
+    const el = document.getElementById('deepDiveStatus');
+    el.className    = `alert alert-${type}`;
+    el.innerHTML    = html;
+    el.style.display = 'block';
+}
+
+function renderDeepDiveResults(data, sourceUrls) {
+    const horses  = data.horses || [];
+    const summary = data.deep_dive_summary || '';
+    let html = `<div class="card border-0 shadow-lg mb-4"><div class="card-body p-4">
+        <h5 class="fw-bold mb-3">Race ${data.race_number} — Deep-Dive Results <span class="badge bg-secondary ms-2">Cached ✓</span></h5>`;
+    if (summary) html += `<div class="alert alert-secondary mb-4">${summary}</div>`;
+
+    horses.forEach(h => {
+        html += `<div class="card mb-3 border-0 bg-dark-subtle"><div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-2">
+                <h6 class="fw-bold mb-0">Post ${h.post_position || '?'} — ${h.name}</h6>
+                <span class="text-muted small">${h.jockey || ''}${h.trainer ? ' / ' + h.trainer : ''}</span>
+            </div>`;
+        if (h.form_notes) html += `<p class="small text-info mb-2">📝 ${h.form_notes}</p>`;
+
+        if (h.recent_results && h.recent_results.length) {
+            html += `<p class="small fw-semibold mb-1">Recent Results</p>
+            <div class="table-responsive mb-2"><table class="table table-sm table-dark small mb-0">
+            <thead><tr><th>Date</th><th>Track</th><th>Dist</th><th>Surf</th><th>Fin</th><th>Fig</th><th>Lgths</th><th>Odds</th></tr></thead><tbody>`;
+            h.recent_results.slice(0,5).forEach(r => {
+                const winCls = r.finish === 1 ? 'text-warning fw-bold' : '';
+                html += `<tr><td>${r.date||''}</td><td>${r.track||''}</td><td>${r.distance||''}</td><td>${r.surface||''}</td>
+                    <td class="${winCls}">${r.finish||''}</td><td>${r.speed_figure||''}</td>
+                    <td>${r.beaten_lengths != null ? r.beaten_lengths : ''}</td><td>${r.odds||''}</td></tr>`;
+            });
+            html += `</tbody></table></div>`;
+        }
+
+        if (h.workouts && h.workouts.length) {
+            html += `<p class="small fw-semibold mb-1">Recent Workouts</p>
+            <div class="table-responsive mb-2"><table class="table table-sm table-dark small mb-0">
+            <thead><tr><th>Date</th><th>Track</th><th>Dist</th><th>Time</th><th>Rank</th><th>Type</th></tr></thead><tbody>`;
+            h.workouts.slice(0,5).forEach(w => {
+                const bulletCls = w.type === 'bullet' ? 'text-warning fw-bold' : '';
+                html += `<tr><td>${w.date||''}</td><td>${w.track||''}</td><td>${w.distance||''}</td>
+                    <td>${w.time||''}</td><td>${w.rank||''}</td><td class="${bulletCls}">${w.type||''}</td></tr>`;
+            });
+            html += `</tbody></table></div>`;
+        }
+
+        const js = h.jockey_stats  || {};
+        const ts = h.trainer_stats || {};
+        if (Object.keys(js).length || Object.keys(ts).length) {
+            html += `<div class="row small mt-1">
+                <div class="col-md-6">🏇 <strong>Jockey:</strong> track ${js.track_win_pct != null ? js.track_win_pct + '%' : '—'} · dist ${js.distance_win_pct != null ? js.distance_win_pct + '%' : '—'} · 30d ${js.last_30_days || '—'}</div>
+                <div class="col-md-6">🎽 <strong>Trainer:</strong> track ${ts.track_win_pct != null ? ts.track_win_pct + '%' : '—'} · dist ${ts.distance_win_pct != null ? ts.distance_win_pct + '%' : '—'} · 30d ${ts.last_30_days || '—'}</div>
+            </div>`;
+        }
+        html += `</div></div>`;
+    });
+
+    if (sourceUrls.length) {
+        html += `<p class="small text-muted mt-2">Sources: `;
+        html += sourceUrls.map(u => `<a href="${u}" target="_blank" rel="noopener" class="text-muted me-2">${new URL(u).hostname}</a>`).join('');
+        html += `</p>`;
+    }
+    html += `</div></div>`;
+    const div = document.getElementById('deepDiveResults');
+    div.innerHTML = html;
+    div.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 </script>
 {% endblock %}

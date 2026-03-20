@@ -383,11 +383,12 @@ SUPPORTED_TRACKS = {
 MODEL_OPTIONS = [MODEL_CATALOG[model_id] for model_id in MODEL_CATALOG]
 MODEL_LOOKUP = MODEL_CATALOG
 DEFAULT_LLM_MODEL = "x-ai/grok-4.20-beta"
-DEFAULT_ADMIN_LLM_MODEL = "google/gemini-3.1-flash-lite-preview"
+DEFAULT_ADMIN_LLM_MODEL = "x-ai/grok-4.20-beta"
 ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS = 10000
 ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS = 5000
 ADMIN_COMPACT_JSON_RETRY_MODEL_PREFIXES = ("minimax/",)
 ADMIN_MANUAL_MAX_TOKENS = 2500
+ADMIN_DEEP_DIVE_MAX_TOKENS = 12000
 STATUS_BADGE_CLASSES = {
     "completed": "success",
     "running": "primary",
@@ -412,6 +413,12 @@ class AdminRaceCardRequest(BaseModel):
     source_text: str = ""
     source_urls: List[str] = Field(default_factory=list)
     admin_notes: str = ""
+
+class AdminDeepDiveRequest(BaseModel):
+    session_id: str
+    race_number: int
+    race_date: str
+    track_id: str = "DMR"
 
 class AnalysisStatus(BaseModel):
     session_id: str
@@ -496,8 +503,6 @@ async def admin_page(request: Request):
         _template_context(
             request,
             f"{BRAND_NAME} Admin Workflow",
-            model_options=_get_configured_model_options(),
-            default_model=_get_default_model(DEFAULT_ADMIN_LLM_MODEL),
             available_tracks=[{"id": track_id, "name": track_name} for track_id, track_name in SUPPORTED_TRACKS.items()],
             default_date=datetime.now().strftime("%Y-%m-%d"),
             openrouter_configured=bool(app_state.ensure_openrouter_client() and app_state.openrouter_client.api_key),
@@ -900,6 +905,211 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
             session_id, "failed", 0, "admin_failed", str(exc)
         )
         raise HTTPException(status_code=500, detail=f"Failed to create admin race card: {exc}") from exc
+
+
+@app.get("/api/admin/sessions")
+async def list_admin_sessions(request: Request):
+    """List recent admin-created race card sessions for the deep-dive tab."""
+    if not _auth_enabled():
+        raise HTTPException(status_code=503, detail="Admin access is not configured on the server")
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+
+    session_manager = await app_state.ensure_session_manager()
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager is not available")
+
+    sessions = await session_manager.get_recent_sessions(20)
+    return JSONResponse(sessions)
+
+
+@app.get("/api/results-json/{session_id}")
+async def get_session_results_json(session_id: str, request: Request):
+    """Return raw session results JSON — used by the deep-dive tab to enumerate races."""
+    if not _auth_enabled():
+        raise HTTPException(status_code=503, detail="Admin access is not configured on the server")
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+
+    session_manager = await app_state.ensure_session_manager()
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager is not available")
+
+    results = await session_manager.get_session_results(session_id)
+    if "error" in results:
+        raise HTTPException(status_code=404, detail=results["error"])
+    return JSONResponse(results)
+
+
+@app.post("/api/admin/race-deep-dive")
+async def admin_race_deep_dive(request: AdminDeepDiveRequest, http_request: Request = None):
+    """Deep-dive into one race: search for workouts, recent form, and jockey/trainer stats for every horse."""
+    if not _auth_enabled():
+        raise HTTPException(status_code=503, detail="Admin access is not configured on the server")
+    if http_request is None or not _is_admin(http_request):
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+
+    session_manager = await app_state.ensure_session_manager()
+    openrouter_client = app_state.ensure_openrouter_client()
+
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager is not available")
+    if not openrouter_client or not openrouter_client.api_key:
+        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured on the server")
+    if not extract_json_object:
+        raise HTTPException(status_code=503, detail="Admin race-card helpers are unavailable")
+
+    logger.info(
+        "🔍 DEEP-DIVE: session=%s | race=%s | date=%s | track=%s",
+        request.session_id, request.race_number, request.race_date, request.track_id,
+    )
+
+    session_results = await session_manager.get_session_results(request.session_id)
+    if "error" in session_results:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_results['error']}")
+
+    race_analyses = session_results.get("race_analyses", [])
+    target_race = next(
+        (r for r in race_analyses if r.get("race_number") == request.race_number),
+        None,
+    )
+    if not target_race:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Race {request.race_number} not found in session {request.session_id}",
+        )
+
+    horses = target_race.get("predictions", [])
+    if not horses:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No horses found for Race {request.race_number}",
+        )
+
+    horse_lines = []
+    for h in horses:
+        name = h.get("horse") or h.get("name", "Unknown")
+        post = h.get("post_position", "?")
+        jockey = h.get("jockey", "")
+        trainer = h.get("trainer", "")
+        horse_lines.append(f"  - Post {post}: {name} (Jockey: {jockey}, Trainer: {trainer})")
+
+    track_full = SUPPORTED_TRACKS.get(request.track_id, request.track_id)
+    race_info = (
+        f"Race {request.race_number} on {request.race_date} at {track_full} ({request.track_id}) | "
+        f"{target_race.get('race_type', '')} | {target_race.get('distance', '')} | {target_race.get('surface', '')}"
+    )
+
+    prompt = f"""You are a professional horse racing data analyst. Perform a comprehensive deep-dive data collection for the following race.
+
+RACE: {race_info}
+
+HORSES ({len(horses)} starters):
+{chr(10).join(horse_lines)}
+
+For EACH horse above, search the web and collect ALL of the following data points:
+1. **Recent race results** — Last 5 races: date, track, distance, surface, finish position, speed figure/Beyer, beaten lengths, odds, race type/class
+2. **Recent workouts** — Last 4 weeks: date, track, distance, time, rank (e.g. "1/20"), workout type (bullet/handily/breezing)
+3. **Jockey stats** — Win % at {track_full}, win % at this distance/surface, last-30-day form (starts-wins-places-shows)
+4. **Trainer stats** — Win % at {track_full}, win % at this class/distance, last-30-day form
+5. **Form notes** — beaten favorite? class drop/rise? equipment change? medication? current condition?
+
+Search equibase.com, horseracingnation.com, brisnet.com, and any other authoritative racing data sources.
+
+Return ONLY a valid JSON object with this exact structure:
+{{
+  "race_number": {request.race_number},
+  "race_date": "{request.race_date}",
+  "track_id": "{request.track_id}",
+  "horses": [
+    {{
+      "name": "Horse Name",
+      "post_position": 1,
+      "jockey": "Jockey Name",
+      "trainer": "Trainer Name",
+      "recent_results": [
+        {{"date": "YYYY-MM-DD", "track": "XX", "distance": "6f", "surface": "Dirt", "finish": 1, "speed_figure": 95, "beaten_lengths": 0.0, "odds": "2-1", "race_type": "CLM"}}
+      ],
+      "workouts": [
+        {{"date": "YYYY-MM-DD", "track": "XX", "distance": "4F", "time": "48.2", "rank": "1/20", "type": "bullet"}}
+      ],
+      "jockey_stats": {{"track_win_pct": 22, "distance_win_pct": 18, "last_30_days": "12-3-2-1"}},
+      "trainer_stats": {{"track_win_pct": 15, "distance_win_pct": 12, "last_30_days": "8-2-1-0"}},
+      "form_notes": "Brief sharp condition assessment"
+    }}
+  ],
+  "deep_dive_summary": "Overall race dynamics and standout horses"
+}}"""
+
+    try:
+        response = await openrouter_client.call_model(
+            model="x-ai/grok-4.20-beta",
+            task_type="analysis",
+            prompt=prompt,
+            context={
+                "race_date": request.race_date,
+                "track_id": request.track_id,
+                "race_number": request.race_number,
+                "session_id": request.session_id,
+            },
+            max_tokens=ADMIN_DEEP_DIVE_MAX_TOKENS,
+            temperature=0.1,
+            plugins=[{"id": "web"}],
+            return_metadata=True,
+            response_format={"type": "json_object"},
+        )
+
+        content = response.get("content", "") if isinstance(response, dict) else ""
+        if not content:
+            raise HTTPException(status_code=502, detail="Grok returned empty content for deep-dive")
+
+        deep_dive_data = extract_json_object(content)
+
+        enriched_horses = deep_dive_data.get("horses", [])
+        for horse_data in enriched_horses:
+            horse_name = horse_data.get("name", "")
+            if horse_name:
+                await session_manager.cache_horse_data(
+                    request.session_id,
+                    request.race_date,
+                    horse_name,
+                    {
+                        "last3_results": horse_data.get("recent_results", []),
+                        "workouts": horse_data.get("workouts", []),
+                        "smartpick": {
+                            "jockey_stats": horse_data.get("jockey_stats", {}),
+                            "trainer_stats": horse_data.get("trainer_stats", {}),
+                            "form_notes": horse_data.get("form_notes", ""),
+                        },
+                        "quality_rating": 0.0,
+                        "profile_url": "",
+                    },
+                )
+
+        annotations = response.get("annotations", []) if isinstance(response, dict) else []
+        source_urls = [a.get("url") for a in annotations if isinstance(a, dict) and a.get("url")]
+
+        logger.info(
+            "✅ Deep-dive complete | race=%s | horses_enriched=%s | sources=%s",
+            request.race_number, len(enriched_horses), len(source_urls),
+        )
+
+        return JSONResponse({
+            "session_id": request.session_id,
+            "race_number": request.race_number,
+            "horses_enriched": len(enriched_horses),
+            "deep_dive": deep_dive_data,
+            "source_urls": source_urls,
+        })
+
+    except AdminRaceCardJSONError as exc:
+        raise HTTPException(status_code=422, detail=f"Deep-dive JSON parse failed: {exc}") from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Deep-dive failed for race {request.race_number}: {exc}")
+        raise HTTPException(status_code=500, detail=f"Deep-dive failed: {exc}") from exc
+
 
 @app.get("/api/status/{session_id}")
 async def get_analysis_status(session_id: str):
