@@ -20,6 +20,10 @@ if [ ! -d "/opt/render/project/.cache/ms-playwright" ] && [ ! -d "$HOME/.cache/m
     python -m playwright install chromium || echo "⚠️  Warning: Could not install Playwright browsers"
 fi
 
+# Clear stale bytecode to ensure fresh source is loaded
+find . -name "*.pyc" -delete 2>/dev/null || true
+find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+
 # Start the application
 echo "🎯 Starting application on port $PORT..."
 if [ "$ENVIRONMENT" = "production" ]; then

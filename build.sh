@@ -5,6 +5,11 @@ set -e
 
 echo "🚀 Starting TrackStarAI build..."
 
+# Clear stale Python bytecode from previous builds
+echo "🧹 Clearing stale bytecode caches..."
+find . -name "*.pyc" -delete 2>/dev/null || true
+find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+
 # Upgrade pip
 echo "📦 Upgrading pip..."
 pip install --upgrade pip
