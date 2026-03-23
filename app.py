@@ -40,6 +40,7 @@ try:
     from services.race_card_admin import (
         AdminRaceCardJSONError,
         build_equibase_card_overview_url,
+        build_equibase_race_urls,
         extract_json_object,
         fetch_equibase_expected_horses_by_race,
         fetch_equibase_expected_race_numbers,
@@ -55,6 +56,7 @@ except ImportError as e:
     OpenRouterClient = None
     AdminRaceCardJSONError = ValueError
     build_equibase_card_overview_url = None
+    build_equibase_race_urls = None
     extract_json_object = None
     fetch_equibase_expected_horses_by_race = None
     fetch_equibase_expected_race_numbers = None
@@ -384,8 +386,8 @@ MODEL_OPTIONS = [MODEL_CATALOG[model_id] for model_id in MODEL_CATALOG]
 MODEL_LOOKUP = MODEL_CATALOG
 DEFAULT_LLM_MODEL = "x-ai/grok-4.20-beta"
 DEFAULT_ADMIN_LLM_MODEL = "x-ai/grok-4.20-beta"
-ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS = 10000
-ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS = 5000
+ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS = 16000
+ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS = 8000
 ADMIN_COMPACT_JSON_RETRY_MODEL_PREFIXES = ("minimax/",)
 ADMIN_MANUAL_MAX_TOKENS = 2500
 ADMIN_DEEP_DIVE_MAX_TOKENS = 12000
@@ -686,6 +688,11 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
         )
         if expected_horses_by_race and not expected_race_numbers:
             expected_race_numbers = sorted(expected_horses_by_race)
+        per_race_urls = (
+            build_equibase_race_urls(request.track_id, request.race_date, expected_race_numbers)
+            if is_web_search_mode and expected_race_numbers and build_equibase_race_urls
+            else {}
+        )
         status_message = (
             "Auto-gathering and structuring race card with OpenRouter web search"
             if is_web_search_mode
@@ -703,6 +710,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                 expected_race_numbers=expected_race_numbers,
                 expected_horses_by_race=expected_horses_by_race,
                 official_card_url=official_card_url,
+                per_race_urls=per_race_urls,
             ),
             context=_build_admin_structuring_context(
                 request,
@@ -710,6 +718,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                 expected_race_numbers=expected_race_numbers,
                 expected_horses_by_race=expected_horses_by_race,
                 official_card_url=official_card_url,
+                per_race_urls=per_race_urls,
             ),
             max_tokens=(
                 ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS
@@ -759,6 +768,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                     expected_race_numbers=expected_race_numbers,
                     expected_horses_by_race=expected_horses_by_race,
                     official_card_url=official_card_url,
+                    per_race_urls=per_race_urls,
                     compact_response=True,
                 ),
                 context=_build_admin_structuring_context(
@@ -767,6 +777,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                     expected_race_numbers=expected_race_numbers,
                     expected_horses_by_race=expected_horses_by_race,
                     official_card_url=official_card_url,
+                    per_race_urls=per_race_urls,
                 ),
                 max_tokens=ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS,
                 temperature=0.2,
@@ -828,6 +839,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                     expected_horses_by_race=expected_horses_by_race,
                     missing_horses_by_race=missing_horses_by_race,
                     official_card_url=official_card_url,
+                    per_race_urls=per_race_urls,
                 ),
                 context=_build_admin_structuring_context(
                     request,
@@ -837,6 +849,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                     expected_horses_by_race=expected_horses_by_race,
                     missing_horses_by_race=missing_horses_by_race,
                     official_card_url=official_card_url,
+                    per_race_urls=per_race_urls,
                 ),
                 max_tokens=ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS,
                 temperature=0.2,
@@ -861,10 +874,10 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
 
         if expected_race_numbers and missing_race_numbers:
             missing_labels = ", ".join(str(number) for number in missing_race_numbers)
-            raise ValueError(f"Model response was incomplete. Missing races: {missing_labels}")
+            logger.warning(f"Partial card accepted — still missing races after retry: {missing_labels}")
         if missing_horses_by_race:
-            raise ValueError(
-                f"Model response was incomplete. Missing horses: {_format_missing_horses_by_race(missing_horses_by_race)}"
+            logger.warning(
+                f"Partial card accepted — still missing horses after retry: {_format_missing_horses_by_race(missing_horses_by_race)}"
             )
 
         normalized_results = normalize_admin_results(
@@ -1303,10 +1316,14 @@ def _build_admin_structuring_prompt(
     expected_horses_by_race: Optional[Dict[int, List[str]]] = None,
     missing_horses_by_race: Optional[Dict[int, List[str]]] = None,
     official_card_url: Optional[str] = None,
+    per_race_urls: Optional[Dict[int, Dict[str, str]]] = None,
     compact_response: bool = False,
 ) -> str:
     source_strategy = (
-        "Use web search before answering. Prefer official or high-confidence racing sources for the selected card, and cross-check fields when needed."
+        "Use web search before answering. "
+        "Your PRIMARY data sources are the Equibase SmartPick pages listed below — search each one to get the full field, "
+        "post positions, jockeys, trainers, morning line odds, and SmartPick rankings for every horse. "
+        "Cross-reference with the Equibase entry pages and other high-confidence racing sources."
         if request.source_mode == "web_search"
         else "Use only the supplied source material. Do not rely on outside knowledge or browse the web."
     )
@@ -1314,6 +1331,7 @@ def _build_admin_structuring_prompt(
     missing_race_numbers = missing_race_numbers or []
     expected_horses_by_race = expected_horses_by_race or {}
     missing_horses_by_race = missing_horses_by_race or {}
+    per_race_urls = per_race_urls or {}
 
     if missing_race_numbers or missing_horses_by_race:
         retry_requirements: List[str] = ["This is a retry."]
@@ -1341,8 +1359,20 @@ def _build_admin_structuring_prompt(
     else:
         discovery_requirements = "Include every race you can identify from the supplied material."
 
-    official_url_line = f"Official card URL: {official_card_url}" if official_card_url else ""
+    official_url_line = f"Official card overview URL: {official_card_url}" if official_card_url else ""
     official_field_summary = _format_expected_field_summary(expected_horses_by_race)
+
+    # Build per-race URL reference block for the prompt
+    smartpick_url_block = ""
+    if per_race_urls:
+        url_lines = []
+        for race_number in sorted(per_race_urls):
+            urls = per_race_urls[race_number]
+            url_lines.append(f"  Race {race_number}: SmartPick={urls['smartpick']}  Entry={urls['entry']}")
+        smartpick_url_block = (
+            "Equibase URLs by race (search these for accurate data):\n" + "\n".join(url_lines)
+        )
+
     compact_retry_line = (
         "This is a compact retry because the previous answer was malformed or truncated JSON. "
         "Keep the payload lean so the full card fits in one valid JSON object."
@@ -1385,6 +1415,7 @@ def _build_admin_structuring_prompt(
           "post_position": 1,
           "jockey": "Jockey Name",
           "trainer": "Trainer Name",
+          "morning_line_odds": "5-1",
           "composite_rating": 88.5,
           "factors": {
             "speed_rating": 88,
@@ -1406,7 +1437,7 @@ def _build_admin_structuring_prompt(
         if compact_response
         else (
             "- If evidence is limited, still rank the full field strongest to weakest and keep notes concise about uncertainty.\n"
-            "- Keep notes concise.\n"
+            "- Keep notes concise — one sentence max per horse.\n"
         )
     )
 
@@ -1418,6 +1449,7 @@ Race date: {request.race_date}
 Source mode: {request.source_mode}
 {source_strategy}
 {official_url_line}
+{smartpick_url_block}
 {official_field_summary}
 {compact_retry_line}
 
@@ -1431,8 +1463,10 @@ Rules:
 - Return a ranked prediction for EVERY horse in every returned race. Never truncate to only the top 3-5 horses.
 - If official horse names are provided, include every listed horse exactly once in that race.
 - Order each race's predictions strongest to weakest.
+- Use the Equibase SmartPick data as your primary source for post positions, jockeys, trainers, and morning line odds.
 - Use only grounded details; leave uncertain text blank instead of inventing facts.
 - `composite_rating` must be numeric on a 0-100 scale.
+- Include `morning_line_odds` for each horse if available from the SmartPick or entry pages.
 {compact_rules}""".strip()
 
 
@@ -1477,6 +1511,7 @@ def _build_admin_structuring_context(
     expected_horses_by_race: Optional[Dict[int, List[str]]] = None,
     missing_horses_by_race: Optional[Dict[int, List[str]]] = None,
     official_card_url: Optional[str] = None,
+    per_race_urls: Optional[Dict[int, Dict[str, str]]] = None,
 ) -> Dict[str, object]:
     context: Dict[str, object] = {
         "race_date": request.race_date,
@@ -1496,6 +1531,8 @@ def _build_admin_structuring_context(
         context["missing_horses_by_race"] = missing_horses_by_race
     if official_card_url:
         context["official_card_url"] = official_card_url
+    if per_race_urls:
+        context["per_race_urls"] = per_race_urls
     if source_text:
         context["source_text"] = source_text
     return context

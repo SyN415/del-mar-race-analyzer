@@ -458,7 +458,7 @@ class RaceCardAdminTests(unittest.TestCase):
             official_card_url="https://example.com/official-card",
         )
 
-        self.assertIn("Official card URL: https://example.com/official-card", prompt)
+        self.assertIn("Official card overview URL: https://example.com/official-card", prompt)
         self.assertIn("ONLY for these missing races: 3", prompt)
         self.assertIn("Missing horses on retry: Race 3: Delta.", prompt)
         self.assertIn("Never truncate to only the top 3-5 horses", prompt)
@@ -791,7 +791,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         self.assertEqual(second_call_kwargs["context"]["missing_horses_by_race"], {1: ["Bravo", "Charlie"]})
         self.assertIn("Missing horses on retry: Race 1: Bravo, Charlie.", second_call_kwargs["prompt"])
 
-    def test_create_admin_race_card_rejects_incomplete_card_after_retry(self):
+    def test_create_admin_race_card_accepts_partial_card_after_retry(self):
         app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: [1, 2, 3]
         self.openrouter_client.call_model = AsyncMock(side_effect=[
             {
@@ -811,15 +811,13 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             source_mode="web_search",
         )
 
-        with self.assertRaises(app_module.HTTPException) as exc:
-            app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
-
-        self.assertEqual(exc.exception.status_code, 422)
-        self.assertIn("Missing races: 3", exc.exception.detail)
+        # Partial cards are now accepted with a warning instead of raising HTTPException
+        result = app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
+        self.assertEqual(result.status_code, 200)
         self.assertEqual(self.openrouter_client.call_model.await_count, 2)
-        self.session_manager.save_session_results.assert_not_awaited()
+        self.session_manager.save_session_results.assert_awaited_once()
 
-    def test_create_admin_race_card_rejects_incomplete_field_after_retry(self):
+    def test_create_admin_race_card_accepts_partial_field_after_retry(self):
         app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: [1]
         app_module.fetch_equibase_expected_horses_by_race = lambda *args, **kwargs: {
             1: ["Alpha", "Bravo"]
@@ -842,13 +840,11 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             source_mode="web_search",
         )
 
-        with self.assertRaises(app_module.HTTPException) as exc:
-            app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
-
-        self.assertEqual(exc.exception.status_code, 422)
-        self.assertIn("Missing horses: Race 1: Bravo", exc.exception.detail)
+        # Partial fields are now accepted with a warning instead of raising HTTPException
+        result = app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
+        self.assertEqual(result.status_code, 200)
         self.assertEqual(self.openrouter_client.call_model.await_count, 2)
-        self.session_manager.save_session_results.assert_not_awaited()
+        self.session_manager.save_session_results.assert_awaited_once()
 
     def test_create_admin_race_card_surfaces_openrouter_timeout_as_503(self):
         self.openrouter_client.call_model = AsyncMock(return_value={

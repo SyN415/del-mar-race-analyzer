@@ -213,6 +213,41 @@ def build_equibase_card_overview_url(track_id: str, race_date: str, country: str
     return f"https://www.equibase.com/static/entry/{track_id.upper()}{formatted_date}{country}-EQB.html?SAP=viewe2"
 
 
+def build_equibase_race_entry_url(track_id: str, race_date: str, race_number: int, country: str = "USA") -> str:
+    """Build the Equibase individual race entry page URL."""
+    date_obj = datetime.strptime(race_date, "%Y-%m-%d")
+    formatted_date = date_obj.strftime("%m%d%y")
+    return f"https://www.equibase.com/static/entry/{track_id.upper()}{formatted_date}{country}{race_number}-EQB.html"
+
+
+def build_equibase_smartpick_url(track_id: str, race_date: str, race_number: int) -> str:
+    """Build the Equibase SmartPick page URL for a specific race."""
+    date_obj = datetime.strptime(race_date, "%Y-%m-%d")
+    formatted_date = date_obj.strftime("%m/%d/%Y")
+    return (
+        f"https://www.equibase.com/smartPick/smartPick.cfm/"
+        f"?trackId={track_id.upper()}&raceDate={formatted_date}&country=USA&dayEvening=D&raceNumber={race_number}"
+    )
+
+
+def build_equibase_race_urls(
+    track_id: str,
+    race_date: str,
+    race_numbers: List[int],
+) -> Dict[int, Dict[str, str]]:
+    """Build entry and SmartPick URLs for each race number.
+
+    Returns ``{race_number: {"entry": url, "smartpick": url}}``.
+    """
+    urls: Dict[int, Dict[str, str]] = {}
+    for race_number in race_numbers:
+        urls[race_number] = {
+            "entry": build_equibase_race_entry_url(track_id, race_date, race_number),
+            "smartpick": build_equibase_smartpick_url(track_id, race_date, race_number),
+        }
+    return urls
+
+
 def fetch_equibase_expected_race_numbers(
     track_id: str,
     race_date: str,
