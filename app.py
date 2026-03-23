@@ -46,6 +46,7 @@ try:
         fetch_equibase_expected_race_numbers,
         find_missing_horses_by_race,
         find_missing_race_numbers,
+        find_races_with_incomplete_fields,
         merge_source_urls,
         merge_structured_race_cards,
         normalize_admin_results,
@@ -875,6 +876,71 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                 excluded_race_numbers=missing_race_numbers,
             )
 
+        # --- Jockey / trainer gap-fill retry ---
+        incomplete_field_races = (
+            find_races_with_incomplete_fields(final_structured_payload)
+            if is_web_search_mode
+            else {}
+        )
+        if incomplete_field_races:
+            incomplete_race_nums = sorted(incomplete_field_races)
+            gap_summary = "; ".join(
+                f"Race {rn}: {len(gaps)} horse(s)" for rn, gaps in sorted(incomplete_field_races.items())
+            )
+            logger.info(f"Detected incomplete jockey/trainer fields — retrying for {gap_summary}")
+            await session_manager.update_session_status(
+                session_id,
+                "running",
+                75,
+                "admin_retry_jockey_trainer",
+                f"Filling missing jockey/trainer data for races {', '.join(str(n) for n in incomplete_race_nums)}",
+            )
+            # Build per-race URLs filtered to only the incomplete races
+            incomplete_per_race_urls = {
+                rn: per_race_urls[rn] for rn in incomplete_race_nums if rn in per_race_urls
+            } if per_race_urls else {}
+
+            jt_retry_response = await openrouter_client.call_model(
+                model=request.llm_model,
+                task_type="analysis",
+                prompt=_build_jockey_trainer_retry_prompt(
+                    request,
+                    incomplete_field_races=incomplete_field_races,
+                    per_race_urls=incomplete_per_race_urls,
+                ),
+                context=_build_admin_structuring_context(
+                    request,
+                    source_text,
+                    expected_race_numbers=incomplete_race_nums,
+                    official_card_url=official_card_url,
+                    per_race_urls=incomplete_per_race_urls,
+                ),
+                max_tokens=ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS,
+                temperature=0.2,
+                plugins=[{"id": "web"}],
+                return_metadata=True,
+                response_format=admin_response_format,
+            )
+            try:
+                jt_retry_payload = extract_admin_openrouter_payload(
+                    jt_retry_response,
+                    phase_label="retrying jockey/trainer gap-fill",
+                )
+                final_structured_payload = merge_structured_race_cards(final_structured_payload, jt_retry_payload)
+                merged_urls = merge_source_urls(
+                    source_urls=merged_urls,
+                    annotations=jt_retry_response.get("annotations"),
+                )
+            except AdminRaceCardJSONError:
+                logger.warning("Jockey/trainer gap-fill retry returned malformed JSON — keeping original data")
+
+            remaining_gaps = find_races_with_incomplete_fields(final_structured_payload)
+            if remaining_gaps:
+                gap_detail = "; ".join(
+                    f"Race {rn}: {', '.join(gaps)}" for rn, gaps in sorted(remaining_gaps.items())
+                )
+                logger.warning(f"Still incomplete after jockey/trainer retry: {gap_detail}")
+
         if expected_race_numbers and missing_race_numbers:
             missing_labels = ", ".join(str(number) for number in missing_race_numbers)
             logger.warning(f"Partial card accepted — still missing races after retry: {missing_labels}")
@@ -1324,9 +1390,9 @@ def _build_admin_structuring_prompt(
 ) -> str:
     source_strategy = (
         "Use web search before answering. "
-        "Your PRIMARY data sources are the Equibase SmartPick pages listed below — search each one to get the full field, "
-        "post positions, jockeys, trainers, morning line odds, and SmartPick rankings for every horse. "
-        "Cross-reference with the Equibase entry pages and other high-confidence racing sources."
+        "Your PRIMARY data sources are the Equibase SmartPick pages listed below — you MUST search the SmartPick URL for EVERY race "
+        "(not just the first few) to get the full field, post positions, jockeys, trainers, morning line odds, and SmartPick rankings. "
+        "Do not skip later races. Cross-reference with the Equibase entry pages and other high-confidence racing sources."
         if request.source_mode == "web_search"
         else "Use only the supplied source material. Do not rely on outside knowledge or browse the web."
     )
@@ -1467,7 +1533,8 @@ Rules:
 - If official horse names are provided, include every listed horse exactly once in that race.
 - Order each race's predictions strongest to weakest.
 - Use the Equibase SmartPick data as your primary source for post positions, jockeys, trainers, and morning line odds.
-- Use only grounded details; leave uncertain text blank instead of inventing facts.
+- **Jockey and trainer are MANDATORY for every horse.** Search the SmartPick page for EACH race to get this data. Never use "N/A", "Unknown", or leave them blank.
+- Use only grounded details; leave uncertain text blank instead of inventing facts — but jockey and trainer must always be populated.
 - `composite_rating` must be numeric on a 0-100 scale.
 - Include `morning_line_odds` for each horse if available from the SmartPick or entry pages.
 {compact_rules}""".strip()
@@ -1574,6 +1641,68 @@ def _format_missing_horses_by_race(missing_horses_by_race: Dict[int, List[str]])
         for race_number, horse_names in sorted(missing_horses_by_race.items())
         if horse_names
     )
+
+
+def _build_jockey_trainer_retry_prompt(
+    request: AdminRaceCardRequest,
+    *,
+    incomplete_field_races: Dict[int, List[str]],
+    per_race_urls: Optional[Dict[int, Dict[str, str]]] = None,
+) -> str:
+    """Build a targeted prompt to fill in missing jockey/trainer data for specific races."""
+    per_race_urls = per_race_urls or {}
+
+    gap_lines: List[str] = []
+    for race_number in sorted(incomplete_field_races):
+        gaps = incomplete_field_races[race_number]
+        gap_lines.append(f"  Race {race_number}: {'; '.join(gaps)}")
+
+    url_lines: List[str] = []
+    for race_number in sorted(per_race_urls):
+        urls = per_race_urls[race_number]
+        url_lines.append(f"  Race {race_number}: SmartPick={urls['smartpick']}  Entry={urls['entry']}")
+
+    url_block = (
+        "\nSearch these Equibase URLs for the missing data:\n" + "\n".join(url_lines)
+        if url_lines else ""
+    )
+
+    return f"""
+You are filling in missing jockey and trainer data for a horse racing card.
+
+Track: {SUPPORTED_TRACKS[request.track_id]} ({request.track_id})
+Race date: {request.race_date}
+
+Use web search before answering. Search the Equibase SmartPick and entry pages for each race listed below.
+{url_block}
+
+The following races have horses with missing jockey and/or trainer names:
+{chr(10).join(gap_lines)}
+
+Return ONLY valid JSON with this shape:
+{{
+  "race_analyses": [
+    {{
+      "race_number": 7,
+      "predictions": [
+        {{
+          "horse_name": "Horse Name",
+          "jockey": "Jockey Name",
+          "trainer": "Trainer Name"
+        }}
+      ]
+    }}
+  ]
+}}
+
+Rules:
+- Do not wrap the JSON in markdown fences.
+- ONLY return the races listed above — do not repeat already-complete races.
+- Include EVERY horse in each listed race, with the correct jockey and trainer from the SmartPick or entry page.
+- Jockey and trainer are MANDATORY — never use "N/A", "Unknown", or leave them blank.
+- If a horse is scratched, omit it entirely.
+""".strip()
+
 
 @app.post("/api/validate")
 async def run_validation():

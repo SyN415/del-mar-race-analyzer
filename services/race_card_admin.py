@@ -349,6 +349,48 @@ def find_missing_horses_by_race(
     return missing_horses_by_race
 
 
+_EMPTY_FIELD_VALUES = {"", "n/a", "na", "unknown", "tbd", "tba", "none", "-"}
+
+
+def _is_empty_field(value: Any) -> bool:
+    """Return True when a field value is missing, blank, or a known placeholder."""
+    if not value:
+        return True
+    return str(value).strip().lower() in _EMPTY_FIELD_VALUES
+
+
+def find_races_with_incomplete_fields(
+    structured_card: Dict[str, Any],
+    *,
+    required_fields: tuple[str, ...] = ("jockey", "trainer"),
+) -> Dict[int, List[str]]:
+    """Find races where horses are missing required fields (e.g. jockey, trainer).
+
+    Returns a dict mapping race number → list of missing field descriptions
+    like ``["Horse A: jockey, trainer", "Horse B: jockey"]``.
+    """
+    raw_races = structured_card.get("race_analyses") or structured_card.get("races") or []
+    incomplete: Dict[int, List[str]] = {}
+
+    for index, race in enumerate(raw_races, start=1):
+        race_number = _to_int(race.get("race_number") or race.get("number"), index)
+        raw_predictions = race.get("predictions") or race.get("entries") or race.get("horses") or []
+
+        race_gaps: List[str] = []
+        for prediction in raw_predictions:
+            horse_name = prediction.get("horse_name") or prediction.get("name") or prediction.get("horse") or "?"
+            missing_fields = [
+                field for field in required_fields if _is_empty_field(prediction.get(field))
+            ]
+            if missing_fields:
+                race_gaps.append(f"{horse_name}: {', '.join(missing_fields)}")
+
+        if race_gaps:
+            incomplete[race_number] = race_gaps
+
+    return incomplete
+
+
 def merge_structured_race_cards(*structured_cards: Dict[str, Any]) -> Dict[str, Any]:
     """Merge multiple structured card payloads, keeping the strongest version of each race."""
     merged_card: Dict[str, Any] = {"card_overview": "", "race_analyses": []}
