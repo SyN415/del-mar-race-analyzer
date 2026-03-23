@@ -292,6 +292,7 @@ def _render_login_page(
     title: str = "TrackStarAI Admin Sign In",
 ):
     return templates.TemplateResponse(
+        request,
         "login.html",
         _template_context(
             request,
@@ -436,6 +437,7 @@ async def landing_page(request: Request):
     """Public dashboard for recent race cards."""
     dashboard_cards = await _safe_load_dashboard_cards(limit=8)
     return templates.TemplateResponse(
+        request,
         "landing.html",
         _template_context(
             request,
@@ -501,6 +503,7 @@ async def admin_page(request: Request):
     if not _is_admin(request):
         return RedirectResponse("/login", status_code=302)
     return templates.TemplateResponse(
+        request,
         "admin.html",
         _template_context(
             request,
@@ -1192,7 +1195,7 @@ async def cancel_analysis(session_id: str):
 @app.get("/progress/{session_id}", response_class=HTMLResponse)
 async def progress_page(request: Request, session_id: str):
     """Progress tracking page with real-time updates"""
-    return templates.TemplateResponse("progress.html", {
+    return templates.TemplateResponse(request, "progress.html", {
         "request": request,
         "session_id": session_id,
         "title": "Analysis in Progress"
@@ -1208,7 +1211,7 @@ async def results_page(request: Request, session_id: str):
         else:
             results = {"error": "Session manager not available"}
             
-        return templates.TemplateResponse("results.html", {
+        return templates.TemplateResponse(request, "results.html", {
             "request": request,
             "session_id": session_id,
             "results": results,
@@ -1216,7 +1219,7 @@ async def results_page(request: Request, session_id: str):
         })
     except Exception as e:
         logger.error(f"Failed to load results for session {session_id}: {e}")
-        return templates.TemplateResponse("error.html", {
+        return templates.TemplateResponse(request, "error.html", {
             "request": request,
             "error": str(e),
             "title": "Error Loading Results"
