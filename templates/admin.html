@@ -257,7 +257,7 @@ document.getElementById('sessionSelect').addEventListener('change', async functi
     }
 });
 
-async function runDeepDive(sessionId, raceNumber, raceDate, trackId, clickedBtn) {
+async function runDeepDive(sessionId, raceNumber, raceDate, trackId, clickedBtn, forceRefresh = false) {
     // highlight active button
     document.querySelectorAll('#raceButtons button').forEach(b => {
         b.classList.remove('btn-primary'); b.classList.add('btn-outline-primary'); b.disabled = false;
@@ -268,17 +268,21 @@ async function runDeepDive(sessionId, raceNumber, raceDate, trackId, clickedBtn)
     clickedBtn.innerHTML = `Race ${raceNumber} ⏳`;
 
     document.getElementById('deepDiveResults').innerHTML = '';
-    showDeepDiveStatus('info', `🔍 Running deep-dive on Race ${raceNumber}… Grok is searching for workouts, recent form, and jockey/trainer stats. This may take 30–60 seconds.`);
+    showDeepDiveStatus('info', `🔍 Loading Race ${raceNumber} deep-dive data…`);
 
     try {
         const resp   = await fetch('/api/admin/race-deep-dive', {
             method: 'POST',
             headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({ session_id: sessionId, race_number: raceNumber, race_date: raceDate, track_id: trackId })
+            body: JSON.stringify({ session_id: sessionId, race_number: raceNumber, race_date: raceDate, track_id: trackId, force_refresh: forceRefresh })
         });
         const result = await resp.json();
         if (!resp.ok) throw new Error(result.detail || 'Deep-dive failed');
-        showDeepDiveStatus('success', `✅ Deep-dive complete — enriched data collected for <strong>${result.horses_enriched}</strong> horses and cached.`);
+        if (result.from_cache) {
+            showDeepDiveStatus('success', `✅ Loaded from cache — enriched data for <strong>${result.horses_enriched}</strong> horses. <a href="#" class="alert-link ms-2" onclick="runDeepDive('${sessionId}', ${raceNumber}, '${raceDate}', '${trackId}', document.querySelector('#raceButtons .btn-primary'), true); return false;">🔄 Re-run deep dive</a>`);
+        } else {
+            showDeepDiveStatus('success', `✅ Deep-dive complete — enriched data collected for <strong>${result.horses_enriched}</strong> horses and cached.`);
+        }
         renderDeepDiveResults(result.deep_dive, result.source_urls || []);
     } catch (err) {
         showDeepDiveStatus('danger', `❌ Deep-dive failed: ${err.message}`);

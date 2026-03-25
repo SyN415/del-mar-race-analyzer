@@ -423,6 +423,7 @@ class AdminDeepDiveRequest(BaseModel):
     race_number: int
     race_date: str
     track_id: str = "DMR"
+    force_refresh: bool = False
 
 class AnalysisStatus(BaseModel):
     session_id: str
@@ -1068,6 +1069,28 @@ async def admin_race_deep_dive(request: AdminDeepDiveRequest, http_request: Requ
             detail=f"No horses found for Race {request.race_number}",
         )
 
+    # ── Cache look-up ──────────────────────────────────────────────────────────
+    if not request.force_refresh:
+        cached = await session_manager.get_race_deep_dive(
+            request.race_date, request.track_id, request.race_number
+        )
+        if cached:
+            deep_dive_data = cached.get("deep_dive", {})
+            cached_urls = cached.get("source_urls", [])
+            horses_enriched = len(deep_dive_data.get("horses", []))
+            logger.info(
+                "🎯 DEEP-DIVE CACHE HIT: race=%s | date=%s | track=%s | horses=%s",
+                request.race_number, request.race_date, request.track_id, horses_enriched,
+            )
+            return JSONResponse({
+                "session_id": request.session_id,
+                "race_number": request.race_number,
+                "horses_enriched": horses_enriched,
+                "deep_dive": deep_dive_data,
+                "source_urls": cached_urls,
+                "from_cache": True,
+            })
+
     horse_lines = []
     for h in horses:
         name = h.get("horse") or h.get("name", "Unknown")
@@ -1176,12 +1199,23 @@ Return ONLY a valid JSON object with this exact structure:
             request.race_number, len(enriched_horses), len(source_urls),
         )
 
+        # ── Persist result so subsequent requests return from cache ────────────
+        await session_manager.save_race_deep_dive(
+            request.session_id,
+            request.race_date,
+            request.track_id,
+            request.race_number,
+            deep_dive_data,
+            source_urls,
+        )
+
         return JSONResponse({
             "session_id": request.session_id,
             "race_number": request.race_number,
             "horses_enriched": len(enriched_horses),
             "deep_dive": deep_dive_data,
             "source_urls": source_urls,
+            "from_cache": False,
         })
 
     except AdminRaceCardJSONError as exc:

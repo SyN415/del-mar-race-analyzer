@@ -492,6 +492,96 @@ class SessionManager:
             
         return None
     
+    async def save_race_deep_dive(
+        self,
+        session_id: str,
+        race_date: str,
+        track_id: str,
+        race_number: int,
+        deep_dive_data: Dict,
+        source_urls: List[str],
+    ) -> None:
+        """Persist a completed race deep-dive result to the race_data_cache table."""
+        payload = json.dumps({
+            "deep_dive": deep_dive_data,
+            "source_urls": source_urls,
+            "session_id": session_id,
+        })
+        try:
+            if self.storage_backend == 'supabase':
+                await self._supabase_request(
+                    'POST',
+                    'race_data_cache',
+                    params={'on_conflict': 'race_date,track_id,race_number'},
+                    prefer='resolution=merge-duplicates',
+                    payload={
+                        'race_date': race_date,
+                        'track_id': track_id,
+                        'race_number': race_number,
+                        'race_data_json': payload,
+                        'created_at': self._utcnow_iso(),
+                    },
+                )
+                logger.info(
+                    "💾 Saved race deep-dive to Supabase | race=%s | date=%s | track=%s",
+                    race_number, race_date, track_id,
+                )
+                return
+
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("""
+                    INSERT OR REPLACE INTO race_data_cache
+                    (race_date, track_id, race_number, race_data_json, created_at)
+                    VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (race_date, track_id, race_number, payload))
+                await db.commit()
+            logger.info(
+                "💾 Saved race deep-dive to SQLite | race=%s | date=%s | track=%s",
+                race_number, race_date, track_id,
+            )
+        except Exception as e:
+            logger.error(f"Failed to save race deep-dive: {e}")
+
+    async def get_race_deep_dive(
+        self,
+        race_date: str,
+        track_id: str,
+        race_number: int,
+    ) -> Optional[Dict]:
+        """Retrieve a cached race deep-dive result, or None if not present."""
+        try:
+            if self.storage_backend == 'supabase':
+                rows = await self._supabase_request(
+                    'GET',
+                    'race_data_cache',
+                    params={
+                        'race_date': f'eq.{race_date}',
+                        'track_id': f'eq.{track_id}',
+                        'race_number': f'eq.{race_number}',
+                        'select': 'race_data_json',
+                        'limit': 1,
+                    },
+                )
+                row = rows[0] if rows else None
+                if row:
+                    data = row.get('race_data_json')
+                    if data:
+                        return json.loads(data) if isinstance(data, str) else data
+                return None
+
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute("""
+                    SELECT race_data_json FROM race_data_cache
+                    WHERE race_date = ? AND track_id = ? AND race_number = ?
+                    LIMIT 1
+                """, (race_date, track_id, race_number)) as cursor:
+                    row = await cursor.fetchone()
+            if row and row[0]:
+                return json.loads(row[0])
+        except Exception as e:
+            logger.error(f"Failed to get cached race deep-dive: {e}")
+        return None
+
     async def get_recent_sessions(self, limit: int = 10) -> List[Dict]:
         """Get recent analysis sessions"""
         try:
