@@ -284,14 +284,14 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
     <img src="/static/img/trackstar-mark.svg" alt="{{ brand_name }}">
     <span>{{ brand_name }}</span>
   </a>
-  <a class="cc-nav-back" href="/">← Back to platform</a>
+  <a class="cc-nav-back" href="/">← All Cards</a>
 </nav>
 
 <!-- HERO -->
 <section class="cc-hero">
   <div class="cc-eyebrow">✦ Curated Betting Card</div>
   <h1 class="cc-hero-title">{{ track_name }}</h1>
-  <p class="cc-hero-sub">Expert picks, AI-backed intelligence, and admin-curated strategy for race day.</p>
+  <p class="cc-hero-sub">Expert picks and AI-backed strategy for every race on the card.</p>
   <div class="cc-meta-chips">
     <span class="cc-chip">📅 {{ race_date }}</span>
     <span class="cc-chip">🏟 {{ track_name }}</span>
@@ -398,7 +398,7 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 {% if card.admin_notes %}
 <div class="cc-take">
   <div class="take-inner">
-    <div class="take-eyebrow">Admin's Take</div>
+    <div class="take-eyebrow">Expert's Take</div>
     <div class="take-body">{{ card.admin_notes }}</div>
   </div>
 </div>
@@ -417,7 +417,26 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 
 <!-- FOOTER -->
 <footer class="cc-footer">
-  <p>Built by <a href="/">{{ brand_name }}</a> &mdash; Curated intelligence for serious horseplayers.</p>
+  <div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid var(--border);">
+    <p style="font-size:.78rem;font-weight:600;color:var(--subtle);margin-bottom:.6rem;">Support TrackStarAI — Donate with Crypto</p>
+    <div style="display:flex;justify-content:center;gap:2rem;flex-wrap:wrap;">
+      <div style="text-align:center;">
+        <div style="display:flex;align-items:center;gap:.4rem;justify-content:center;margin-bottom:.3rem;">
+          <img src="https://cryptologos.cc/logos/bitcoin-btc-logo.svg" alt="Bitcoin" width="16" height="16">
+          <span style="font-size:.75rem;font-weight:600;color:#f7931a;">Bitcoin</span>
+        </div>
+        <code style="font-size:.58rem;color:var(--muted);cursor:pointer;padding:.2rem .5rem;border-radius:4px;background:rgba(255,255,255,.04);border:1px solid var(--border);" title="Click to copy" onclick="navigator.clipboard.writeText('3JBSDy1o89G6FxtKDmA8ZfnYCm1QRXASmM').then(()=>{this.style.borderColor='#22c55e';this.style.color='#22c55e';setTimeout(()=>{this.style.borderColor='';this.style.color=''},1500)})">3JBSDy1o89G6FxtKDmA8ZfnYCm1QRXASmM</code>
+      </div>
+      <div style="text-align:center;">
+        <div style="display:flex;align-items:center;gap:.4rem;justify-content:center;margin-bottom:.3rem;">
+          <img src="https://cryptologos.cc/logos/ethereum-eth-logo.svg" alt="Ethereum" width="16" height="16">
+          <span style="font-size:.75rem;font-weight:600;color:#627eea;">Ethereum</span>
+        </div>
+        <code style="font-size:.58rem;color:var(--muted);cursor:pointer;padding:.2rem .5rem;border-radius:4px;background:rgba(255,255,255,.04);border:1px solid var(--border);" title="Click to copy" onclick="navigator.clipboard.writeText('0x1b904804Cf095828F8e77DCdAEB3a4b84c798861').then(()=>{this.style.borderColor='#22c55e';this.style.color='#22c55e';setTimeout(()=>{this.style.borderColor='';this.style.color=''},1500)})">0x1b904804Cf095828F8e77DCdAEB3a4b84c798861</code>
+      </div>
+    </div>
+  </div>
+  <p>Built by <a href="/">{{ brand_name }}</a> &mdash; AI-curated picks for serious horseplayers.</p>
   <p style="margin-top:.4rem;font-size:.72rem">For entertainment and research purposes. Always wager responsibly.</p>
 </footer>
 

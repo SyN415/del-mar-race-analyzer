@@ -455,32 +455,26 @@ class AnalysisStatus(BaseModel):
 # API Routes
 @app.get("/", response_class=HTMLResponse)
 async def landing_page(request: Request):
-    """Public dashboard for recent race cards."""
+    """Public landing page showing published curated betting cards."""
     session_manager = await app_state.ensure_session_manager()
-    dashboard_cards_coro = _safe_load_dashboard_cards(limit=8)
     published_cards: List[Dict] = []
     if session_manager:
         try:
             published_cards = await asyncio.wait_for(
-                session_manager.get_published_curated_cards(limit=6), timeout=2.0
+                session_manager.get_published_curated_cards(limit=12), timeout=2.0
             )
             for pc in published_cards:
                 pc["track_name"] = SUPPORTED_TRACKS.get(pc.get("track_id"), pc.get("track_id"))
                 pc["card_url"] = f"/card/{pc.get('race_date')}/{pc.get('track_id')}"
         except Exception as e:
             logger.warning(f"Failed to load published curated cards for landing page: {e}")
-    dashboard_cards = await dashboard_cards_coro
     return templates.TemplateResponse(
         request,
         "landing.html",
         _template_context(
             request,
             BRAND_NAME,
-            dashboard_cards=dashboard_cards,
             published_curated_cards=published_cards,
-            card_count=len(dashboard_cards),
-            completed_count=len([card for card in dashboard_cards if card["status"] == "completed"]),
-            openrouter_configured=bool(app_state.ensure_openrouter_client() and app_state.openrouter_client.api_key),
         ),
     )
 

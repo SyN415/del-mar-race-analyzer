@@ -15,7 +15,7 @@
     <!-- Font Awesome -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <!-- Custom CSS -->
-    <link href="/static/css/style.css?v=3.0.3" rel="stylesheet">
+    <link href="/static/css/style.css?v=4.0.0" rel="stylesheet">
 
     {% block extra_head %}{% endblock %}
 </head>
@@ -27,38 +27,24 @@
                 <img src="/static/img/trackstar-mark.svg" alt="{{ brand_name }}" class="brand-logo">
                 <span class="brand-wordmark">
                     <span>{{ brand_name }}</span>
-                    <span class="brand-submark">Resilient racing intelligence</span>
+                    <span class="brand-submark">AI-Powered Horse Racing Picks</span>
                 </span>
             </a>
+            {% if user_role == 'admin' %}
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav ms-auto align-items-center">
                     <li class="nav-item">
-                        <a class="nav-link" href="/">Platform</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="/health">Status</a>
-                    </li>
-                    {% if user_role == 'admin' %}
-                    <li class="nav-item">
                         <a class="nav-link" href="/admin">Admin</a>
                     </li>
                     <li class="nav-item ms-lg-2">
                         <a class="btn btn-sm btn-outline-light" href="/logout">Sign Out</a>
                     </li>
-                    {% elif auth_enabled %}
-                    <li class="nav-item ms-lg-2">
-                        <a class="btn btn-sm btn-primary" href="/login">Admin Sign In</a>
-                    </li>
-                    {% else %}
-                    <li class="nav-item ms-lg-2">
-                        <a class="setup-pill text-decoration-none" href="/login">Setup Required</a>
-                    </li>
-                    {% endif %}
                 </ul>
             </div>
+            {% endif %}
         </div>
     </nav>
 
@@ -69,9 +55,31 @@
 
     <!-- Footer -->
     <footer class="mt-5 py-4">
-        <div class="container text-center">
-            <p class="mb-1 small fw-medium">{{ brand_name }}</p>
-            <small>Scraped field intelligence, structured signals, and curated AI race cards.</small>
+        <div class="container">
+            <!-- Crypto Donations -->
+            <div class="crypto-donations text-center mb-3">
+                <p class="small fw-semibold mb-2" style="color: var(--text-secondary);">Support TrackStarAI — Donate with Crypto</p>
+                <div class="d-flex justify-content-center gap-4 flex-wrap">
+                    <div class="crypto-wallet">
+                        <div class="d-flex align-items-center gap-2 mb-1 justify-content-center">
+                            <img src="https://cryptologos.cc/logos/bitcoin-btc-logo.svg" alt="Bitcoin" width="18" height="18">
+                            <span class="small fw-semibold" style="color: #f7931a;">Bitcoin</span>
+                        </div>
+                        <code class="crypto-address" title="Click to copy" onclick="navigator.clipboard.writeText('3JBSDy1o89G6FxtKDmA8ZfnYCm1QRXASmM').then(()=>{this.classList.add('copied');setTimeout(()=>this.classList.remove('copied'),1500)})">3JBSDy1o89G6FxtKDmA8ZfnYCm1QRXASmM</code>
+                    </div>
+                    <div class="crypto-wallet">
+                        <div class="d-flex align-items-center gap-2 mb-1 justify-content-center">
+                            <img src="https://cryptologos.cc/logos/ethereum-eth-logo.svg" alt="Ethereum" width="18" height="18">
+                            <span class="small fw-semibold" style="color: #627eea;">Ethereum</span>
+                        </div>
+                        <code class="crypto-address" title="Click to copy" onclick="navigator.clipboard.writeText('0x1b904804Cf095828F8e77DCdAEB3a4b84c798861').then(()=>{this.classList.add('copied');setTimeout(()=>this.classList.remove('copied'),1500)})">0x1b904804Cf095828F8e77DCdAEB3a4b84c798861</code>
+                    </div>
+                </div>
+            </div>
+            <div class="text-center">
+                <p class="mb-1 small fw-medium">{{ brand_name }}</p>
+                <small>AI-curated picks for serious horseplayers. For entertainment and research purposes. Always wager responsibly.</small>
+            </div>
         </div>
     </footer>
 
