@@ -435,10 +435,11 @@ class CuratedCardRequest(BaseModel):
     admin_notes: str = ""
     betting_strategy: str = ""
     is_published: bool = False
+    races: Optional[List] = None
+    card_overview: str = ""
 
 class AutoCurateRequest(BaseModel):
     session_id: str
-    race_number: int
     race_date: str
     track_id: str = "DMR"
 
@@ -1375,7 +1376,7 @@ async def health_check():
 
 @app.post("/api/admin/auto-curate")
 async def auto_curate_card(request: AutoCurateRequest, http_request: Request = None):
-    """Use Grok to synthesize race card analysis + deep-dive data and suggest curation picks."""
+    """Use Grok to synthesize the full race card analysis + all deep-dives and curate the entire card."""
     if not _auth_enabled():
         raise HTTPException(status_code=503, detail="Admin access is not configured on the server")
     if http_request is None or not _is_admin(http_request):
@@ -1389,42 +1390,19 @@ async def auto_curate_card(request: AutoCurateRequest, http_request: Request = N
     if not openrouter_client or not openrouter_client.api_key:
         raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured on the server")
 
-    # ── 1. Fetch race card analysis ──────────────────────────────────────────
+    track_full = SUPPORTED_TRACKS.get(request.track_id, request.track_id)
+
+    # ── 1. Fetch full race card session ──────────────────────────────────────
     session_results = await session_manager.get_session_results(request.session_id)
     if "error" in session_results:
         raise HTTPException(status_code=404, detail=f"Session not found: {session_results['error']}")
 
     race_analyses = session_results.get("race_analyses", [])
-    target_race = next(
-        (r for r in race_analyses if r.get("race_number") == request.race_number),
-        None,
-    )
-    if not target_race:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Race {request.race_number} not found in session {request.session_id}",
-        )
+    if not race_analyses:
+        raise HTTPException(status_code=404, detail="No race analyses found in session")
 
-    # ── 2. Fetch deep-dive cache ─────────────────────────────────────────────
-    cached_dive = await session_manager.get_race_deep_dive(
-        request.race_date, request.track_id, request.race_number
-    )
-    deep_dive_data = cached_dive.get("deep_dive", {}) if cached_dive else {}
-
-    # ── 3. Build combined prompt ─────────────────────────────────────────────
-    track_full = SUPPORTED_TRACKS.get(request.track_id, request.track_id)
-    race_meta = (
-        f"Race {request.race_number} · {request.race_date} · {track_full} ({request.track_id})\n"
-        f"Type: {target_race.get('race_type', 'N/A')} | Distance: {target_race.get('distance', 'N/A')} | "
-        f"Surface: {target_race.get('surface', 'N/A')}"
-    )
-
-    # Build per-horse summary merging both data sources
-    card_predictions = target_race.get("predictions", [])
-    dd_horses_by_name = {h.get("name", "").lower(): h for h in deep_dive_data.get("horses", [])}
-
-    horse_blocks = []
-    for pred in card_predictions:
+    # ── 2. For each race, merge card analysis + cached deep-dive ─────────────
+    def _build_horse_block(pred: dict, dd_horse: dict) -> str:
         name = pred.get("horse_name") or pred.get("name") or ""
         post = pred.get("post_position", "?")
         jockey = pred.get("jockey", "")
@@ -1434,86 +1412,113 @@ async def auto_curate_card(request: AutoCurateRequest, http_request: Request = N
         notes = pred.get("notes", "")
         factors = pred.get("factors") or {}
 
-        dd = dd_horses_by_name.get(name.lower(), {})
-        form_notes = dd.get("form_notes", "")
-        js = dd.get("jockey_stats") or {}
-        ts = dd.get("trainer_stats") or {}
-        recent = dd.get("recent_results") or []
-        workouts = dd.get("workouts") or []
+        form_notes = dd_horse.get("form_notes", "")
+        js = dd_horse.get("jockey_stats") or {}
+        ts = dd_horse.get("trainer_stats") or {}
+        recent = dd_horse.get("recent_results") or []
+        workouts = dd_horse.get("workouts") or []
 
         recent_str = "; ".join(
-            f"{r.get('date','')} Fin{r.get('finish','')} Fig{r.get('speed_figure','')} @ {r.get('track','')}"
+            f"{r.get('date','')} Fin{r.get('finish','')} Fig{r.get('speed_figure','')}@{r.get('track','')}"
             for r in recent[:4]
         ) or "N/A"
         workout_str = "; ".join(
-            f"{w.get('date','')} {w.get('distance','')} {w.get('time','')} ({w.get('type','')})"
+            f"{w.get('date','')} {w.get('distance','')} {w.get('time','')}({w.get('type','')})"
             for w in workouts[:3]
         ) or "N/A"
 
-        block = (
-            f"Post {post}: {name}\n"
-            f"  Jockey: {jockey} | Trainer: {trainer}\n"
-            f"  Composite Rating: {composite} | Win Probability: {win_prob}%\n"
-        )
+        block = f"  Post {post}: {name} | J:{jockey} T:{trainer}\n"
+        block += f"  Rating:{composite} WinProb:{win_prob}%"
         if factors:
-            block += f"  Factors — Speed:{factors.get('speed_rating',0)} Form:{factors.get('form_rating',0)} Class:{factors.get('class_rating',0)} Workout:{factors.get('workout_rating',0)}\n"
+            block += f" | Spd:{factors.get('speed_rating',0)} Form:{factors.get('form_rating',0)} Cls:{factors.get('class_rating',0)} Wrk:{factors.get('workout_rating',0)}"
+        block += "\n"
         if notes:
-            block += f"  Card Notes: {notes}\n"
+            block += f"  CardNote: {notes}\n"
         if form_notes:
-            block += f"  Form Notes: {form_notes}\n"
+            block += f"  FormNote: {form_notes}\n"
         if js:
-            block += f"  Jockey Stats: Track {js.get('track_win_pct','?')}% | Dist {js.get('distance_win_pct','?')}% | 30d {js.get('last_30_days','?')}\n"
+            block += f"  Jockey: Track{js.get('track_win_pct','?')}% Dist{js.get('distance_win_pct','?')}% 30d:{js.get('last_30_days','?')}\n"
         if ts:
-            block += f"  Trainer Stats: Track {ts.get('track_win_pct','?')}% | Dist {ts.get('distance_win_pct','?')}% | 30d {ts.get('last_30_days','?')}\n"
+            block += f"  Trainer: Track{ts.get('track_win_pct','?')}% Dist{ts.get('distance_win_pct','?')}% 30d:{ts.get('last_30_days','?')}\n"
         block += f"  Recent: {recent_str}\n"
         block += f"  Workouts: {workout_str}\n"
-        horse_blocks.append(block)
+        return block
 
-    deep_dive_summary = deep_dive_data.get("deep_dive_summary", "")
+    race_sections = []
+    horse_names_by_race: dict = {}  # race_number -> list of horse names
 
-    prompt = f"""You are an expert horse racing handicapper and betting analyst. You have been given two data sources for the same race — the initial AI race card analysis AND a detailed deep-dive with workouts, form, and jockey/trainer statistics. Synthesize ALL of this information and select the three best betting angles for this race.
+    for race in sorted(race_analyses, key=lambda r: r.get("race_number", 0)):
+        race_num = race.get("race_number", 0)
+        cached_dive = await session_manager.get_race_deep_dive(
+            request.race_date, request.track_id, race_num
+        )
+        dd_data = cached_dive.get("deep_dive", {}) if cached_dive else {}
+        dd_by_name = {h.get("name", "").lower(): h for h in dd_data.get("horses", [])}
 
-RACE: {race_meta}
+        predictions = race.get("predictions", [])
+        horse_names_by_race[race_num] = [
+            (p.get("horse_name") or p.get("name") or "") for p in predictions
+        ]
 
---- COMBINED HORSE DATA ---
-{chr(10).join(horse_blocks)}
-{"--- DEEP-DIVE RACE SUMMARY ---" + chr(10) + deep_dive_summary if deep_dive_summary else ""}
+        section = (
+            f"RACE {race_num} — {race.get('race_type','?')} | "
+            f"{race.get('distance','?')} | {race.get('surface','?')}\n"
+        )
+        if dd_data.get("deep_dive_summary"):
+            section += f"DeepDiveSummary: {dd_data['deep_dive_summary']}\n"
+        for pred in predictions:
+            name = (pred.get("horse_name") or pred.get("name") or "").lower()
+            section += _build_horse_block(pred, dd_by_name.get(name, {}))
+        race_sections.append(section)
 
-Your job:
-1. **Top Pick** — The horse you believe has the highest probability of winning based on all available data.
-2. **Value Play** — A horse with strong credentials that may be overlooked at the betting windows (good form + undervalued composite rating or high trainer/jockey win %).
-3. **Longshot** — A horse with a realistic upset chance at double-digit odds (e.g., recent workout bullet, favorable class drop, improving form).
+    prompt = f"""You are a professional horse racing handicapper. You have the full race card for {track_full} on {request.race_date} — including the initial AI race card analysis AND deep-dive research (workouts, recent form, jockey/trainer stats) for each race.
 
-Provide your reasoning in an editorial style for the "Admin's Take" field (2–4 sentences, confident and engaging).
-Provide a concrete betting strategy (win bets, exacta/trifecta keys, etc.).
+Re-analyze the entire card using ALL of this combined information. For every race, identify the three best betting angles and write editorial-quality race notes. Then write an overall card overview.
 
-Return ONLY valid JSON in this exact structure:
+FULL RACE CARD DATA:
+{'='*60}
+{chr(10).join(race_sections)}
+{'='*60}
+
+For each race return:
+- top_pick: the horse name with the highest win probability after re-analysis
+- value_play: a horse with strong credentials likely undervalued at the windows
+- longshot: a horse with realistic upset potential at big odds
+- race_notes: 2-3 sentences of editorial analysis explaining the picks and race shape
+- betting_strategy: specific bet types (win, exacta key, trifecta, etc.) with post positions
+
+Also return:
+- card_overview: 3-4 sentence overview of the overall card themes, standout races, and key angles for the day
+
+Return ONLY valid JSON:
 {{
-  "top_pick": "Exact Horse Name",
-  "value_play": "Exact Horse Name",
-  "longshot": "Exact Horse Name",
-  "admin_notes": "Engaging 2-4 sentence editorial reasoning for the picks.",
-  "betting_strategy": "Specific bet types and horse numbers, e.g. Win on #3, exacta key 3/1,5,7, trifecta 3 with 1,5 with 1,5,7."
+  "card_overview": "Overall card analysis...",
+  "races": [
+    {{
+      "race_number": 1,
+      "top_pick": "Exact Horse Name",
+      "value_play": "Exact Horse Name",
+      "longshot": "Exact Horse Name",
+      "race_notes": "Editorial 2-3 sentence analysis...",
+      "betting_strategy": "Win on #X, exacta key X/Y,Z, trifecta..."
+    }}
+  ]
 }}"""
 
     logger.info(
-        "🤖 AUTO-CURATE: session=%s | race=%s | horses=%s",
-        request.session_id, request.race_number, len(card_predictions),
+        "🤖 FULL-CARD AUTO-CURATE: session=%s | track=%s | date=%s | races=%s",
+        request.session_id, request.track_id, request.race_date, len(race_analyses),
     )
 
-    # ── 4. Call Grok ─────────────────────────────────────────────────────────
+    # ── 3. Call Grok (no web plugins — data is already in hand) ──────────────
     try:
         response = await openrouter_client.call_model(
             model="x-ai/grok-4.20-beta",
             task_type="analysis",
             prompt=prompt,
-            context={
-                "race_date": request.race_date,
-                "track_id": request.track_id,
-                "race_number": request.race_number,
-            },
-            max_tokens=1200,
-            temperature=0.3,
+            context={"race_date": request.race_date, "track_id": request.track_id},
+            max_tokens=4000,
+            temperature=0.25,
             return_metadata=True,
             response_format={"type": "json_object"},
         )
@@ -1522,7 +1527,6 @@ Return ONLY valid JSON in this exact structure:
         if not content:
             raise HTTPException(status_code=502, detail="Grok returned empty content for auto-curation")
 
-        # Parse JSON response
         try:
             parsed = json.loads(content)
         except json.JSONDecodeError:
@@ -1533,25 +1537,21 @@ Return ONLY valid JSON in this exact structure:
             else:
                 raise HTTPException(status_code=502, detail="Could not parse Grok's curation response as JSON")
 
+        races_out = parsed.get("races", [])
         logger.info(
-            "✅ AUTO-CURATE complete | race=%s | top=%s | value=%s | longshot=%s",
-            request.race_number,
-            parsed.get("top_pick", "?"),
-            parsed.get("value_play", "?"),
-            parsed.get("longshot", "?"),
+            "✅ FULL-CARD AUTO-CURATE complete | races_returned=%s",
+            len(races_out),
         )
         return JSONResponse({
-            "top_pick": parsed.get("top_pick", ""),
-            "value_play": parsed.get("value_play", ""),
-            "longshot": parsed.get("longshot", ""),
-            "admin_notes": parsed.get("admin_notes", ""),
-            "betting_strategy": parsed.get("betting_strategy", ""),
+            "card_overview": parsed.get("card_overview", ""),
+            "races": races_out,
+            "horse_names_by_race": horse_names_by_race,
         })
 
     except HTTPException:
         raise
     except Exception as exc:
-        logger.error(f"Auto-curation failed: {exc}")
+        logger.error(f"Full-card auto-curation failed: {exc}")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -1578,6 +1578,8 @@ async def save_curated_card(request: CuratedCardRequest, http_request: Request =
             admin_notes=request.admin_notes,
             betting_strategy=request.betting_strategy,
             is_published=request.is_published,
+            races=request.races,
+            card_overview=request.card_overview,
         )
         status = "published" if request.is_published else "saved"
         logger.info(

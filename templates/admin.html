@@ -143,6 +143,26 @@
                     </div>
                 </div>
 
+                <!-- Full Card Curation Panel -->
+                <div id="fullCardCuratePanel" class="card border-0 shadow-lg mb-4" style="display:none; border-left:4px solid #7c3aed !important;">
+                  <div class="card-body p-4">
+                    <div class="mb-1 text-muted text-uppercase fw-semibold small" style="letter-spacing:.1em">Admin Curation</div>
+                    <h5 class="fw-bold mb-1">Curate Full Betting Card with AI</h5>
+                    <p class="text-muted small mb-4">
+                      The AI will re-analyze the entire race card using all initial build data and cached deep-dive research together,
+                      then return curated picks, race notes, and a betting strategy for every race.
+                      Review and edit any field before publishing to the public card page.
+                    </p>
+                    <div class="d-flex align-items-center gap-3 flex-wrap mb-3">
+                      <button class="btn btn-outline-primary" id="fullCardCurateBtn" onclick="runFullCardCuration()">
+                        Generate AI Curated Card
+                      </button>
+                      <span id="fullCardCurateStatus" class="small text-muted"></span>
+                    </div>
+                    <div id="fullCardFormContainer"></div>
+                  </div>
+                </div>
+
                 <div id="deepDiveResults"></div>
             </div>
 
@@ -233,6 +253,8 @@ document.getElementById('sessionSelect').addEventListener('change', async functi
     const buttonsDiv = document.getElementById('raceButtons');
     document.getElementById('deepDiveResults').innerHTML  = '';
     document.getElementById('deepDiveStatus').style.display = 'none';
+    const curatePanel = document.getElementById('fullCardCuratePanel');
+    if (curatePanel) curatePanel.style.display = 'none';
     if (!sessionId) { container.style.display = 'none'; return; }
     try {
         const resp = await fetch(`/api/results-json/${sessionId}`);
@@ -251,6 +273,7 @@ document.getElementById('sessionSelect').addEventListener('change', async functi
             buttonsDiv.appendChild(btn);
         });
         container.style.display = races.length ? 'block' : 'none';
+        if (races.length && curatePanel) curatePanel.style.display = 'block';
     } catch (err) {
         container.style.display = 'none';
         showDeepDiveStatus('danger', `Could not load races: ${err.message}`);
@@ -357,196 +380,174 @@ function renderDeepDiveResults(data, sourceUrls) {
     html += `</div></div>`;
     const div = document.getElementById('deepDiveResults');
     div.innerHTML = html;
-
-    // Render curate panel after horse data
-    renderCuratePanel(data);
-
     div.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-// ── CURATE PANEL ─────────────────────────────────────────────────────────────
-let _curateContext = {};
+// ── FULL CARD CURATION ────────────────────────────────────────────────────────
+let _fullCardData = null;   // stores { sessionId, raceDate, trackId, races, cardOverview }
 
-function renderCuratePanel(deepDiveData) {
+function showFullCardPanel() {
     const sessionId = document.getElementById('sessionSelect').value;
-    const btn       = document.querySelector('#raceButtons .btn-primary');
-    const raceDate  = btn ? btn.dataset.raceDate : '';
-    const trackId   = btn ? btn.dataset.trackId  : '';
-
-    _curateContext = { sessionId, raceDate, trackId, deepDiveData };
-
-    const horses = (deepDiveData.horses || []).map(h => h.name).filter(Boolean);
-    const opts   = ['— None —', ...horses].map(n =>
-        `<option value="${n === '— None —' ? '' : n}">${n}</option>`
-    ).join('');
-
-    const panel = document.createElement('div');
-    panel.id    = 'curatePanel';
-    panel.innerHTML = `
-<div class="card border-0 shadow-lg mb-4" style="border-left: 4px solid var(--ts-accent, #7c3aed) !important;">
-  <div class="card-body p-4">
-    <div class="d-flex align-items-center gap-3 mb-3">
-      <span class="fs-4">✦</span>
-      <div>
-        <div class="small text-muted text-uppercase fw-semibold ls-wide">Admin curation</div>
-        <h5 class="fw-bold mb-0">Curate Race ${deepDiveData.race_number} — Betting Card</h5>
-      </div>
-    </div>
-    <p class="text-muted small mb-4">Select your picks and add your analysis. Save as a draft or publish directly to the public Curated Card page.</p>
-
-    <div class="row g-3 mb-4">
-      <div class="col-md-4">
-        <label class="form-label fw-semibold">🥇 Top Pick</label>
-        <select class="form-select" id="curateTopPick">${opts}</select>
-      </div>
-      <div class="col-md-4">
-        <label class="form-label fw-semibold">💎 Value Play</label>
-        <select class="form-select" id="curateValuePlay">${opts}</select>
-      </div>
-      <div class="col-md-4">
-        <label class="form-label fw-semibold">🎯 Longshot</label>
-        <select class="form-select" id="curateLongshot">${opts}</select>
-      </div>
-    </div>
-
-    <div class="mb-3">
-      <label class="form-label fw-semibold">Admin's Take <span class="text-muted fw-normal">(shown on public card)</span></label>
-      <textarea class="form-control" id="curateAdminNotes" rows="3" placeholder="Share your reasoning, angle, or read on the race…"></textarea>
-    </div>
-    <div class="mb-4">
-      <label class="form-label fw-semibold">Betting Strategy</label>
-      <textarea class="form-control" id="curateBettingStrategy" rows="2" placeholder="e.g. Win on #1, key #3 in exactas, use #7 as saver…"></textarea>
-    </div>
-
-    <div class="d-flex gap-3 flex-wrap align-items-center">
-      <button class="btn btn-outline-info" id="curateAiBtn" onclick="runAutoCurate()">
-        ✨ AI Suggest
-      </button>
-      <button class="btn btn-outline-secondary" onclick="submitCuratedCard(false)">
-        💾 Save Draft
-      </button>
-      <button class="btn btn-primary btn-lg px-4" onclick="submitCuratedCard(true)">
-        🚀 Publish to Card Page
-      </button>
-      <span id="curateStatus" class="small text-muted"></span>
-    </div>
-  </div>
-</div>`;
-    document.getElementById('deepDiveResults').appendChild(panel);
+    if (!sessionId) return;
+    const panel = document.getElementById('fullCardCuratePanel');
+    if (panel) panel.style.display = 'block';
 }
 
-function _buildPickPayload(horseName, deepDiveData) {
-    if (!horseName) return null;
-    const horse = (deepDiveData.horses || []).find(h => h.name === horseName);
-    return horse ? {
-        name:              horse.name,
-        post_position:     horse.post_position,
-        jockey:            horse.jockey,
-        trainer:           horse.trainer,
-        form_notes:        horse.form_notes,
-        jockey_stats:      horse.jockey_stats,
-        trainer_stats:     horse.trainer_stats,
-        recent_results:    (horse.recent_results || []).slice(0, 3),
-    } : { name: horseName };
-}
+async function runFullCardCuration() {
+    const sessionId = document.getElementById('sessionSelect').value;
+    const btn       = document.getElementById('fullCardCurateBtn');
+    const statusEl  = document.getElementById('fullCardCurateStatus');
 
-async function runAutoCurate() {
-    const { sessionId, raceDate, trackId, deepDiveData } = _curateContext;
-    const btn      = document.getElementById('curateAiBtn');
-    const statusEl = document.getElementById('curateStatus');
+    // pull raceDate + trackId from any visible race button
+    const raceBtn  = document.querySelector('#raceButtons [data-race-date]');
+    const raceDate = raceBtn ? raceBtn.dataset.raceDate : '';
+    const trackId  = raceBtn ? raceBtn.dataset.trackId  : '';
 
     if (!sessionId || !raceDate || !trackId) {
-        statusEl.textContent = '❌ No active deep-dive context. Run a deep-dive first.';
+        statusEl.textContent = 'Select a session and load at least one race first.';
         return;
     }
 
     btn.disabled    = true;
-    btn.textContent = '✨ Thinking…';
-    statusEl.textContent = 'AI is analysing race card + deep-dive data…';
+    btn.textContent = 'Analyzing full card…';
+    statusEl.textContent = 'Sending all race card and deep-dive data to AI for re-analysis…';
+    document.getElementById('fullCardFormContainer').innerHTML = '';
 
     try {
         const resp   = await fetch('/api/admin/auto-curate', {
-            method: 'POST',
+            method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                session_id:  sessionId,
-                race_number: deepDiveData.race_number,
-                race_date:   raceDate,
-                track_id:    trackId,
-            }),
+            body:    JSON.stringify({ session_id: sessionId, race_date: raceDate, track_id: trackId }),
         });
         const result = await resp.json();
-        if (!resp.ok) throw new Error(result.detail || 'Auto-curation failed');
+        if (!resp.ok) throw new Error(result.detail || 'Full-card curation failed');
 
-        // Helper: find the closest matching option in a <select>
-        function _setSelect(id, horseName) {
-            const sel = document.getElementById(id);
-            if (!sel || !horseName) return;
-            // Try exact match first, then case-insensitive partial
-            for (const opt of sel.options) {
-                if (opt.text.toLowerCase() === horseName.toLowerCase()) {
-                    sel.value = opt.value; return;
-                }
-            }
-            for (const opt of sel.options) {
-                if (opt.text.toLowerCase().includes(horseName.toLowerCase())) {
-                    sel.value = opt.value; return;
-                }
-            }
-        }
+        _fullCardData = {
+            sessionId, raceDate, trackId,
+            races: result.races || [],
+            cardOverview: result.card_overview || '',
+            horseNamesByRace: result.horse_names_by_race || {},
+        };
 
-        _setSelect('curateTopPick',   result.top_pick);
-        _setSelect('curateValuePlay', result.value_play);
-        _setSelect('curateLongshot',  result.longshot);
-
-        if (result.admin_notes)      document.getElementById('curateAdminNotes').value      = result.admin_notes;
-        if (result.betting_strategy) document.getElementById('curateBettingStrategy').value = result.betting_strategy;
-
-        statusEl.innerHTML = `✅ AI picks loaded — <strong>${result.top_pick}</strong> / ${result.value_play} / ${result.longshot}. Review and edit before publishing.`;
+        renderFullCardForm(_fullCardData);
+        statusEl.textContent = `AI analysis complete — ${result.races.length} races curated. Review and edit before publishing.`;
     } catch (err) {
-        statusEl.textContent = `❌ ${err.message}`;
+        statusEl.textContent = `Error: ${err.message}`;
     } finally {
         btn.disabled    = false;
-        btn.textContent = '✨ AI Suggest';
+        btn.textContent = 'Generate AI Curated Card';
     }
 }
 
-async function submitCuratedCard(publish) {
-    const { sessionId, raceDate, trackId, deepDiveData } = _curateContext;
-    const statusEl = document.getElementById('curateStatus');
-    statusEl.textContent = publish ? 'Publishing…' : 'Saving…';
+function renderFullCardForm(data) {
+    const { races, cardOverview, horseNamesByRace } = data;
+    let html = `
+<div class="mb-4">
+  <label class="form-label fw-semibold">Card Overview <span class="text-muted fw-normal small">(overall narrative shown at top of public card)</span></label>
+  <textarea class="form-control" id="fc_cardOverview" rows="3">${escHtml(cardOverview)}</textarea>
+</div>`;
 
-    const topPick   = document.getElementById('curateTopPick').value;
-    const valuePick = document.getElementById('curateValuePlay').value;
-    const longshot  = document.getElementById('curateLongshot').value;
+    races.forEach((race, idx) => {
+        const rn    = race.race_number || (idx + 1);
+        const names = horseNamesByRace[rn] || [];
+        const opts  = ['', ...names].map(n =>
+            `<option value="${escHtml(n)}"${n === race.top_pick ? ' selected' : ''}>${n || '— None —'}</option>`
+        ).join('');
+        const optsVal = ['', ...names].map(n =>
+            `<option value="${escHtml(n)}"${n === race.value_play ? ' selected' : ''}>${n || '— None —'}</option>`
+        ).join('');
+        const optsLs  = ['', ...names].map(n =>
+            `<option value="${escHtml(n)}"${n === race.longshot ? ' selected' : ''}>${n || '— None —'}</option>`
+        ).join('');
+
+        html += `
+<div class="card border-0 bg-dark-subtle mb-3">
+  <div class="card-body p-3">
+    <div class="fw-bold mb-3 border-bottom pb-2">Race ${rn}</div>
+    <div class="row g-2 mb-2">
+      <div class="col-md-4">
+        <label class="form-label small fw-semibold">Top Pick</label>
+        <select class="form-select form-select-sm" id="fc_top_${rn}">${opts}</select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label small fw-semibold">Value Play</label>
+        <select class="form-select form-select-sm" id="fc_val_${rn}">${optsVal}</select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label small fw-semibold">Longshot</label>
+        <select class="form-select form-select-sm" id="fc_ls_${rn}">${optsLs}</select>
+      </div>
+    </div>
+    <div class="mb-2">
+      <label class="form-label small fw-semibold">Race Notes</label>
+      <textarea class="form-control form-control-sm" id="fc_notes_${rn}" rows="2">${escHtml(race.race_notes || '')}</textarea>
+    </div>
+    <div>
+      <label class="form-label small fw-semibold">Betting Strategy</label>
+      <textarea class="form-control form-control-sm" id="fc_strat_${rn}" rows="1">${escHtml(race.betting_strategy || '')}</textarea>
+    </div>
+  </div>
+</div>`;
+    });
+
+    html += `
+<div class="d-flex gap-3 flex-wrap align-items-center mt-3">
+  <button class="btn btn-outline-secondary" onclick="submitFullCard(false)">Save Draft</button>
+  <button class="btn btn-primary px-4" onclick="submitFullCard(true)">Publish Card</button>
+  <span id="fullCardSaveStatus" class="small text-muted"></span>
+</div>`;
+
+    document.getElementById('fullCardFormContainer').innerHTML = html;
+}
+
+function escHtml(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function submitFullCard(publish) {
+    if (!_fullCardData) return;
+    const { sessionId, raceDate, trackId, races, horseNamesByRace } = _fullCardData;
+    const saveStatus = document.getElementById('fullCardSaveStatus');
+    saveStatus.textContent = publish ? 'Publishing…' : 'Saving draft…';
+
+    const cardOverview = document.getElementById('fc_cardOverview')?.value || '';
+
+    const racesPayload = races.map((race, idx) => {
+        const rn = race.race_number || (idx + 1);
+        return {
+            race_number:      rn,
+            top_pick:         document.getElementById(`fc_top_${rn}`)?.value  || '',
+            value_play:       document.getElementById(`fc_val_${rn}`)?.value  || '',
+            longshot:         document.getElementById(`fc_ls_${rn}`)?.value   || '',
+            race_notes:       document.getElementById(`fc_notes_${rn}`)?.value || '',
+            betting_strategy: document.getElementById(`fc_strat_${rn}`)?.value || '',
+        };
+    });
 
     const payload = {
-        race_date:        raceDate,
-        track_id:         trackId,
-        session_id:       sessionId,
-        top_pick:         _buildPickPayload(topPick, deepDiveData),
-        value_play:       _buildPickPayload(valuePick, deepDiveData),
-        longshot:         _buildPickPayload(longshot, deepDiveData),
-        admin_notes:      document.getElementById('curateAdminNotes').value,
-        betting_strategy: document.getElementById('curateBettingStrategy').value,
-        is_published:     publish,
+        race_date:     raceDate,
+        track_id:      trackId,
+        session_id:    sessionId,
+        races:         racesPayload,
+        card_overview: cardOverview,
+        is_published:  publish,
     };
 
     try {
         const resp   = await fetch('/api/admin/curated-card', {
-            method: 'POST',
+            method:  'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
+            body:    JSON.stringify(payload),
         });
         const result = await resp.json();
-        if (!resp.ok) throw new Error(result.detail || 'Failed to save curated card');
+        if (!resp.ok) throw new Error(result.detail || 'Failed to save');
         if (publish) {
-            statusEl.innerHTML = `✅ Published! <a href="${result.card_url}" target="_blank" class="ms-1">View Card →</a>`;
+            saveStatus.innerHTML = `Published — <a href="${result.card_url}" target="_blank" class="ms-1">View Card</a>`;
         } else {
-            statusEl.textContent = '✅ Draft saved.';
+            saveStatus.textContent = 'Draft saved.';
         }
     } catch (err) {
-        statusEl.textContent = `❌ ${err.message}`;
+        saveStatus.textContent = `Error: ${err.message}`;
     }
 }
 </script>

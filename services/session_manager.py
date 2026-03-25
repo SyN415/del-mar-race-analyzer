@@ -200,11 +200,23 @@ class SessionManager:
                     admin_notes TEXT DEFAULT '',
                     betting_strategy TEXT DEFAULT '',
                     is_published INTEGER DEFAULT 0,
+                    races_json TEXT,
+                    card_overview TEXT DEFAULT '',
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE (race_date, track_id)
                 )
             """)
+
+            # Migration: add new columns to existing databases that predate them
+            for col, defn in [
+                ("races_json", "TEXT"),
+                ("card_overview", "TEXT DEFAULT ''"),
+            ]:
+                try:
+                    await db.execute(f"ALTER TABLE curated_cards ADD COLUMN {col} {defn}")
+                except Exception:
+                    pass  # column already exists
 
             await db.commit()
 
@@ -611,6 +623,8 @@ class SessionManager:
         admin_notes: str,
         betting_strategy: str,
         is_published: bool,
+        races: Optional[List] = None,
+        card_overview: str = '',
     ) -> str:
         """Upsert a curated betting card. Returns the card id."""
         card_id = str(uuid.uuid4())
@@ -633,6 +647,8 @@ class SessionManager:
                         'admin_notes': admin_notes,
                         'betting_strategy': betting_strategy,
                         'is_published': is_published,
+                        'races_json': races,
+                        'card_overview': card_overview,
                         'created_at': now,
                         'updated_at': now,
                     },
@@ -644,8 +660,9 @@ class SessionManager:
                 await db.execute("""
                     INSERT INTO curated_cards
                     (id, race_date, track_id, session_id, top_pick_json, value_play_json,
-                     longshot_json, admin_notes, betting_strategy, is_published, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                     longshot_json, admin_notes, betting_strategy, is_published,
+                     races_json, card_overview, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     ON CONFLICT(race_date, track_id) DO UPDATE SET
                         session_id=excluded.session_id,
                         top_pick_json=excluded.top_pick_json,
@@ -654,6 +671,8 @@ class SessionManager:
                         admin_notes=excluded.admin_notes,
                         betting_strategy=excluded.betting_strategy,
                         is_published=excluded.is_published,
+                        races_json=excluded.races_json,
+                        card_overview=excluded.card_overview,
                         updated_at=CURRENT_TIMESTAMP
                 """, (
                     card_id, race_date, track_id, session_id,
@@ -662,6 +681,8 @@ class SessionManager:
                     json.dumps(longshot) if longshot else None,
                     admin_notes, betting_strategy,
                     1 if is_published else 0,
+                    json.dumps(races) if races else None,
+                    card_overview,
                 ))
                 await db.commit()
             logger.info("💾 Upserted curated card to SQLite | date=%s | track=%s", race_date, track_id)
@@ -696,9 +717,12 @@ class SessionManager:
             if not row:
                 return None
             d = dict(row)
-            for field in ('top_pick_json', 'value_play_json', 'longshot_json'):
+            for field in ('top_pick_json', 'value_play_json', 'longshot_json', 'races_json'):
                 if d.get(field):
-                    d[field] = json.loads(d[field])
+                    try:
+                        d[field] = json.loads(d[field])
+                    except (TypeError, json.JSONDecodeError):
+                        pass
             d['is_published'] = bool(d.get('is_published'))
             return d
         except Exception as e:
@@ -732,9 +756,12 @@ class SessionManager:
             result = []
             for row in rows:
                 d = dict(row)
-                for field in ('top_pick_json', 'value_play_json', 'longshot_json'):
+                for field in ('top_pick_json', 'value_play_json', 'longshot_json', 'races_json'):
                     if d.get(field):
-                        d[field] = json.loads(d[field])
+                        try:
+                            d[field] = json.loads(d[field])
+                        except (TypeError, json.JSONDecodeError):
+                            pass
                 d['is_published'] = bool(d.get('is_published'))
                 result.append(d)
             return result
@@ -764,9 +791,12 @@ class SessionManager:
             result = []
             for row in rows:
                 d = dict(row)
-                for field in ('top_pick_json', 'value_play_json', 'longshot_json'):
+                for field in ('top_pick_json', 'value_play_json', 'longshot_json', 'races_json'):
                     if d.get(field):
-                        d[field] = json.loads(d[field])
+                        try:
+                            d[field] = json.loads(d[field])
+                        except (TypeError, json.JSONDecodeError):
+                            pass
                 d['is_published'] = bool(d.get('is_published'))
                 result.append(d)
             return result
