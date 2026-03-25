@@ -357,7 +357,133 @@ function renderDeepDiveResults(data, sourceUrls) {
     html += `</div></div>`;
     const div = document.getElementById('deepDiveResults');
     div.innerHTML = html;
+
+    // Render curate panel after horse data
+    renderCuratePanel(data);
+
     div.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// ── CURATE PANEL ─────────────────────────────────────────────────────────────
+let _curateContext = {};
+
+function renderCuratePanel(deepDiveData) {
+    const sessionId = document.getElementById('sessionSelect').value;
+    const btn       = document.querySelector('#raceButtons .btn-primary');
+    const raceDate  = btn ? btn.dataset.raceDate : '';
+    const trackId   = btn ? btn.dataset.trackId  : '';
+
+    _curateContext = { sessionId, raceDate, trackId, deepDiveData };
+
+    const horses = (deepDiveData.horses || []).map(h => h.name).filter(Boolean);
+    const opts   = ['— None —', ...horses].map(n =>
+        `<option value="${n === '— None —' ? '' : n}">${n}</option>`
+    ).join('');
+
+    const panel = document.createElement('div');
+    panel.id    = 'curatePanel';
+    panel.innerHTML = `
+<div class="card border-0 shadow-lg mb-4" style="border-left: 4px solid var(--ts-accent, #7c3aed) !important;">
+  <div class="card-body p-4">
+    <div class="d-flex align-items-center gap-3 mb-3">
+      <span class="fs-4">✦</span>
+      <div>
+        <div class="small text-muted text-uppercase fw-semibold ls-wide">Admin curation</div>
+        <h5 class="fw-bold mb-0">Curate Race ${deepDiveData.race_number} — Betting Card</h5>
+      </div>
+    </div>
+    <p class="text-muted small mb-4">Select your picks and add your analysis. Save as a draft or publish directly to the public Curated Card page.</p>
+
+    <div class="row g-3 mb-4">
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">🥇 Top Pick</label>
+        <select class="form-select" id="curateTopPick">${opts}</select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">💎 Value Play</label>
+        <select class="form-select" id="curateValuePlay">${opts}</select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">🎯 Longshot</label>
+        <select class="form-select" id="curateLongshot">${opts}</select>
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Admin's Take <span class="text-muted fw-normal">(shown on public card)</span></label>
+      <textarea class="form-control" id="curateAdminNotes" rows="3" placeholder="Share your reasoning, angle, or read on the race…"></textarea>
+    </div>
+    <div class="mb-4">
+      <label class="form-label fw-semibold">Betting Strategy</label>
+      <textarea class="form-control" id="curateBettingStrategy" rows="2" placeholder="e.g. Win on #1, key #3 in exactas, use #7 as saver…"></textarea>
+    </div>
+
+    <div class="d-flex gap-3 flex-wrap align-items-center">
+      <button class="btn btn-outline-secondary" onclick="submitCuratedCard(false)">
+        💾 Save Draft
+      </button>
+      <button class="btn btn-primary btn-lg px-4" onclick="submitCuratedCard(true)">
+        🚀 Publish to Card Page
+      </button>
+      <span id="curateStatus" class="small text-muted"></span>
+    </div>
+  </div>
+</div>`;
+    document.getElementById('deepDiveResults').appendChild(panel);
+}
+
+function _buildPickPayload(horseName, deepDiveData) {
+    if (!horseName) return null;
+    const horse = (deepDiveData.horses || []).find(h => h.name === horseName);
+    return horse ? {
+        name:              horse.name,
+        post_position:     horse.post_position,
+        jockey:            horse.jockey,
+        trainer:           horse.trainer,
+        form_notes:        horse.form_notes,
+        jockey_stats:      horse.jockey_stats,
+        trainer_stats:     horse.trainer_stats,
+        recent_results:    (horse.recent_results || []).slice(0, 3),
+    } : { name: horseName };
+}
+
+async function submitCuratedCard(publish) {
+    const { sessionId, raceDate, trackId, deepDiveData } = _curateContext;
+    const statusEl = document.getElementById('curateStatus');
+    statusEl.textContent = publish ? 'Publishing…' : 'Saving…';
+
+    const topPick   = document.getElementById('curateTopPick').value;
+    const valuePick = document.getElementById('curateValuePlay').value;
+    const longshot  = document.getElementById('curateLongshot').value;
+
+    const payload = {
+        race_date:        raceDate,
+        track_id:         trackId,
+        session_id:       sessionId,
+        top_pick:         _buildPickPayload(topPick, deepDiveData),
+        value_play:       _buildPickPayload(valuePick, deepDiveData),
+        longshot:         _buildPickPayload(longshot, deepDiveData),
+        admin_notes:      document.getElementById('curateAdminNotes').value,
+        betting_strategy: document.getElementById('curateBettingStrategy').value,
+        is_published:     publish,
+    };
+
+    try {
+        const resp   = await fetch('/api/admin/curated-card', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        const result = await resp.json();
+        if (!resp.ok) throw new Error(result.detail || 'Failed to save curated card');
+        if (publish) {
+            statusEl.innerHTML = `✅ Published! <a href="${result.card_url}" target="_blank" class="ms-1">View Card →</a>`;
+        } else {
+            statusEl.textContent = '✅ Draft saved.';
+        }
+    } catch (err) {
+        statusEl.textContent = `❌ ${err.message}`;
+    }
 }
 </script>
 {% endblock %}

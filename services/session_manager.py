@@ -188,6 +188,24 @@ class SessionManager:
                 )
             """)
 
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS curated_cards (
+                    id TEXT PRIMARY KEY,
+                    race_date TEXT NOT NULL,
+                    track_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    top_pick_json TEXT,
+                    value_play_json TEXT,
+                    longshot_json TEXT,
+                    admin_notes TEXT DEFAULT '',
+                    betting_strategy TEXT DEFAULT '',
+                    is_published INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (race_date, track_id)
+                )
+            """)
+
             await db.commit()
 
             if self.db_path.exists():
@@ -581,6 +599,180 @@ class SessionManager:
         except Exception as e:
             logger.error(f"Failed to get cached race deep-dive: {e}")
         return None
+
+    async def save_curated_card(
+        self,
+        race_date: str,
+        track_id: str,
+        session_id: str,
+        top_pick: Optional[Dict],
+        value_play: Optional[Dict],
+        longshot: Optional[Dict],
+        admin_notes: str,
+        betting_strategy: str,
+        is_published: bool,
+    ) -> str:
+        """Upsert a curated betting card. Returns the card id."""
+        card_id = str(uuid.uuid4())
+        now = self._utcnow_iso()
+        try:
+            if self.storage_backend == 'supabase':
+                await self._supabase_request(
+                    'POST',
+                    'curated_cards',
+                    params={'on_conflict': 'race_date,track_id'},
+                    prefer='resolution=merge-duplicates',
+                    payload={
+                        'id': card_id,
+                        'race_date': race_date,
+                        'track_id': track_id,
+                        'session_id': session_id,
+                        'top_pick_json': top_pick,
+                        'value_play_json': value_play,
+                        'longshot_json': longshot,
+                        'admin_notes': admin_notes,
+                        'betting_strategy': betting_strategy,
+                        'is_published': is_published,
+                        'created_at': now,
+                        'updated_at': now,
+                    },
+                )
+                logger.info("💾 Upserted curated card to Supabase | date=%s | track=%s", race_date, track_id)
+                return card_id
+
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("""
+                    INSERT INTO curated_cards
+                    (id, race_date, track_id, session_id, top_pick_json, value_play_json,
+                     longshot_json, admin_notes, betting_strategy, is_published, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT(race_date, track_id) DO UPDATE SET
+                        session_id=excluded.session_id,
+                        top_pick_json=excluded.top_pick_json,
+                        value_play_json=excluded.value_play_json,
+                        longshot_json=excluded.longshot_json,
+                        admin_notes=excluded.admin_notes,
+                        betting_strategy=excluded.betting_strategy,
+                        is_published=excluded.is_published,
+                        updated_at=CURRENT_TIMESTAMP
+                """, (
+                    card_id, race_date, track_id, session_id,
+                    json.dumps(top_pick) if top_pick else None,
+                    json.dumps(value_play) if value_play else None,
+                    json.dumps(longshot) if longshot else None,
+                    admin_notes, betting_strategy,
+                    1 if is_published else 0,
+                ))
+                await db.commit()
+            logger.info("💾 Upserted curated card to SQLite | date=%s | track=%s", race_date, track_id)
+            return card_id
+        except Exception as e:
+            logger.error(f"Failed to save curated card: {e}")
+            raise
+
+    async def get_curated_card(self, race_date: str, track_id: str) -> Optional[Dict]:
+        """Return the curated card for a race date + track, or None."""
+        try:
+            if self.storage_backend == 'supabase':
+                rows = await self._supabase_request(
+                    'GET',
+                    'curated_cards',
+                    params={
+                        'race_date': f'eq.{race_date}',
+                        'track_id': f'eq.{track_id}',
+                        'limit': 1,
+                    },
+                )
+                return rows[0] if rows else None
+
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute("""
+                    SELECT * FROM curated_cards
+                    WHERE race_date = ? AND track_id = ?
+                    LIMIT 1
+                """, (race_date, track_id)) as cursor:
+                    row = await cursor.fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            for field in ('top_pick_json', 'value_play_json', 'longshot_json'):
+                if d.get(field):
+                    d[field] = json.loads(d[field])
+            d['is_published'] = bool(d.get('is_published'))
+            return d
+        except Exception as e:
+            logger.error(f"Failed to get curated card: {e}")
+            return None
+
+    async def get_published_curated_cards(self, limit: int = 10) -> List[Dict]:
+        """Return recently published curated cards, newest first."""
+        try:
+            if self.storage_backend == 'supabase':
+                rows = await self._supabase_request(
+                    'GET',
+                    'curated_cards',
+                    params={
+                        'is_published': 'eq.true',
+                        'order': 'updated_at.desc',
+                        'limit': limit,
+                    },
+                )
+                return rows or []
+
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute("""
+                    SELECT * FROM curated_cards
+                    WHERE is_published = 1
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                """, (limit,)) as cursor:
+                    rows = await cursor.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                for field in ('top_pick_json', 'value_play_json', 'longshot_json'):
+                    if d.get(field):
+                        d[field] = json.loads(d[field])
+                d['is_published'] = bool(d.get('is_published'))
+                result.append(d)
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get published curated cards: {e}")
+            return []
+
+    async def get_all_curated_cards(self, limit: int = 20) -> List[Dict]:
+        """Return all curated cards (published and draft), newest first."""
+        try:
+            if self.storage_backend == 'supabase':
+                rows = await self._supabase_request(
+                    'GET',
+                    'curated_cards',
+                    params={'order': 'updated_at.desc', 'limit': limit},
+                )
+                return rows or []
+
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute("""
+                    SELECT * FROM curated_cards
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                """, (limit,)) as cursor:
+                    rows = await cursor.fetchall()
+            result = []
+            for row in rows:
+                d = dict(row)
+                for field in ('top_pick_json', 'value_play_json', 'longshot_json'):
+                    if d.get(field):
+                        d[field] = json.loads(d[field])
+                d['is_published'] = bool(d.get('is_published'))
+                result.append(d)
+            return result
+        except Exception as e:
+            logger.error(f"Failed to get all curated cards: {e}")
+            return []
 
     async def get_recent_sessions(self, limit: int = 10) -> List[Dict]:
         """Get recent analysis sessions"""

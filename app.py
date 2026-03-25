@@ -425,6 +425,17 @@ class AdminDeepDiveRequest(BaseModel):
     track_id: str = "DMR"
     force_refresh: bool = False
 
+class CuratedCardRequest(BaseModel):
+    race_date: str
+    track_id: str = "DMR"
+    session_id: str
+    top_pick: Optional[Dict] = None
+    value_play: Optional[Dict] = None
+    longshot: Optional[Dict] = None
+    admin_notes: str = ""
+    betting_strategy: str = ""
+    is_published: bool = False
+
 class AnalysisStatus(BaseModel):
     session_id: str
     status: str  # "running", "completed", "failed"
@@ -437,7 +448,20 @@ class AnalysisStatus(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def landing_page(request: Request):
     """Public dashboard for recent race cards."""
-    dashboard_cards = await _safe_load_dashboard_cards(limit=8)
+    session_manager = await app_state.ensure_session_manager()
+    dashboard_cards_coro = _safe_load_dashboard_cards(limit=8)
+    published_cards: List[Dict] = []
+    if session_manager:
+        try:
+            published_cards = await asyncio.wait_for(
+                session_manager.get_published_curated_cards(limit=6), timeout=2.0
+            )
+            for pc in published_cards:
+                pc["track_name"] = SUPPORTED_TRACKS.get(pc.get("track_id"), pc.get("track_id"))
+                pc["card_url"] = f"/card/{pc.get('race_date')}/{pc.get('track_id')}"
+        except Exception as e:
+            logger.warning(f"Failed to load published curated cards for landing page: {e}")
+    dashboard_cards = await dashboard_cards_coro
     return templates.TemplateResponse(
         request,
         "landing.html",
@@ -445,6 +469,7 @@ async def landing_page(request: Request):
             request,
             BRAND_NAME,
             dashboard_cards=dashboard_cards,
+            published_curated_cards=published_cards,
             card_count=len(dashboard_cards),
             completed_count=len([card for card in dashboard_cards if card["status"] == "completed"]),
             openrouter_configured=bool(app_state.ensure_openrouter_client() and app_state.openrouter_client.api_key),
@@ -1340,6 +1365,101 @@ async def health_check():
             "kelly_optimizer": app_state.kelly_optimizer is not None
         }
     }
+
+
+@app.post("/api/admin/curated-card")
+async def save_curated_card(request: CuratedCardRequest, http_request: Request = None):
+    """Save or update a curated betting card for a race date + track."""
+    if not _auth_enabled():
+        raise HTTPException(status_code=503, detail="Admin access is not configured on the server")
+    if http_request is None or not _is_admin(http_request):
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+
+    session_manager = await app_state.ensure_session_manager()
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager is not available")
+
+    try:
+        card_id = await session_manager.save_curated_card(
+            race_date=request.race_date,
+            track_id=request.track_id,
+            session_id=request.session_id,
+            top_pick=request.top_pick,
+            value_play=request.value_play,
+            longshot=request.longshot,
+            admin_notes=request.admin_notes,
+            betting_strategy=request.betting_strategy,
+            is_published=request.is_published,
+        )
+        status = "published" if request.is_published else "saved"
+        logger.info(
+            "✅ Curated card %s | date=%s | track=%s | id=%s",
+            status, request.race_date, request.track_id, card_id,
+        )
+        return JSONResponse({
+            "id": card_id,
+            "status": status,
+            "race_date": request.race_date,
+            "track_id": request.track_id,
+            "card_url": f"/card/{request.race_date}/{request.track_id}",
+        })
+    except Exception as exc:
+        logger.error(f"Failed to save curated card: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/admin/curated-cards")
+async def list_curated_cards(request: Request):
+    """List all curated cards (admin only)."""
+    if not _auth_enabled():
+        raise HTTPException(status_code=503, detail="Admin access is not configured on the server")
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+
+    session_manager = await app_state.ensure_session_manager()
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager is not available")
+
+    cards = await session_manager.get_all_curated_cards(limit=50)
+    for card in cards:
+        card["track_name"] = SUPPORTED_TRACKS.get(card.get("track_id"), card.get("track_id"))
+        card["card_url"] = f"/card/{card.get('race_date')}/{card.get('track_id')}"
+    return JSONResponse(cards)
+
+
+@app.get("/card/{race_date}/{track_id}", response_class=HTMLResponse)
+async def curated_card_page(request: Request, race_date: str, track_id: str):
+    """Public-facing curated betting card page."""
+    session_manager = await app_state.ensure_session_manager()
+    card = None
+    if session_manager:
+        card = await session_manager.get_curated_card(race_date, track_id)
+
+    if not card:
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            _template_context(
+                request,
+                "Card Not Found",
+                error=f"No curated card found for {SUPPORTED_TRACKS.get(track_id, track_id)} on {race_date}.",
+            ),
+            status_code=404,
+        )
+
+    track_name = SUPPORTED_TRACKS.get(track_id, track_id)
+    return templates.TemplateResponse(
+        request,
+        "curated_card.html",
+        _template_context(
+            request,
+            f"{track_name} · {race_date} — TrackStarAI Curated Card",
+            card=card,
+            race_date=race_date,
+            track_id=track_id,
+            track_name=track_name,
+        ),
+    )
 
 
 def _validate_track_id(track_id: str):
