@@ -8,6 +8,7 @@ protected admin workflow, and AI-assisted race-card analysis pipeline.
 
 import asyncio
 import hashlib
+import json
 import hmac
 import logging
 import os
