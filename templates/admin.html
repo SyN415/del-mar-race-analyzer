@@ -419,6 +419,9 @@ function renderCuratePanel(deepDiveData) {
     </div>
 
     <div class="d-flex gap-3 flex-wrap align-items-center">
+      <button class="btn btn-outline-info" id="curateAiBtn" onclick="runAutoCurate()">
+        ✨ AI Suggest
+      </button>
       <button class="btn btn-outline-secondary" onclick="submitCuratedCard(false)">
         💾 Save Draft
       </button>
@@ -445,6 +448,67 @@ function _buildPickPayload(horseName, deepDiveData) {
         trainer_stats:     horse.trainer_stats,
         recent_results:    (horse.recent_results || []).slice(0, 3),
     } : { name: horseName };
+}
+
+async function runAutoCurate() {
+    const { sessionId, raceDate, trackId, deepDiveData } = _curateContext;
+    const btn      = document.getElementById('curateAiBtn');
+    const statusEl = document.getElementById('curateStatus');
+
+    if (!sessionId || !raceDate || !trackId) {
+        statusEl.textContent = '❌ No active deep-dive context. Run a deep-dive first.';
+        return;
+    }
+
+    btn.disabled    = true;
+    btn.textContent = '✨ Thinking…';
+    statusEl.textContent = 'AI is analysing race card + deep-dive data…';
+
+    try {
+        const resp   = await fetch('/api/admin/auto-curate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id:  sessionId,
+                race_number: deepDiveData.race_number,
+                race_date:   raceDate,
+                track_id:    trackId,
+            }),
+        });
+        const result = await resp.json();
+        if (!resp.ok) throw new Error(result.detail || 'Auto-curation failed');
+
+        // Helper: find the closest matching option in a <select>
+        function _setSelect(id, horseName) {
+            const sel = document.getElementById(id);
+            if (!sel || !horseName) return;
+            // Try exact match first, then case-insensitive partial
+            for (const opt of sel.options) {
+                if (opt.text.toLowerCase() === horseName.toLowerCase()) {
+                    sel.value = opt.value; return;
+                }
+            }
+            for (const opt of sel.options) {
+                if (opt.text.toLowerCase().includes(horseName.toLowerCase())) {
+                    sel.value = opt.value; return;
+                }
+            }
+        }
+
+        _setSelect('curateTopPick',   result.top_pick);
+        _setSelect('curateValuePlay', result.value_play);
+        _setSelect('curateLongshot',  result.longshot);
+
+        if (result.admin_notes)      document.getElementById('curateAdminNotes').value      = result.admin_notes;
+        if (result.betting_strategy) document.getElementById('curateBettingStrategy').value = result.betting_strategy;
+
+        statusEl.innerHTML = `✅ AI picks loaded — <strong>${result.top_pick}</strong> / ${result.value_play} / ${result.longshot}. Review and edit before publishing.`;
+    } catch (err) {
+        statusEl.textContent = `❌ ${err.message}`;
+    } finally {
+        btn.disabled    = false;
+        btn.textContent = '✨ AI Suggest';
+    }
 }
 
 async function submitCuratedCard(publish) {
