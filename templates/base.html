@@ -15,7 +15,7 @@
     <!-- Font Awesome -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <!-- Custom CSS -->
-    <link href="/static/css/style.css?v=4.0.0" rel="stylesheet">
+    <link href="/static/css/style.css?v=4.1.0" rel="stylesheet">
 
     {% block extra_head %}{% endblock %}
 </head>
@@ -62,15 +62,15 @@
                 <div class="d-flex justify-content-center gap-4 flex-wrap">
                     <div class="crypto-wallet">
                         <div class="d-flex align-items-center gap-2 mb-1 justify-content-center">
-                            <img src="https://cryptologos.cc/logos/bitcoin-btc-logo.svg" alt="Bitcoin" width="18" height="18">
-                            <span class="small fw-semibold" style="color: #f7931a;">Bitcoin</span>
+                            <i class="fab fa-bitcoin" style="color:#f7931a;font-size:1.1rem;"></i>
+                            <span class="small fw-semibold" style="color: #f7931a;">Bitcoin (BTC)</span>
                         </div>
                         <code class="crypto-address" title="Click to copy" onclick="navigator.clipboard.writeText('3JBSDy1o89G6FxtKDmA8ZfnYCm1QRXASmM').then(()=>{this.classList.add('copied');setTimeout(()=>this.classList.remove('copied'),1500)})">3JBSDy1o89G6FxtKDmA8ZfnYCm1QRXASmM</code>
                     </div>
                     <div class="crypto-wallet">
                         <div class="d-flex align-items-center gap-2 mb-1 justify-content-center">
-                            <img src="https://cryptologos.cc/logos/ethereum-eth-logo.svg" alt="Ethereum" width="18" height="18">
-                            <span class="small fw-semibold" style="color: #627eea;">Ethereum</span>
+                            <i class="fab fa-ethereum" style="color:#627eea;font-size:1.1rem;"></i>
+                            <span class="small fw-semibold" style="color: #627eea;">Ethereum (ETH)</span>
                         </div>
                         <code class="crypto-address" title="Click to copy" onclick="navigator.clipboard.writeText('0x1b904804Cf095828F8e77DCdAEB3a4b84c798861').then(()=>{this.classList.add('copied');setTimeout(()=>this.classList.remove('copied'),1500)})">0x1b904804Cf095828F8e77DCdAEB3a4b84c798861</code>
                     </div>

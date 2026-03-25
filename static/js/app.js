@@ -232,21 +232,6 @@ const Analysis = {
         }
     },
 
-        // Initial poll
-        poll();
-        
-        // Set up interval
-        App.pollInterval = setInterval(poll, interval);
-        
-        // Auto-stop after 10 minutes
-        setTimeout(() => {
-            if (App.pollInterval) {
-                this.stopPolling();
-                console.log('Polling stopped due to timeout');
-            }
-        }, 600000);
-    },
-
     // Stop polling
     stopPolling() {
         if (App.pollInterval) {

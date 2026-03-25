@@ -379,11 +379,14 @@ def _get_default_model(fallback: str) -> str:
     return available_models[0]
 
 
-# Supported tracks
-SUPPORTED_TRACKS = {
-    "DMR": "Del Mar",
-    "SA": "Santa Anita"
-}
+# Supported tracks — configurable via TRACK_CONFIG env var
+# Format: JSON object, e.g. '{"DMR": "Del Mar", "SA": "Santa Anita", "GP": "Gulfstream Park"}'
+_DEFAULT_TRACKS = {"DMR": "Del Mar", "SA": "Santa Anita"}
+try:
+    SUPPORTED_TRACKS = json.loads(os.environ.get("TRACK_CONFIG", "")) or _DEFAULT_TRACKS
+except (json.JSONDecodeError, TypeError):
+    SUPPORTED_TRACKS = _DEFAULT_TRACKS
+logger.info(f"Configured tracks: {SUPPORTED_TRACKS}")
 
 MODEL_OPTIONS = [MODEL_CATALOG[model_id] for model_id in MODEL_CATALOG]
 MODEL_LOOKUP = MODEL_CATALOG

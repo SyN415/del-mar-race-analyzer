@@ -119,7 +119,7 @@ main.container {
 }
 
 .hero-copy { max-width: 42rem; }
-.hero-section h1 { letter-spacing: -0.04em; max-width: 12ch; }
+.hero-section h1 { letter-spacing: -0.04em; }
 
 .fw-800 { font-weight: 800; }
 
@@ -493,17 +493,18 @@ footer p, footer small { color: var(--text-muted) !important; }
     align-items: center;
 }
 .crypto-address {
-    font-size: 0.62rem;
-    color: var(--text-muted);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
     background: rgba(255,255,255,0.04);
     border: 1px solid var(--border-primary);
-    padding: 0.3rem 0.6rem;
-    border-radius: 6px;
+    padding: 0.45rem 0.85rem;
+    border-radius: 8px;
     cursor: pointer;
     transition: all 0.2s;
     word-break: break-all;
-    max-width: 280px;
+    max-width: 380px;
     text-align: center;
+    letter-spacing: 0.02em;
 }
 .crypto-address:hover {
     background: rgba(255,255,255,0.08);
