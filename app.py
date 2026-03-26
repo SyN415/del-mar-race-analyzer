@@ -17,7 +17,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 import uvicorn
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
@@ -380,13 +380,42 @@ def _get_default_model(fallback: str) -> str:
 
 
 # Supported tracks — configurable via TRACK_CONFIG env var
-# Format: JSON object, e.g. '{"DMR": "Del Mar", "SA": "Santa Anita", "GP": "Gulfstream Park"}'
-_DEFAULT_TRACKS = {"DMR": "Del Mar", "SA": "Santa Anita"}
+# Extended format (recommended):
+#   {"DMR": {"name": "Del Mar", "country": "USA"}, "OI": {"name": "Tokyo City Keiba", "country": "JPN"}}
+# Legacy format still supported:
+#   {"DMR": "Del Mar", "SA": "Santa Anita"}
+_DEFAULT_TRACK_CONFIG: Dict[str, Any] = {
+    "DMR": {"name": "Del Mar", "country": "USA"},
+    "SA": {"name": "Santa Anita", "country": "USA"},
+}
 try:
-    SUPPORTED_TRACKS = json.loads(os.environ.get("TRACK_CONFIG", "")) or _DEFAULT_TRACKS
+    _raw_track_config = json.loads(os.environ.get("TRACK_CONFIG", "")) or _DEFAULT_TRACK_CONFIG
 except (json.JSONDecodeError, TypeError):
-    SUPPORTED_TRACKS = _DEFAULT_TRACKS
+    _raw_track_config = _DEFAULT_TRACK_CONFIG
+
+# Normalize: support both {"ID": "Name"} and {"ID": {"name": ..., "country": ...}}
+TRACK_CONFIG_FULL: Dict[str, Dict[str, str]] = {}
+for _tid, _val in _raw_track_config.items():
+    if isinstance(_val, dict):
+        TRACK_CONFIG_FULL[_tid] = {"name": _val.get("name", _tid), "country": _val.get("country", "USA")}
+    else:
+        TRACK_CONFIG_FULL[_tid] = {"name": str(_val), "country": "USA"}
+
+# Backward-compatible name lookup: {track_id: display_name}
+SUPPORTED_TRACKS: Dict[str, str] = {tid: cfg["name"] for tid, cfg in TRACK_CONFIG_FULL.items()}
+# Country lookup: {track_id: country_code}
+TRACK_COUNTRIES: Dict[str, str] = {tid: cfg["country"] for tid, cfg in TRACK_CONFIG_FULL.items()}
+
+def get_track_country(track_id: str) -> str:
+    """Return the country code for a track (defaults to 'USA')."""
+    return TRACK_COUNTRIES.get(track_id, "USA")
+
+def is_international_track(track_id: str) -> bool:
+    """Return True if track is outside the USA."""
+    return get_track_country(track_id) != "USA"
+
 logger.info(f"Configured tracks: {SUPPORTED_TRACKS}")
+logger.info(f"Track countries: {TRACK_COUNTRIES}")
 
 MODEL_OPTIONS = [MODEL_CATALOG[model_id] for model_id in MODEL_CATALOG]
 MODEL_LOOKUP = MODEL_CATALOG
@@ -705,26 +734,27 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
 
     try:
         is_web_search_mode = request.source_mode == "web_search"
+        track_country = get_track_country(request.track_id)
         admin_response_format = {"type": "json_object"}
         official_card_url = (
-            build_equibase_card_overview_url(request.track_id, request.race_date)
+            build_equibase_card_overview_url(request.track_id, request.race_date, country=track_country)
             if is_web_search_mode
             else None
         )
         expected_horses_by_race = (
-            fetch_equibase_expected_horses_by_race(request.track_id, request.race_date)
+            fetch_equibase_expected_horses_by_race(request.track_id, request.race_date, country=track_country)
             if is_web_search_mode
             else {}
         )
         expected_race_numbers = (
-            fetch_equibase_expected_race_numbers(request.track_id, request.race_date)
+            fetch_equibase_expected_race_numbers(request.track_id, request.race_date, country=track_country)
             if is_web_search_mode
             else []
         )
         if expected_horses_by_race and not expected_race_numbers:
             expected_race_numbers = sorted(expected_horses_by_race)
         per_race_urls = (
-            build_equibase_race_urls(request.track_id, request.race_date, expected_race_numbers)
+            build_equibase_race_urls(request.track_id, request.race_date, expected_race_numbers, country=track_country)
             if is_web_search_mode and expected_race_numbers and build_equibase_race_urls
             else {}
         )
@@ -1130,10 +1160,26 @@ async def admin_race_deep_dive(request: AdminDeepDiveRequest, http_request: Requ
         horse_lines.append(f"  - Post {post}: {name} (Jockey: {jockey}, Trainer: {trainer})")
 
     track_full = SUPPORTED_TRACKS.get(request.track_id, request.track_id)
+    track_country = get_track_country(request.track_id)
+    intl = track_country != "USA"
     race_info = (
         f"Race {request.race_number} on {request.race_date} at {track_full} ({request.track_id}) | "
+        f"Country: {track_country} | "
         f"{target_race.get('race_type', '')} | {target_race.get('distance', '')} | {target_race.get('surface', '')}"
     )
+
+    if intl:
+        search_sources = (
+            "Search the following sources for data on each horse:\n"
+            "  - nar.netkeiba.com (Japanese racing — past results, speed figures, jockey/trainer stats)\n"
+            "  - irace.com.sg (international form guides)\n"
+            "  - skyracingworld.com (form guides for Japan/Australia)\n"
+            "  - tabtouch.com.au / tab.com.au (Australian racing data)\n"
+            "  - equibase.com/static/foreign/ (Equibase international entries)\n"
+            "Cross-reference multiple sources. Note: Beyer speed figures are NOT available for international races — use local speed ratings or time-based figures instead."
+        )
+    else:
+        search_sources = "Search equibase.com, horseracingnation.com, brisnet.com, and any other authoritative racing data sources."
 
     prompt = f"""You are a professional horse racing data analyst. Perform a comprehensive deep-dive data collection for the following race.
 
@@ -1149,7 +1195,7 @@ For EACH horse above, search the web and collect ALL of the following data point
 4. **Trainer stats** — Win % at {track_full}, win % at this class/distance, last-30-day form
 5. **Form notes** — beaten favorite? class drop/rise? equipment change? medication? current condition?
 
-Search equibase.com, horseracingnation.com, brisnet.com, and any other authoritative racing data sources.
+{search_sources}
 
 Return ONLY a valid JSON object with this exact structure:
 {{
@@ -1730,14 +1776,31 @@ def _build_admin_structuring_prompt(
     per_race_urls: Optional[Dict[int, Dict[str, str]]] = None,
     compact_response: bool = False,
 ) -> str:
-    source_strategy = (
-        "Use web search before answering. "
-        "Your PRIMARY data sources are the Equibase SmartPick pages listed below — you MUST search the SmartPick URL for EVERY race "
-        "(not just the first few) to get the full field, post positions, jockeys, trainers, morning line odds, and SmartPick rankings. "
-        "Do not skip later races. Cross-reference with the Equibase entry pages and other high-confidence racing sources."
-        if request.source_mode == "web_search"
-        else "Use only the supplied source material. Do not rely on outside knowledge or browse the web."
-    )
+    track_country = get_track_country(request.track_id)
+    intl = track_country != "USA"
+
+    if request.source_mode != "web_search":
+        source_strategy = "Use only the supplied source material. Do not rely on outside knowledge or browse the web."
+    elif intl:
+        source_strategy = (
+            "Use web search before answering. "
+            "This is an INTERNATIONAL track — Equibase SmartPick pages do NOT exist for this region. "
+            "Your PRIMARY data sources are the Equibase foreign entry pages listed below. "
+            "ALSO search these supplementary sources for speed figures, form, and statistics:\n"
+            "  - nar.netkeiba.com (Japanese racing speed/stats — use race_id format matching the track and date)\n"
+            "  - irace.com.sg (international form guides and express form PDFs)\n"
+            "  - skyracingworld.com (form guides for Japan/Australia)\n"
+            "  - tabtouch.com.au / tab.com.au (Australian racing data)\n"
+            "Cross-reference multiple sources to build the most complete field possible. "
+            "Do not skip later races."
+        )
+    else:
+        source_strategy = (
+            "Use web search before answering. "
+            "Your PRIMARY data sources are the Equibase SmartPick pages listed below — you MUST search the SmartPick URL for EVERY race "
+            "(not just the first few) to get the full field, post positions, jockeys, trainers, morning line odds, and SmartPick rankings. "
+            "Do not skip later races. Cross-reference with the Equibase entry pages and other high-confidence racing sources."
+        )
     expected_race_numbers = expected_race_numbers or []
     missing_race_numbers = missing_race_numbers or []
     expected_horses_by_race = expected_horses_by_race or {}
@@ -1779,10 +1842,12 @@ def _build_admin_structuring_prompt(
         url_lines = []
         for race_number in sorted(per_race_urls):
             urls = per_race_urls[race_number]
-            url_lines.append(f"  Race {race_number}: SmartPick={urls['smartpick']}  Entry={urls['entry']}")
-        smartpick_url_block = (
-            "Equibase URLs by race (search these for accurate data):\n" + "\n".join(url_lines)
-        )
+            if urls.get("smartpick"):
+                url_lines.append(f"  Race {race_number}: SmartPick={urls['smartpick']}  Entry={urls['entry']}")
+            else:
+                url_lines.append(f"  Race {race_number}: Entry={urls['entry']}")
+        label = "Equibase URLs by race (search these for accurate data):"
+        smartpick_url_block = label + "\n" + "\n".join(url_lines)
 
     compact_retry_line = (
         "This is a compact retry because the previous answer was malformed or truncated JSON. "
@@ -1852,10 +1917,26 @@ def _build_admin_structuring_prompt(
         )
     )
 
+    # Data source rules differ for USA vs international
+    if intl:
+        data_source_rules = (
+            "- Use the Equibase foreign entry pages as your primary source for the field, post positions, jockeys, and trainers.\n"
+            "- ALSO search nar.netkeiba.com, irace.com.sg, skyracingworld.com, tabtouch.com.au, and tab.com.au for supplementary speed figures, form data, and statistics.\n"
+            "- **Jockey and trainer are MANDATORY for every horse.** Search multiple sources to find this data. Never use \"N/A\", \"Unknown\", or leave them blank.\n"
+            "- Include `morning_line_odds` for each horse if available from any source."
+        )
+    else:
+        data_source_rules = (
+            "- Use the Equibase SmartPick data as your primary source for post positions, jockeys, trainers, and morning line odds.\n"
+            "- **Jockey and trainer are MANDATORY for every horse.** Search the SmartPick page for EACH race to get this data. Never use \"N/A\", \"Unknown\", or leave them blank.\n"
+            "- Include `morning_line_odds` for each horse if available from the SmartPick or entry pages."
+        )
+
     return f"""
 You are structuring a horse racing card for internal display.
 
 Track: {SUPPORTED_TRACKS[request.track_id]} ({request.track_id})
+Country: {track_country}
 Race date: {request.race_date}
 Source mode: {request.source_mode}
 {source_strategy}
@@ -1874,11 +1955,9 @@ Rules:
 - Return a ranked prediction for EVERY horse in every returned race. Never truncate to only the top 3-5 horses.
 - If official horse names are provided, include every listed horse exactly once in that race.
 - Order each race's predictions strongest to weakest.
-- Use the Equibase SmartPick data as your primary source for post positions, jockeys, trainers, and morning line odds.
-- **Jockey and trainer are MANDATORY for every horse.** Search the SmartPick page for EACH race to get this data. Never use "N/A", "Unknown", or leave them blank.
+{data_source_rules}
 - Use only grounded details; leave uncertain text blank instead of inventing facts — but jockey and trainer must always be populated.
 - `composite_rating` must be numeric on a 0-100 scale.
-- Include `morning_line_odds` for each horse if available from the SmartPick or entry pages.
 {compact_rules}""".strip()
 
 
@@ -1999,23 +2078,39 @@ def _build_jockey_trainer_retry_prompt(
         gaps = incomplete_field_races[race_number]
         gap_lines.append(f"  Race {race_number}: {'; '.join(gaps)}")
 
+    track_country = get_track_country(request.track_id)
+    intl = track_country != "USA"
+
     url_lines: List[str] = []
     for race_number in sorted(per_race_urls):
         urls = per_race_urls[race_number]
-        url_lines.append(f"  Race {race_number}: SmartPick={urls['smartpick']}  Entry={urls['entry']}")
+        if urls.get("smartpick"):
+            url_lines.append(f"  Race {race_number}: SmartPick={urls['smartpick']}  Entry={urls['entry']}")
+        else:
+            url_lines.append(f"  Race {race_number}: Entry={urls['entry']}")
 
     url_block = (
         "\nSearch these Equibase URLs for the missing data:\n" + "\n".join(url_lines)
         if url_lines else ""
     )
 
+    if intl:
+        search_instruction = (
+            "Use web search before answering. This is an INTERNATIONAL track — SmartPick pages do NOT exist. "
+            "Search the Equibase foreign entry pages listed below, AND also search nar.netkeiba.com, "
+            "irace.com.sg, skyracingworld.com, tabtouch.com.au for jockey/trainer data."
+        )
+    else:
+        search_instruction = "Use web search before answering. Search the Equibase SmartPick and entry pages for each race listed below."
+
     return f"""
 You are filling in missing jockey and trainer data for a horse racing card.
 
 Track: {SUPPORTED_TRACKS[request.track_id]} ({request.track_id})
+Country: {track_country}
 Race date: {request.race_date}
 
-Use web search before answering. Search the Equibase SmartPick and entry pages for each race listed below.
+{search_instruction}
 {url_block}
 
 The following races have horses with missing jockey and/or trainer names:

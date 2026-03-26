@@ -207,21 +207,40 @@ def merge_source_urls(
 
 
 def build_equibase_card_overview_url(track_id: str, race_date: str, country: str = "USA") -> str:
-    """Build the official Equibase card overview URL for a track/date."""
+    """Build the official Equibase card overview URL for a track/date.
+
+    USA tracks use ``/static/entry/{track}{date}{country}-EQB.html``.
+    International tracks use ``/static/foreign/entry/RaceCardIndex{track}{date}{country}-EQB.html``.
+    """
     date_obj = datetime.strptime(race_date, "%Y-%m-%d")
     formatted_date = date_obj.strftime("%m%d%y")
-    return f"https://www.equibase.com/static/entry/{track_id.upper()}{formatted_date}{country}-EQB.html?SAP=viewe2"
+    tid = track_id.upper()
+    if country == "USA":
+        return f"https://www.equibase.com/static/entry/{tid}{formatted_date}{country}-EQB.html?SAP=viewe2"
+    return f"https://www.equibase.com/static/foreign/entry/RaceCardIndex{tid}{formatted_date}{country}-EQB.html"
 
 
 def build_equibase_race_entry_url(track_id: str, race_date: str, race_number: int, country: str = "USA") -> str:
-    """Build the Equibase individual race entry page URL."""
+    """Build the Equibase individual race entry page URL.
+
+    USA: ``/static/entry/{track}{date}{country}{race}-EQB.html``
+    International: ``/static/foreign/entry/{track}{date}{country}{race}-EQB.html``
+    """
     date_obj = datetime.strptime(race_date, "%Y-%m-%d")
     formatted_date = date_obj.strftime("%m%d%y")
-    return f"https://www.equibase.com/static/entry/{track_id.upper()}{formatted_date}{country}{race_number}-EQB.html"
+    tid = track_id.upper()
+    if country == "USA":
+        return f"https://www.equibase.com/static/entry/{tid}{formatted_date}{country}{race_number}-EQB.html"
+    return f"https://www.equibase.com/static/foreign/entry/{tid}{formatted_date}{country}{race_number}-EQB.html"
 
 
-def build_equibase_smartpick_url(track_id: str, race_date: str, race_number: int) -> str:
-    """Build the Equibase SmartPick page URL for a specific race."""
+def build_equibase_smartpick_url(track_id: str, race_date: str, race_number: int, country: str = "USA") -> Optional[str]:
+    """Build the Equibase SmartPick page URL for a specific race.
+
+    Returns ``None`` for international tracks — SmartPicks are USA-only.
+    """
+    if country != "USA":
+        return None
     date_obj = datetime.strptime(race_date, "%Y-%m-%d")
     formatted_date = date_obj.strftime("%m/%d/%Y")
     return (
@@ -234,16 +253,17 @@ def build_equibase_race_urls(
     track_id: str,
     race_date: str,
     race_numbers: List[int],
+    country: str = "USA",
 ) -> Dict[int, Dict[str, str]]:
     """Build entry and SmartPick URLs for each race number.
 
-    Returns ``{race_number: {"entry": url, "smartpick": url}}``.
+    Returns ``{race_number: {"entry": url, "smartpick": url_or_none}}``.
     """
     urls: Dict[int, Dict[str, str]] = {}
     for race_number in race_numbers:
         urls[race_number] = {
-            "entry": build_equibase_race_entry_url(track_id, race_date, race_number),
-            "smartpick": build_equibase_smartpick_url(track_id, race_date, race_number),
+            "entry": build_equibase_race_entry_url(track_id, race_date, race_number, country=country),
+            "smartpick": build_equibase_smartpick_url(track_id, race_date, race_number, country=country),
         }
     return urls
 
@@ -252,9 +272,10 @@ def fetch_equibase_expected_race_numbers(
     track_id: str,
     race_date: str,
     timeout_seconds: float = 12.0,
+    country: str = "USA",
 ) -> List[int]:
     """Fetch the official Equibase overview page and infer race numbers on the card."""
-    html = _fetch_equibase_card_overview_html(track_id, race_date, timeout_seconds=timeout_seconds)
+    html = _fetch_equibase_card_overview_html(track_id, race_date, timeout_seconds=timeout_seconds, country=country)
     if not html:
         return []
 
@@ -269,9 +290,10 @@ def fetch_equibase_expected_horses_by_race(
     track_id: str,
     race_date: str,
     timeout_seconds: float = 12.0,
+    country: str = "USA",
 ) -> Dict[int, List[str]]:
     """Fetch the official Equibase overview page and infer horse fields by race."""
-    html = _fetch_equibase_card_overview_html(track_id, race_date, timeout_seconds=timeout_seconds)
+    html = _fetch_equibase_card_overview_html(track_id, race_date, timeout_seconds=timeout_seconds, country=country)
     if not html:
         return {}
 
@@ -667,8 +689,8 @@ def _to_int(value: Any, default: int) -> int:
         return default
 
 
-def _fetch_equibase_card_overview_html(track_id: str, race_date: str, timeout_seconds: float = 12.0) -> str:
-    overview_url = build_equibase_card_overview_url(track_id, race_date)
+def _fetch_equibase_card_overview_html(track_id: str, race_date: str, timeout_seconds: float = 12.0, country: str = "USA") -> str:
+    overview_url = build_equibase_card_overview_url(track_id, race_date, country=country)
     req = urllib_request.Request(
         overview_url,
         headers={
