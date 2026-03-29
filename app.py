@@ -421,6 +421,7 @@ MODEL_OPTIONS = [MODEL_CATALOG[model_id] for model_id in MODEL_CATALOG]
 MODEL_LOOKUP = MODEL_CATALOG
 DEFAULT_LLM_MODEL = "x-ai/grok-4.20-beta"
 DEFAULT_ADMIN_LLM_MODEL = "x-ai/grok-4.20-beta"
+CARD_RETENTION_DAYS = int(os.environ.get("CARD_RETENTION_DAYS", "28"))
 ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS = 16000
 ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS = 8000
 ADMIN_COMPACT_JSON_RETRY_MODEL_PREFIXES = ("minimax/",)
@@ -489,15 +490,24 @@ class AnalysisStatus(BaseModel):
 async def landing_page(request: Request):
     """Public landing page showing published curated betting cards."""
     session_manager = await app_state.ensure_session_manager()
-    published_cards: List[Dict] = []
+    upcoming_cards: List[Dict] = []
+    past_cards: List[Dict] = []
+    today_str = datetime.now().strftime("%Y-%m-%d")
     if session_manager:
         try:
-            published_cards = await asyncio.wait_for(
-                session_manager.get_published_curated_cards(limit=12), timeout=2.0
+            all_published = await asyncio.wait_for(
+                session_manager.get_published_curated_cards(limit=30), timeout=2.0
             )
-            for pc in published_cards:
+            for pc in all_published:
                 pc["track_name"] = SUPPORTED_TRACKS.get(pc.get("track_id"), pc.get("track_id"))
                 pc["card_url"] = f"/card/{pc.get('race_date')}/{pc.get('track_id')}"
+                race_date = pc.get("race_date", "")
+                if race_date >= today_str:
+                    upcoming_cards.append(pc)
+                else:
+                    past_cards.append(pc)
+            # Upcoming: soonest first; Past: most recent first (already desc from query)
+            upcoming_cards.sort(key=lambda c: c.get("race_date", ""))
         except Exception as e:
             logger.warning(f"Failed to load published curated cards for landing page: {e}")
     return templates.TemplateResponse(
@@ -506,7 +516,8 @@ async def landing_page(request: Request):
         _template_context(
             request,
             BRAND_NAME,
-            published_curated_cards=published_cards,
+            upcoming_cards=upcoming_cards,
+            past_cards=past_cards,
         ),
     )
 
@@ -1661,6 +1672,26 @@ async def list_curated_cards(request: Request):
     return JSONResponse(cards)
 
 
+@app.delete("/api/admin/curated-card/{card_id}")
+async def delete_curated_card_endpoint(card_id: str, request: Request):
+    """Delete a curated card by ID (admin only)."""
+    if not _auth_enabled():
+        raise HTTPException(status_code=503, detail="Admin access is not configured on the server")
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+
+    session_manager = await app_state.ensure_session_manager()
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager is not available")
+
+    success = await session_manager.delete_curated_card(card_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete curated card")
+
+    logger.info("🗑️ Admin deleted curated card %s", card_id)
+    return JSONResponse({"status": "deleted", "id": card_id})
+
+
 @app.get("/card/{race_date}/{track_id}", response_class=HTMLResponse)
 async def curated_card_page(request: Request, race_date: str, track_id: str):
     """Public-facing curated betting card page."""
@@ -2246,6 +2277,17 @@ async def startup_event():
     """Initialize application on startup"""
     logger.info(f"Starting {BRAND_NAME}")
     await app_state.initialize()
+
+    # Auto-purge expired curated cards on startup
+    try:
+        sm = await app_state.ensure_session_manager()
+        if sm:
+            purged = await sm.purge_expired_curated_cards(retention_days=CARD_RETENTION_DAYS)
+            if purged:
+                logger.info("🗑️ Startup purge: removed %d expired cards (retention=%d days)", purged, CARD_RETENTION_DAYS)
+    except Exception as e:
+        logger.warning("Startup card purge failed (non-fatal): %s", e)
+
     logger.info("Application startup complete")
 
 @app.on_event("shutdown")

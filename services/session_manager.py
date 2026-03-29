@@ -729,8 +729,8 @@ class SessionManager:
             logger.error(f"Failed to get curated card: {e}")
             return None
 
-    async def get_published_curated_cards(self, limit: int = 10) -> List[Dict]:
-        """Return recently published curated cards, newest first."""
+    async def get_published_curated_cards(self, limit: int = 20) -> List[Dict]:
+        """Return published curated cards, ordered by race_date descending (newest race first)."""
         try:
             if self.storage_backend == 'supabase':
                 rows = await self._supabase_request(
@@ -738,7 +738,7 @@ class SessionManager:
                     'curated_cards',
                     params={
                         'is_published': 'eq.true',
-                        'order': 'updated_at.desc',
+                        'order': 'race_date.desc',
                         'limit': limit,
                     },
                 )
@@ -749,7 +749,7 @@ class SessionManager:
                 async with db.execute("""
                     SELECT * FROM curated_cards
                     WHERE is_published = 1
-                    ORDER BY updated_at DESC
+                    ORDER BY race_date DESC
                     LIMIT ?
                 """, (limit,)) as cursor:
                     rows = await cursor.fetchall()
@@ -769,14 +769,14 @@ class SessionManager:
             logger.error(f"Failed to get published curated cards: {e}")
             return []
 
-    async def get_all_curated_cards(self, limit: int = 20) -> List[Dict]:
-        """Return all curated cards (published and draft), newest first."""
+    async def get_all_curated_cards(self, limit: int = 50) -> List[Dict]:
+        """Return all curated cards (published and draft), ordered by race_date descending."""
         try:
             if self.storage_backend == 'supabase':
                 rows = await self._supabase_request(
                     'GET',
                     'curated_cards',
-                    params={'order': 'updated_at.desc', 'limit': limit},
+                    params={'order': 'race_date.desc', 'limit': limit},
                 )
                 return rows or []
 
@@ -784,7 +784,7 @@ class SessionManager:
                 db.row_factory = aiosqlite.Row
                 async with db.execute("""
                     SELECT * FROM curated_cards
-                    ORDER BY updated_at DESC
+                    ORDER BY race_date DESC
                     LIMIT ?
                 """, (limit,)) as cursor:
                     rows = await cursor.fetchall()
@@ -803,6 +803,66 @@ class SessionManager:
         except Exception as e:
             logger.error(f"Failed to get all curated cards: {e}")
             return []
+
+    async def delete_curated_card(self, card_id: str) -> bool:
+        """Delete a curated card by its id. Returns True on success."""
+        try:
+            if self.storage_backend == 'supabase':
+                await self._supabase_request(
+                    'DELETE',
+                    'curated_cards',
+                    params={'id': f'eq.{card_id}'},
+                )
+                logger.info("🗑️ Deleted curated card %s from Supabase", card_id)
+                return True
+
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("DELETE FROM curated_cards WHERE id = ?", (card_id,))
+                await db.commit()
+            logger.info("🗑️ Deleted curated card %s from SQLite", card_id)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete curated card {card_id}: {e}")
+            return False
+
+    async def purge_expired_curated_cards(self, retention_days: int = 28) -> int:
+        """Delete curated cards whose race_date is older than retention_days. Returns count deleted."""
+        from datetime import datetime, timedelta
+        cutoff = (datetime.utcnow() - timedelta(days=retention_days)).strftime("%Y-%m-%d")
+        try:
+            if self.storage_backend == 'supabase':
+                # Fetch ids to delete first so we can count them
+                rows = await self._supabase_request(
+                    'GET',
+                    'curated_cards',
+                    params={
+                        'race_date': f'lt.{cutoff}',
+                        'select': 'id',
+                    },
+                )
+                count = len(rows) if rows else 0
+                if count:
+                    await self._supabase_request(
+                        'DELETE',
+                        'curated_cards',
+                        params={'race_date': f'lt.{cutoff}'},
+                    )
+                logger.info("🗑️ Purged %d expired curated cards (before %s) from Supabase", count, cutoff)
+                return count
+
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute(
+                    "SELECT COUNT(*) FROM curated_cards WHERE race_date < ?", (cutoff,)
+                )
+                count = (await cursor.fetchone())[0]
+                if count:
+                    await db.execute("DELETE FROM curated_cards WHERE race_date < ?", (cutoff,))
+                    await db.commit()
+            logger.info("🗑️ Purged %d expired curated cards (before %s) from SQLite", count, cutoff)
+            return count
+        except Exception as e:
+            logger.error(f"Failed to purge expired curated cards: {e}")
+            return 0
 
     async def get_recent_sessions(self, limit: int = 10) -> List[Dict]:
         """Get recent analysis sessions"""
