@@ -531,6 +531,7 @@ function renderFullCardForm(data) {
 
     html += `
 <div class="d-flex gap-3 flex-wrap align-items-center mt-3">
+  <button class="btn btn-outline-warning" id="rewriteAllBtn" onclick="rewriteAllRaceNotes()">✨ Rewrite All Notes</button>
   <button class="btn btn-outline-secondary" onclick="submitFullCard(false)">Save Draft</button>
   <button class="btn btn-primary px-4" onclick="submitFullCard(true)">Publish Card</button>
   <span id="fullCardSaveStatus" class="small text-muted"></span>
@@ -595,6 +596,38 @@ async function rewriteRaceNotes(raceNumber) {
         btn.disabled = false;
         btn.textContent = '✨ Rewrite Notes';
     }
+}
+
+async function rewriteAllRaceNotes() {
+    if (!_fullCardData) return;
+    const { races } = _fullCardData;
+    const btn = document.getElementById('rewriteAllBtn');
+    const status = document.getElementById('fullCardSaveStatus');
+    btn.disabled = true;
+    btn.textContent = '⏳ Rewriting all notes…';
+    status.textContent = '';
+
+    let done = 0;
+    const total = races.length;
+
+    for (const race of races) {
+        const rn = race.race_number || (races.indexOf(race) + 1);
+        const perStatus = document.getElementById(`fc_rewrite_status_${rn}`);
+        if (perStatus) { perStatus.textContent = '⏳'; perStatus.className = 'small text-muted ms-2'; }
+
+        try {
+            await rewriteRaceNotes(rn);
+            done++;
+            btn.textContent = `⏳ Rewriting… (${done}/${total})`;
+        } catch (err) {
+            console.error(`Rewrite failed for race ${rn}:`, err);
+        }
+    }
+
+    btn.disabled = false;
+    btn.textContent = '✨ Rewrite All Notes';
+    status.textContent = `✅ All ${done}/${total} race notes rewritten`;
+    status.className = 'small text-success';
 }
 
 async function submitFullCard(publish) {

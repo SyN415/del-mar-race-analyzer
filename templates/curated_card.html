@@ -52,13 +52,12 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 .cc-hero{
   position:relative;z-index:1;
   text-align:center;padding:clamp(2.5rem,7vw,5rem) clamp(1rem,4vw,2rem) clamp(2rem,5vw,3.5rem);
-  overflow:hidden;
 }
 .cc-hero::before{
-  content:"";position:absolute;inset:0;z-index:-1;
+  content:"";position:absolute;inset:-2rem;z-index:-1;
   background:
     radial-gradient(ellipse 80% 60% at 50% -10%,rgba(192,132,252,.22) 0%,transparent 70%),
-    radial-gradient(ellipse 60% 40% at 80% 100%,rgba(245,213,107,.1) 0%,transparent 60%);
+    radial-gradient(ellipse 70% 50% at 50% 110%,rgba(245,213,107,.07) 0%,transparent 60%);
 }
 .cc-eyebrow{
   display:inline-flex;align-items:center;gap:.5rem;
@@ -182,8 +181,8 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 }
 .overview-inner{
   border-radius:var(--r-lg);padding:2rem 2.5rem;
-  background:linear-gradient(135deg,rgba(192,132,252,.08),rgba(245,213,107,.06));
-  border:1px solid rgba(192,132,252,.28);
+  background:linear-gradient(135deg,rgba(192,132,252,.08),rgba(245,213,107,.04));
+  border:1px solid rgba(192,132,252,.15);
   box-shadow:0 0 60px rgba(192,132,252,.06);
 }
 .overview-eyebrow{

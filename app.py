@@ -257,8 +257,19 @@ def _get_current_role(request: Request) -> str | None:
     return _verify_signed(cookie)
 
 
+def _is_automation_token_valid(request: Request) -> bool:
+    """Check if the request carries a valid automation bearer token."""
+    token = os.getenv("TRACKSTAR_AUTOMATION_TOKEN", "")
+    if not token:
+        return False
+    auth_header = request.headers.get("authorization", "")
+    if not auth_header.lower().startswith("bearer "):
+        return False
+    return hmac.compare_digest(auth_header[7:], token)
+
+
 def _is_admin(request: Request) -> bool:
-    return _get_current_role(request) == "admin"
+    return _get_current_role(request) == "admin" or _is_automation_token_valid(request)
 
 
 def _auth_enabled() -> bool:
@@ -1747,12 +1758,16 @@ ALL HORSES IN THE FIELD:
 
 Write:
 1. race_notes: 2-3 sentences of editorial analysis explaining why the top pick is the strongest play, why the value play is undervalued, and why the longshot has upset potential. Be specific — cite speed figures, form, jockey/trainer stats, or running style.
-2. betting_strategy: specific bet types (win, exacta key, trifecta, etc.) using the selected horses.
+2. betting_strategy: specific bet types using POST POSITION NUMBERS only (e.g. "Win on 5, exacta key 5/3,8, trifecta 5 with 3,8,2"). NEVER use horse names in the strategy — use only post numbers.
+
+IMPORTANT FORMATTING RULES:
+- race_notes should be 2-3 sentences. Match the concise editorial style of a professional tip sheet.
+- betting_strategy must reference horses ONLY by their post position numbers, formatted like: "Win on 5, exacta key 5/3,8, trifecta 5 with 3,8,2"
 
 Return ONLY valid JSON:
 {{
   "race_notes": "Editorial analysis...",
-  "betting_strategy": "Win on #X, exacta key..."
+  "betting_strategy": "Win on #, exacta key #/#,#, trifecta # with #,#,#"
 }}"""
 
     logger.info(
@@ -2466,6 +2481,15 @@ async def run_analysis_pipeline(session_id: str, date: str, llm_model: str, trac
             del app_state.active_tasks[session_id]
             logger.info(f"Cleaned up task for session {session_id}")
 
+# ── Automation scheduler instance ─────────────────────────────────────────────
+try:
+    from services.automation_scheduler import AutomationScheduler
+    _automation_scheduler = AutomationScheduler(tracks=TRACK_CONFIG_FULL)
+except Exception as _sched_err:
+    logger.warning("Could not import AutomationScheduler: %s", _sched_err)
+    _automation_scheduler = None  # type: ignore[assignment]
+
+
 # Application lifecycle events
 @app.on_event("startup")
 async def startup_event():
@@ -2483,12 +2507,26 @@ async def startup_event():
     except Exception as e:
         logger.warning("Startup card purge failed (non-fatal): %s", e)
 
+    # Start the automation scheduler
+    if _automation_scheduler is not None:
+        try:
+            _automation_scheduler.start()
+        except Exception as e:
+            logger.warning("Automation scheduler failed to start (non-fatal): %s", e)
+
     logger.info("Application startup complete")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on application shutdown"""
     logger.info(f"Shutting down {BRAND_NAME}")
+
+    # Stop the automation scheduler
+    if _automation_scheduler is not None:
+        try:
+            await _automation_scheduler.stop()
+        except Exception as e:
+            logger.warning("Automation scheduler stop failed: %s", e)
 
     # Cancel all active tasks
     for session_id, task in list(app_state.active_tasks.items()):
@@ -2502,7 +2540,6 @@ async def shutdown_event():
 
     app_state.active_tasks.clear()
     logger.info("All active tasks cancelled")
-    # Add cleanup logic here
     logger.info("Application shutdown complete")
 
 # Development server
