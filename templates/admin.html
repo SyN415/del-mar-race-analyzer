@@ -461,6 +461,7 @@ async function runFullCardCuration() {
             races: result.races || [],
             cardOverview: result.card_overview || '',
             horseNamesByRace: result.horse_names_by_race || {},
+            horseNotesByRace: result.horse_notes_by_race || {},
         };
 
         renderFullCardForm(_fullCardData);
@@ -516,9 +517,13 @@ function renderFullCardForm(data) {
       <label class="form-label small fw-semibold">Race Notes</label>
       <textarea class="form-control form-control-sm" id="fc_notes_${rn}" rows="2">${escHtml(race.race_notes || '')}</textarea>
     </div>
-    <div>
+    <div class="mb-2">
       <label class="form-label small fw-semibold">Betting Strategy</label>
       <textarea class="form-control form-control-sm" id="fc_strat_${rn}" rows="1">${escHtml(race.betting_strategy || '')}</textarea>
+    </div>
+    <div>
+      <button class="btn btn-outline-warning btn-sm" id="fc_rewrite_btn_${rn}" onclick="rewriteRaceNotes(${rn})">✨ Rewrite Notes</button>
+      <span class="small text-muted ms-2" id="fc_rewrite_status_${rn}"></span>
     </div>
   </div>
 </div>`;
@@ -536,6 +541,60 @@ function renderFullCardForm(data) {
 
 function escHtml(s) {
     return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function rewriteRaceNotes(raceNumber) {
+    if (!_fullCardData) return;
+    const { sessionId, raceDate, trackId } = _fullCardData;
+    const topPick   = document.getElementById(`fc_top_${raceNumber}`)?.value || '';
+    const valuePlay = document.getElementById(`fc_val_${raceNumber}`)?.value || '';
+    const longshot  = document.getElementById(`fc_ls_${raceNumber}`)?.value || '';
+
+    if (!topPick && !valuePlay && !longshot) {
+        alert('Select at least one pick before rewriting notes.');
+        return;
+    }
+
+    const btn    = document.getElementById(`fc_rewrite_btn_${raceNumber}`);
+    const status = document.getElementById(`fc_rewrite_status_${raceNumber}`);
+    btn.disabled = true;
+    btn.textContent = '⏳ Rewriting…';
+    status.textContent = '';
+
+    try {
+        const resp = await fetch('/api/admin/rewrite-race-notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                race_date: raceDate,
+                track_id: trackId,
+                race_number: raceNumber,
+                top_pick: topPick,
+                value_play: valuePlay,
+                longshot: longshot,
+            }),
+        });
+        const result = await resp.json();
+        if (!resp.ok) throw new Error(result.detail || 'Rewrite failed');
+
+        // Update the textareas with new AI-generated content
+        const notesEl = document.getElementById(`fc_notes_${raceNumber}`);
+        const stratEl = document.getElementById(`fc_strat_${raceNumber}`);
+        if (notesEl && result.race_notes) notesEl.value = result.race_notes;
+        if (stratEl && result.betting_strategy) stratEl.value = result.betting_strategy;
+
+        status.textContent = '✅ Notes rewritten';
+        status.classList.remove('text-danger');
+        status.classList.add('text-success');
+    } catch (err) {
+        status.textContent = `Error: ${err.message}`;
+        status.classList.remove('text-success');
+        status.classList.add('text-danger');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '✨ Rewrite Notes';
+    }
 }
 
 async function submitFullCard(publish) {

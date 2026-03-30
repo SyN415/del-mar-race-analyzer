@@ -472,6 +472,15 @@ class CuratedCardRequest(BaseModel):
     races: Optional[List] = None
     card_overview: str = ""
 
+class RewriteRaceNotesRequest(BaseModel):
+    session_id: str
+    race_date: str
+    track_id: str = "DMR"
+    race_number: int
+    top_pick: str = ""
+    value_play: str = ""
+    longshot: str = ""
+
 class AutoCurateRequest(BaseModel):
     session_id: str
     race_date: str
@@ -1229,6 +1238,7 @@ For EACH horse above, search the web and collect ALL of the following data point
 3. **Jockey stats** — Win % at {track_full}, win % at this distance/surface, last-30-day form (starts-wins-places-shows)
 4. **Trainer stats** — Win % at {track_full}, win % at this class/distance, last-30-day form
 5. **Form notes** — beaten favorite? class drop/rise? equipment change? medication? current condition?
+6. **Horse analysis** — Write a 2-3 sentence narrative assessment of each horse's realistic win chances. Cover key strengths, weaknesses, and the specific scenario in which the horse wins. Cite specific data points (speed figures, jockey stats, etc.).
 
 {search_sources}
 
@@ -1251,7 +1261,8 @@ Return ONLY a valid JSON object with this exact structure:
       ],
       "jockey_stats": {{"track_win_pct": 22, "distance_win_pct": 18, "last_30_days": "12-3-2-1"}},
       "trainer_stats": {{"track_win_pct": 15, "distance_win_pct": 12, "last_30_days": "8-2-1-0"}},
-      "form_notes": "Brief sharp condition assessment"
+      "form_notes": "Brief sharp condition assessment",
+      "horse_analysis": "2-3 sentence narrative assessment of this horse's realistic win chances. Cover key strengths, weaknesses, and the specific scenario in which this horse wins. Be concrete and cite data."
     }}
   ],
   "deep_dive_summary": "Overall race dynamics and standout horses"
@@ -1296,6 +1307,7 @@ Return ONLY a valid JSON object with this exact structure:
                             "jockey_stats": horse_data.get("jockey_stats", {}),
                             "trainer_stats": horse_data.get("trainer_stats", {}),
                             "form_notes": horse_data.get("form_notes", ""),
+                            "horse_analysis": horse_data.get("horse_analysis", ""),
                         },
                         "quality_rating": 0.0,
                         "profile_url": "",
@@ -1492,6 +1504,7 @@ async def auto_curate_card(request: AutoCurateRequest, http_request: Request = N
         factors = pred.get("factors") or {}
 
         form_notes = dd_horse.get("form_notes", "")
+        horse_analysis = dd_horse.get("horse_analysis", "")
         js = dd_horse.get("jockey_stats") or {}
         ts = dd_horse.get("trainer_stats") or {}
         recent = dd_horse.get("recent_results") or []
@@ -1515,6 +1528,8 @@ async def auto_curate_card(request: AutoCurateRequest, http_request: Request = N
             block += f"  CardNote: {notes}\n"
         if form_notes:
             block += f"  FormNote: {form_notes}\n"
+        if horse_analysis:
+            block += f"  Analysis: {horse_analysis}\n"
         if js:
             block += f"  Jockey: Track{js.get('track_win_pct','?')}% Dist{js.get('distance_win_pct','?')}% 30d:{js.get('last_30_days','?')}\n"
         if ts:
@@ -1525,6 +1540,7 @@ async def auto_curate_card(request: AutoCurateRequest, http_request: Request = N
 
     race_sections = []
     horse_names_by_race: dict = {}  # race_number -> list of horse names
+    horse_notes_by_race: dict = {}  # race_number -> {horse_name: analysis}
 
     for race in sorted(race_analyses, key=lambda r: r.get("race_number", 0)):
         race_num = race.get("race_number", 0)
@@ -1538,6 +1554,16 @@ async def auto_curate_card(request: AutoCurateRequest, http_request: Request = N
         horse_names_by_race[race_num] = [
             (p.get("horse_name") or p.get("name") or "") for p in predictions
         ]
+
+        # Collect per-horse narrative analyses for the UI
+        race_horse_notes = {}
+        for h_dd in dd_data.get("horses", []):
+            h_name = h_dd.get("name", "")
+            h_analysis = h_dd.get("horse_analysis", "")
+            if h_name and h_analysis:
+                race_horse_notes[h_name] = h_analysis
+        if race_horse_notes:
+            horse_notes_by_race[race_num] = race_horse_notes
 
         section = (
             f"RACE {race_num} — {race.get('race_type','?')} | "
@@ -1625,12 +1651,157 @@ Return ONLY valid JSON:
             "card_overview": parsed.get("card_overview", ""),
             "races": races_out,
             "horse_names_by_race": horse_names_by_race,
+            "horse_notes_by_race": horse_notes_by_race,
         })
 
     except HTTPException:
         raise
     except Exception as exc:
         logger.error(f"Full-card auto-curation failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/admin/rewrite-race-notes")
+async def rewrite_race_notes(request: RewriteRaceNotesRequest, http_request: Request = None):
+    """Rewrite race notes and betting strategy when an admin changes pick selections."""
+    if not _auth_enabled():
+        raise HTTPException(status_code=503, detail="Admin access is not configured on the server")
+    if http_request is None or not _is_admin(http_request):
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+
+    session_manager = await app_state.ensure_session_manager()
+    openrouter_client = app_state.ensure_openrouter_client()
+
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager is not available")
+    if not openrouter_client or not openrouter_client.api_key:
+        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured on the server")
+
+    track_full = SUPPORTED_TRACKS.get(request.track_id, request.track_id)
+
+    # ── 1. Fetch session race data ────────────────────────────────────────────
+    session_results = await session_manager.get_session_results(request.session_id)
+    if "error" in session_results:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_results['error']}")
+
+    race_analyses = session_results.get("race_analyses", [])
+    target_race = next(
+        (r for r in race_analyses if r.get("race_number") == request.race_number), None
+    )
+    if not target_race:
+        raise HTTPException(status_code=404, detail=f"Race {request.race_number} not found in session")
+
+    predictions = target_race.get("predictions", [])
+
+    # ── 2. Fetch deep-dive data ───────────────────────────────────────────────
+    cached_dive = await session_manager.get_race_deep_dive(
+        request.race_date, request.track_id, request.race_number
+    )
+    dd_data = cached_dive.get("deep_dive", {}) if cached_dive else {}
+    dd_by_name = {h.get("name", "").lower(): h for h in dd_data.get("horses", [])}
+
+    # ── 3. Build horse summaries ──────────────────────────────────────────────
+    horse_summaries = []
+    for pred in predictions:
+        name = pred.get("horse_name") or pred.get("name") or ""
+        dd_horse = dd_by_name.get(name.lower(), {})
+        composite = pred.get("composite_rating", "?")
+        win_prob = pred.get("win_probability", "?")
+        factors = pred.get("factors") or {}
+        analysis = dd_horse.get("horse_analysis", "")
+        form_notes = dd_horse.get("form_notes", "")
+        js = dd_horse.get("jockey_stats") or {}
+        ts = dd_horse.get("trainer_stats") or {}
+
+        summary = f"- {name} (Post {pred.get('post_position','?')}, Rating:{composite}, WinProb:{win_prob}%)"
+        if factors:
+            summary += f" | Spd:{factors.get('speed_rating',0)} Form:{factors.get('form_rating',0)} Cls:{factors.get('class_rating',0)}"
+        if analysis:
+            summary += f"\n  Analysis: {analysis}"
+        elif form_notes:
+            summary += f"\n  Form: {form_notes}"
+        if js:
+            summary += f"\n  Jockey: Track{js.get('track_win_pct','?')}% 30d:{js.get('last_30_days','?')}"
+        if ts:
+            summary += f"\n  Trainer: Track{ts.get('track_win_pct','?')}% 30d:{ts.get('last_30_days','?')}"
+        horse_summaries.append(summary)
+
+    race_info = (
+        f"Race {request.race_number} at {track_full} on {request.race_date} — "
+        f"{target_race.get('race_type','?')} | {target_race.get('distance','?')} | {target_race.get('surface','?')}"
+    )
+
+    prompt = f"""You are a professional horse racing handicapper writing editorial-quality race notes.
+
+The admin has selected the following picks for this race. Write race notes and a betting strategy that logically explain WHY these specific horses were chosen, citing concrete data points from the horse analyses below.
+
+RACE: {race_info}
+
+ADMIN'S PICKS:
+- Top Pick: {request.top_pick or '(none)'}
+- Value Play: {request.value_play or '(none)'}
+- Longshot: {request.longshot or '(none)'}
+
+ALL HORSES IN THE FIELD:
+{chr(10).join(horse_summaries)}
+
+Write:
+1. race_notes: 2-3 sentences of editorial analysis explaining why the top pick is the strongest play, why the value play is undervalued, and why the longshot has upset potential. Be specific — cite speed figures, form, jockey/trainer stats, or running style.
+2. betting_strategy: specific bet types (win, exacta key, trifecta, etc.) using the selected horses.
+
+Return ONLY valid JSON:
+{{
+  "race_notes": "Editorial analysis...",
+  "betting_strategy": "Win on #X, exacta key..."
+}}"""
+
+    logger.info(
+        "✏️ REWRITE-NOTES: session=%s | race=%s | top=%s | value=%s | longshot=%s",
+        request.session_id, request.race_number,
+        request.top_pick, request.value_play, request.longshot,
+    )
+
+    try:
+        response = await openrouter_client.call_model(
+            model="x-ai/grok-4.20-beta",
+            task_type="analysis",
+            prompt=prompt,
+            context={
+                "race_date": request.race_date,
+                "track_id": request.track_id,
+                "race_number": request.race_number,
+            },
+            max_tokens=1000,
+            temperature=0.3,
+            return_metadata=True,
+            response_format={"type": "json_object"},
+        )
+
+        content = response.get("content", "") if isinstance(response, dict) else str(response)
+        if not content:
+            raise HTTPException(status_code=502, detail="AI returned empty content for notes rewrite")
+
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            import re as _re
+            match = _re.search(r'\{.*\}', content, _re.DOTALL)
+            if match:
+                parsed = json.loads(match.group())
+            else:
+                raise HTTPException(status_code=502, detail="Could not parse AI notes rewrite response as JSON")
+
+        logger.info("✅ REWRITE-NOTES complete | race=%s", request.race_number)
+        return JSONResponse({
+            "race_number": request.race_number,
+            "race_notes": parsed.get("race_notes", ""),
+            "betting_strategy": parsed.get("betting_strategy", ""),
+        })
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Rewrite-notes failed for race {request.race_number}: {exc}")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
