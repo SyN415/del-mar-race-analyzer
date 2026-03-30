@@ -44,6 +44,13 @@
                     🔍 Race Deep-Dives
                 </button>
             </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="manage-tab" data-bs-toggle="tab"
+                        data-bs-target="#manage-cards" type="button" role="tab"
+                        onclick="initManageTab()">
+                    🗂️ Manage
+                </button>
+            </li>
         </ul>
 
         <div class="tab-content">
@@ -123,14 +130,17 @@
                         </p>
 
                         <div class="row mb-3 align-items-end">
-                            <div class="col-md-9 mb-2 mb-md-0">
+                            <div class="col-md-8 mb-2 mb-md-0">
                                 <label for="sessionSelect" class="form-label">Session</label>
                                 <select class="form-select" id="sessionSelect">
                                     <option value="">— click Refresh to load sessions —</option>
                                 </select>
                             </div>
-                            <div class="col-md-3">
+                            <div class="col-md-2">
                                 <button class="btn btn-outline-secondary w-100" onclick="loadSessions()">↻ Refresh</button>
+                            </div>
+                            <div class="col-md-2">
+                                <button class="btn btn-outline-danger w-100" id="deleteSessionBtn" onclick="deleteSelectedSession()" disabled>🗑️ Delete</button>
                             </div>
                         </div>
 
@@ -164,6 +174,31 @@
                 </div>
 
                 <div id="deepDiveResults"></div>
+            </div>
+
+            <!-- ===== MANAGE TAB ===== -->
+            <div class="tab-pane fade" id="manage-cards" role="tabpanel">
+                <!-- Sessions Management -->
+                <div class="card shadow-lg border-0 mb-4">
+                    <div class="card-body p-4">
+                        <h5 class="fw-bold mb-1">Sessions</h5>
+                        <p class="text-muted small mb-3">All race card build sessions. Delete old or failed sessions to keep things clean.</p>
+                        <div id="manageSessionsList">
+                            <p class="text-muted small">Click the <strong>Manage</strong> tab to load…</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Curated Cards Management -->
+                <div class="card shadow-lg border-0 mb-4">
+                    <div class="card-body p-4">
+                        <h5 class="fw-bold mb-1">Published Cards</h5>
+                        <p class="text-muted small mb-3">All curated betting cards. Delete cards with mistakes or that need to be rebuilt.</p>
+                        <div id="manageCuratedList">
+                            <p class="text-muted small">Loading…</p>
+                        </div>
+                    </div>
+                </div>
             </div>
 
         </div><!-- /tab-content -->
@@ -548,6 +583,122 @@ async function submitFullCard(publish) {
         }
     } catch (err) {
         saveStatus.textContent = `Error: ${err.message}`;
+    }
+}
+
+// ── SESSION DELETE (from deep-dive tab) ──────────────────────────────────────
+document.getElementById('sessionSelect').addEventListener('change', function() {
+    document.getElementById('deleteSessionBtn').disabled = !this.value;
+});
+
+async function deleteSelectedSession() {
+    const sel = document.getElementById('sessionSelect');
+    const sessionId = sel.value;
+    if (!sessionId) return;
+    if (!confirm(`Delete session ${sessionId.slice(0,8)}…? This cannot be undone.`)) return;
+
+    try {
+        const resp = await fetch(`/api/admin/session/${sessionId}`, { method: 'DELETE' });
+        if (!resp.ok) { const r = await resp.json(); throw new Error(r.detail || 'Delete failed'); }
+        sel.querySelector(`option[value="${sessionId}"]`)?.remove();
+        sel.value = '';
+        sel.dispatchEvent(new Event('change'));
+        document.getElementById('deleteSessionBtn').disabled = true;
+    } catch (err) {
+        alert(`Error: ${err.message}`);
+    }
+}
+
+// ── MANAGE TAB ───────────────────────────────────────────────────────────────
+let manageTabInited = false;
+function initManageTab() {
+    if (!manageTabInited) { loadManageSessions(); loadManageCurated(); manageTabInited = true; }
+}
+
+async function loadManageSessions() {
+    const container = document.getElementById('manageSessionsList');
+    container.innerHTML = '<p class="text-muted small">Loading sessions…</p>';
+    try {
+        const resp = await fetch('/api/admin/sessions');
+        if (!resp.ok) throw new Error('Could not load sessions');
+        const sessions = await resp.json();
+        if (!sessions.length) { container.innerHTML = '<p class="text-muted small">No sessions found.</p>'; return; }
+        let html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">';
+        html += '<thead><tr><th>Date</th><th>Track</th><th>Status</th><th>Session ID</th><th></th></tr></thead><tbody>';
+        sessions.forEach(s => {
+            html += `<tr id="session-row-${s.session_id}">
+                <td class="small">${s.race_date || '—'}</td>
+                <td class="small">${s.track_id || '—'}</td>
+                <td><span class="badge ${s.status === 'completed' ? 'bg-success' : s.status === 'failed' ? 'bg-danger' : 'bg-secondary'}">${s.status}</span></td>
+                <td class="small text-muted">${s.session_id.slice(0,12)}…</td>
+                <td class="text-end">
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteManageSession('${s.session_id}', this)">🗑️</button>
+                </td>
+            </tr>`;
+        });
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    } catch (err) {
+        container.innerHTML = `<p class="text-danger small">Error: ${err.message}</p>`;
+    }
+}
+
+async function deleteManageSession(sessionId, btn) {
+    if (!confirm(`Delete session ${sessionId.slice(0,8)}…?`)) return;
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`/api/admin/session/${sessionId}`, { method: 'DELETE' });
+        if (!resp.ok) { const r = await resp.json(); throw new Error(r.detail || 'Delete failed'); }
+        document.getElementById(`session-row-${sessionId}`)?.remove();
+    } catch (err) {
+        alert(`Error: ${err.message}`);
+        btn.disabled = false;
+    }
+}
+
+async function loadManageCurated() {
+    const container = document.getElementById('manageCuratedList');
+    container.innerHTML = '<p class="text-muted small">Loading curated cards…</p>';
+    try {
+        const resp = await fetch('/api/admin/curated-cards');
+        if (!resp.ok) throw new Error('Could not load curated cards');
+        const cards = await resp.json();
+        if (!cards.length) { container.innerHTML = '<p class="text-muted small">No curated cards found.</p>'; return; }
+        let html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">';
+        html += '<thead><tr><th>Race Date</th><th>Track</th><th>Published</th><th>Top Pick</th><th></th></tr></thead><tbody>';
+        cards.forEach(c => {
+            const topPick = c.top_pick_json ? (c.top_pick_json.name || '—') : '—';
+            const pubBadge = c.is_published
+                ? '<span class="badge bg-success">Yes</span>'
+                : '<span class="badge bg-secondary">Draft</span>';
+            html += `<tr id="card-row-${c.id}">
+                <td class="small">${c.race_date || '—'}</td>
+                <td class="small">${c.track_name || c.track_id || '—'}</td>
+                <td>${pubBadge}</td>
+                <td class="small">${escHtml(topPick)}</td>
+                <td class="text-end">
+                    <a href="${c.card_url || '#'}" target="_blank" class="btn btn-sm btn-outline-primary me-1">View</a>
+                    <button class="btn btn-sm btn-outline-danger" onclick="deleteManageCurated('${c.id}', this)">🗑️</button>
+                </td>
+            </tr>`;
+        });
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+    } catch (err) {
+        container.innerHTML = `<p class="text-danger small">Error: ${err.message}</p>`;
+    }
+}
+
+async function deleteManageCurated(cardId, btn) {
+    if (!confirm('Delete this curated card? This cannot be undone.')) return;
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`/api/admin/curated-card/${cardId}`, { method: 'DELETE' });
+        if (!resp.ok) { const r = await resp.json(); throw new Error(r.detail || 'Delete failed'); }
+        document.getElementById(`card-row-${cardId}`)?.remove();
+    } catch (err) {
+        alert(`Error: ${err.message}`);
+        btn.disabled = false;
     }
 }
 </script>

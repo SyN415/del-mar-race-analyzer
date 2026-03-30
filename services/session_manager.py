@@ -864,6 +864,38 @@ class SessionManager:
             logger.error(f"Failed to purge expired curated cards: {e}")
             return 0
 
+    async def delete_session(self, session_id: str) -> bool:
+        """Delete an analysis session and its associated cached data by session_id. Returns True on success."""
+        try:
+            if self.storage_backend == 'supabase':
+                # Delete from analysis_sessions
+                await self._supabase_request(
+                    'DELETE',
+                    'analysis_sessions',
+                    params={'session_id': f'eq.{session_id}'},
+                )
+                # Also clean up cached race/horse data for this session
+                for table in ('horse_data_cache', 'race_data_cache'):
+                    try:
+                        await self._supabase_request(
+                            'DELETE',
+                            table,
+                            params={'session_id': f'eq.{session_id}'},
+                        )
+                    except Exception:
+                        pass  # cache tables may not have session_id column
+                logger.info("🗑️ Deleted session %s from Supabase", session_id)
+                return True
+
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("DELETE FROM analysis_sessions WHERE session_id = ?", (session_id,))
+                await db.commit()
+            logger.info("🗑️ Deleted session %s from SQLite", session_id)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete session {session_id}: {e}")
+            return False
+
     async def get_recent_sessions(self, limit: int = 10) -> List[Dict]:
         """Get recent analysis sessions"""
         try:

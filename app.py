@@ -15,7 +15,7 @@ import os
 import secrets
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
@@ -492,7 +492,11 @@ async def landing_page(request: Request):
     session_manager = await app_state.ensure_session_manager()
     upcoming_cards: List[Dict] = []
     past_cards: List[Dict] = []
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    # Use Pacific time (UTC-7) so cards stay "live" until midnight local race time
+    # rather than midnight UTC (which is 5-7 PM Pacific, while races are still running)
+    tz_offset = int(os.environ.get("RACE_TZ_OFFSET_HOURS", "-7"))
+    now_local = datetime.now(timezone(timedelta(hours=tz_offset)))
+    today_str = now_local.strftime("%Y-%m-%d")
     if session_manager:
         try:
             all_published = await asyncio.wait_for(
@@ -1075,6 +1079,26 @@ async def list_admin_sessions(request: Request):
 
     sessions = await session_manager.get_recent_sessions(20)
     return JSONResponse(sessions)
+
+
+@app.delete("/api/admin/session/{session_id}")
+async def delete_session_endpoint(session_id: str, request: Request):
+    """Delete an analysis session by ID (admin only)."""
+    if not _auth_enabled():
+        raise HTTPException(status_code=503, detail="Admin access is not configured on the server")
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+
+    session_manager = await app_state.ensure_session_manager()
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager is not available")
+
+    success = await session_manager.delete_session(session_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete session")
+
+    logger.info("🗑️ Admin deleted session %s", session_id)
+    return JSONResponse({"status": "deleted", "session_id": session_id})
 
 
 @app.get("/api/results-json/{session_id}")
