@@ -2482,9 +2482,29 @@ async def run_analysis_pipeline(session_id: str, date: str, llm_model: str, trac
             logger.info(f"Cleaned up task for session {session_id}")
 
 # ── Automation scheduler instance ─────────────────────────────────────────────
+# AUTOMATION_TRACKS controls which tracks are automated (comma-separated IDs).
+# If unset or empty, automation is disabled for all tracks.
+# Example: AUTOMATION_TRACKS=DMR        → only Del Mar
+#          AUTOMATION_TRACKS=DMR,SA     → Del Mar and Santa Anita
+_AUTOMATION_TRACK_IDS = [
+    tid.strip().upper()
+    for tid in os.getenv("AUTOMATION_TRACKS", "").split(",")
+    if tid.strip()
+]
+_AUTOMATION_TRACKS_FULL = {
+    tid: cfg for tid, cfg in TRACK_CONFIG_FULL.items() if tid in _AUTOMATION_TRACK_IDS
+}
+if _AUTOMATION_TRACK_IDS:
+    unknown = set(_AUTOMATION_TRACK_IDS) - set(TRACK_CONFIG_FULL)
+    if unknown:
+        logger.warning("AUTOMATION_TRACKS contains unknown track IDs: %s", unknown)
+    logger.info("Automation enabled for tracks: %s", list(_AUTOMATION_TRACKS_FULL.keys()))
+else:
+    logger.info("Automation disabled — AUTOMATION_TRACKS not set")
+
 try:
     from services.automation_scheduler import AutomationScheduler
-    _automation_scheduler = AutomationScheduler(tracks=TRACK_CONFIG_FULL)
+    _automation_scheduler = AutomationScheduler(tracks=_AUTOMATION_TRACKS_FULL) if _AUTOMATION_TRACKS_FULL else None
 except Exception as _sched_err:
     logger.warning("Could not import AutomationScheduler: %s", _sched_err)
     _automation_scheduler = None  # type: ignore[assignment]

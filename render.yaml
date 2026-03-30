@@ -23,6 +23,8 @@ services:
         sync: false
       - key: TRACKSTAR_AUTOMATION_TOKEN
         sync: false
+      - key: AUTOMATION_TRACKS
+        sync: false
       - key: TWOCAPTCHA_API_KEY
         sync: false
       - key: ENVIRONMENT
