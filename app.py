@@ -1077,7 +1077,7 @@ async def list_admin_sessions(request: Request):
     if not session_manager:
         raise HTTPException(status_code=503, detail="Session manager is not available")
 
-    sessions = await session_manager.get_recent_sessions(20)
+    sessions = await session_manager.get_recent_sessions(100)
     return JSONResponse(sessions)
 
 
