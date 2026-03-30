@@ -25,6 +25,14 @@ services:
         sync: false
       - key: AUTOMATION_TRACKS
         sync: false
+      - key: AUTOMATION_MORNING_HOUR
+        value: "6"
+      - key: AUTOMATION_SCAN_HOUR
+        value: "6"
+      - key: AUTOMATION_SCAN_WEEKDAY
+        value: "0"
+      - key: RACE_TZ_OFFSET_HOURS
+        value: "-7"
       - key: TWOCAPTCHA_API_KEY
         sync: false
       - key: ENVIRONMENT
