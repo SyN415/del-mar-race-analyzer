@@ -44,12 +44,72 @@ class AnalysisInsight:
 
 class AIAnalysisEnhancer:
     """AI-powered analysis enhancement with pattern recognition"""
-    
+
+    # Default track takeout rates for exotic pools (used in EV calculations)
+    DEFAULT_TAKEOUT = {
+        "exacta": 0.2060,
+        "trifecta": 0.2364,
+        "superfecta": 0.2364,
+    }
+
     def __init__(self, openrouter_client: OpenRouterClient):
         self.ai_client = openrouter_client
         self.historical_patterns: Dict[str, List[Dict]] = {}
         self.track_biases: Dict[str, Dict] = {}
         self.jockey_trainer_insights: Dict[str, Dict] = {}
+
+    # ── Harville helpers & odds parsing ─────────────────────────────────
+
+    @staticmethod
+    def _parse_ml_odds(odds_str: Optional[str]) -> float:
+        """Convert a morning-line odds string (e.g. '5-2', '3/1', '8.0')
+        to *decimal* odds (e.g. 3.5, 4.0, 8.0).  Returns 0.0 on failure."""
+        if not odds_str:
+            return 0.0
+        s = str(odds_str).strip()
+        import re
+        # fractional with dash or slash: "5-2", "3/1"
+        m = re.match(r'^(\d+(?:\.\d+)?)\s*[-/]\s*(\d+(?:\.\d+)?)$', s)
+        if m:
+            num, den = float(m.group(1)), float(m.group(2))
+            if den == 0:
+                return 0.0
+            return (num / den) + 1.0
+        # plain decimal or integer
+        try:
+            val = float(s)
+            return val if val > 0 else 0.0
+        except (ValueError, TypeError):
+            return 0.0
+
+    @staticmethod
+    def _implied_probability(decimal_odds: float) -> float:
+        """Implied win probability from decimal odds (no vig adjustment)."""
+        if decimal_odds <= 1.0:
+            return 1.0
+        return 1.0 / decimal_odds
+
+    @staticmethod
+    def _harville_exacta_prob(p_a: float, p_b: float) -> float:
+        """Harville model: P(A finishes 1st AND B finishes 2nd).
+        Formula: P(A) × P(B) / (1 − P(A))"""
+        if p_a >= 1.0 or p_a <= 0.0:
+            return 0.0
+        return p_a * (p_b / (1.0 - p_a))
+
+    @staticmethod
+    def _harville_trifecta_prob(p_a: float, p_b: float, p_c: float) -> float:
+        """Harville model: P(A 1st, B 2nd, C 3rd).
+        Formula: P(A) × [P(B)/(1−P(A))] × [P(C)/(1−P(A)−P(B))]"""
+        if p_a >= 1.0 or p_a <= 0.0:
+            return 0.0
+        denom_b = 1.0 - p_a
+        if denom_b <= 0:
+            return 0.0
+        denom_c = 1.0 - p_a - p_b
+        if denom_c <= 0:
+            return 0.0
+        return p_a * (p_b / denom_b) * (p_c / denom_c)
         
     async def enhance_race_analysis(self, race_data: Dict, horse_predictions: List[Dict],
                                   historical_data: Dict = None,
@@ -337,7 +397,240 @@ class AIAnalysisEnhancer:
                 ))
         
         return insights
-    
+
+    # ── Strategy 1: Consecutive-Ranking Exotic Grouping ─────────────────
+
+    def _compute_exotic_grouping(self, predictions: List[Dict]) -> Optional[Dict]:
+        """Strategy 1 — Ranking-adjacency exacta / trifecta.
+
+        Trigger:  top pick win_probability >= 35 % AND composite_rating gap
+                  to #2 >= 12 pts.
+        Build:    Use *predicted finish order* (composite_rating rank) rather
+                  than post positions.
+        Output:   dict with exacta/trifecta combos plus Harville probabilities.
+        """
+        if len(predictions) < 3:
+            return None
+
+        top = predictions[0]
+        second = predictions[1]
+        third = predictions[2]
+
+        win_prob = top.get('win_probability', 0.0)
+        gap = top.get('composite_rating', 0) - second.get('composite_rating', 0)
+
+        if win_prob < 35.0 or gap < 12.0:
+            return None  # conviction threshold not met
+
+        # Normalised probabilities for Harville
+        p = [h.get('win_probability', 0) / 100.0 for h in predictions[:3]]
+
+        exacta_prob = self._harville_exacta_prob(p[0], p[1])
+        trifecta_prob = self._harville_trifecta_prob(p[0], p[1], p[2])
+
+        return {
+            "triggered": True,
+            "trigger_reason": (
+                f"{top.get('horse_name')} has {win_prob:.1f}% win prob "
+                f"with {gap:.1f}pt gap to 2nd"
+            ),
+            "exacta": {
+                "horses": [top.get('horse_name', ''), second.get('horse_name', '')],
+                "harville_probability": round(exacta_prob, 4),
+            },
+            "trifecta": {
+                "horses": [
+                    top.get('horse_name', ''),
+                    second.get('horse_name', ''),
+                    third.get('horse_name', ''),
+                ],
+                "harville_probability": round(trifecta_prob, 4),
+            },
+            "conviction_level": "strong" if gap >= 18 else "moderate",
+        }
+
+    # ── Strategy 2: Upset Play with Favorite Hedge ──────────────────────
+
+    def _compute_upset_hedge(self, predictions: List[Dict]) -> Optional[Dict]:
+        """Strategy 2 — Heavy-favorite hedge.
+
+        Detect:  'Heavy Favorite' = ML <= 2/1  **or**  win_probability gap
+                 between #1 and #2 >= 25 pts.
+        Select:  Upset candidate = horse ranked 3rd-6th whose composite rating
+                 is within 8-12 pts of the favourite.
+        Build:   Exacta with upset candidate on top and favourite underneath.
+        """
+        if len(predictions) < 4:
+            return None
+
+        fav = predictions[0]
+        second = predictions[1]
+
+        # Check if favourite qualifies as "heavy"
+        ml_odds_str = fav.get('morning_line_odds', '')
+        ml_decimal = self._parse_ml_odds(ml_odds_str)
+        is_heavy_by_ml = 0 < ml_decimal <= 3.0   # 2/1 → decimal 3.0
+        win_gap = fav.get('win_probability', 0) - second.get('win_probability', 0)
+        is_heavy_by_gap = win_gap >= 25.0
+
+        if not (is_heavy_by_ml or is_heavy_by_gap):
+            return None
+
+        fav_rating = fav.get('composite_rating', 0)
+
+        # Find best upset candidate (ranked 3rd-6th, within 8-12 pts)
+        upset_candidate = None
+        for h in predictions[2:6]:
+            diff = fav_rating - h.get('composite_rating', 0)
+            if 8.0 <= diff <= 12.0:
+                upset_candidate = h
+                break
+
+        if not upset_candidate:
+            # Relax: pick closest horse in 3rd-6th within 15 pts
+            for h in predictions[2:6]:
+                diff = fav_rating - h.get('composite_rating', 0)
+                if diff <= 15.0:
+                    upset_candidate = h
+                    break
+
+        if not upset_candidate:
+            return None
+
+        # Harville probability for upset exacta (upset 1st, fav 2nd)
+        p_upset = upset_candidate.get('win_probability', 0) / 100.0
+        p_fav = fav.get('win_probability', 0) / 100.0
+        upset_exacta_prob = self._harville_exacta_prob(p_upset, p_fav)
+
+        return {
+            "triggered": True,
+            "heavy_favorite": {
+                "horse": fav.get('horse_name', ''),
+                "win_probability": fav.get('win_probability', 0),
+                "morning_line": ml_odds_str or "N/A",
+                "detection_method": "morning_line" if is_heavy_by_ml else "win_prob_gap",
+            },
+            "upset_candidate": {
+                "horse": upset_candidate.get('horse_name', ''),
+                "composite_rating": upset_candidate.get('composite_rating', 0),
+                "rating_gap": round(fav_rating - upset_candidate.get('composite_rating', 0), 1),
+            },
+            "hedge_exacta": {
+                "order": [upset_candidate.get('horse_name', ''), fav.get('horse_name', '')],
+                "harville_probability": round(upset_exacta_prob, 4),
+                "description": (
+                    f"Key {upset_candidate.get('horse_name', '')} over "
+                    f"{fav.get('horse_name', '')} in exacta"
+                ),
+            },
+        }
+
+    # ── Strategy 3: High-Odds Expected-Value Exotics ────────────────────
+
+    def _compute_high_odds_value_exotics(
+        self, predictions: List[Dict], takeout: Optional[Dict] = None
+    ) -> List[Dict]:
+        """Strategy 3 — EV-positive exotic combos.
+
+        Compares MODEL probability (from composite-rating-derived win_probability)
+        against MARKET probability (from morning_line_odds) to find overlays.
+
+        For each exacta & trifecta permutation of the top-5 ranked horses:
+            model_prob  = Harville(model win probs)
+            market_prob = Harville(ML-implied win probs)
+            est_payout  = (1 / market_prob) × (1 − takeout)
+            EV = (model_prob × est_payout) − $1 stake
+
+        Flag combos where EV ≥ 0.15 (15% edge over stake).
+        Falls back to model-only probabilities when morning line is unavailable.
+        """
+        if len(predictions) < 3:
+            return []
+
+        tk = takeout or self.DEFAULT_TAKEOUT
+        top_n = predictions[:5]
+
+        # Model probabilities (from composite rating)
+        model_probs = [h.get('win_probability', 0) / 100.0 for h in top_n]
+
+        # Market probabilities (from morning line odds)
+        ml_probs_raw = []
+        for h in top_n:
+            ml_str = h.get('morning_line_odds', '')
+            ml_dec = self._parse_ml_odds(ml_str)
+            ml_probs_raw.append(self._implied_probability(ml_dec) if ml_dec > 0 else 0.0)
+
+        # If fewer than 2 horses have ML odds, fall back to a wider spread
+        # by using model probs as the market estimate (no EV edge possible)
+        has_ml = sum(1 for p in ml_probs_raw if p > 0)
+        if has_ml < 2:
+            # No meaningful market comparison — use model probs with a small
+            # synthetic spread to still surface the widest-price combos
+            market_probs = model_probs
+        else:
+            # Normalise ML-implied probs to sum to 1 across the subset
+            ml_total = sum(ml_probs_raw) or 1.0
+            market_probs = [(p / ml_total) if p > 0 else model_probs[i]
+                           for i, p in enumerate(ml_probs_raw)]
+
+        names = [h.get('horse_name', '') for h in top_n]
+        ev_plays: List[Dict] = []
+
+        # Exacta permutations
+        for i in range(len(top_n)):
+            for j in range(len(top_n)):
+                if i == j:
+                    continue
+                model_p = self._harville_exacta_prob(model_probs[i], model_probs[j])
+                market_p = self._harville_exacta_prob(market_probs[i], market_probs[j])
+                if model_p <= 0 or market_p <= 0:
+                    continue
+                est_payout = (1.0 / market_p) * (1.0 - tk.get("exacta", 0.206))
+                ev = (model_p * est_payout) - 1.0
+                if ev >= 0.15:
+                    ev_plays.append({
+                        "bet_type": "exacta",
+                        "horses": [names[i], names[j]],
+                        "harville_probability": round(model_p, 5),
+                        "market_implied_prob": round(market_p, 5),
+                        "estimated_payout": round(est_payout, 2),
+                        "expected_value": round(ev, 3),
+                        "ev_margin_pct": round(ev * 100, 1),
+                    })
+
+        # Trifecta permutations (top-5 → up to 60 combos)
+        for i in range(len(top_n)):
+            for j in range(len(top_n)):
+                if j == i:
+                    continue
+                for k in range(len(top_n)):
+                    if k in (i, j):
+                        continue
+                    model_p = self._harville_trifecta_prob(
+                        model_probs[i], model_probs[j], model_probs[k]
+                    )
+                    market_p = self._harville_trifecta_prob(
+                        market_probs[i], market_probs[j], market_probs[k]
+                    )
+                    if model_p <= 0 or market_p <= 0:
+                        continue
+                    est_payout = (1.0 / market_p) * (1.0 - tk.get("trifecta", 0.2364))
+                    ev = (model_p * est_payout) - 1.0
+                    if ev >= 0.15:
+                        ev_plays.append({
+                            "bet_type": "trifecta",
+                            "horses": [names[i], names[j], names[k]],
+                            "harville_probability": round(model_p, 5),
+                            "market_implied_prob": round(market_p, 5),
+                            "estimated_payout": round(est_payout, 2),
+                            "expected_value": round(ev, 3),
+                            "ev_margin_pct": round(ev * 100, 1),
+                        })
+
+        # Sort by EV descending, cap at top 10
+        ev_plays.sort(key=lambda x: x['expected_value'], reverse=True)
+        return ev_plays[:10]
+
     def _generate_betting_strategy(self, predictions: List[Dict], confidence_analysis: Dict,
                                  value_opportunities: List[Dict], risk_assessment: Dict) -> Dict:
         """Generate comprehensive betting strategy"""
@@ -368,7 +661,7 @@ class AIAnalysisEnhancer:
                 "reasoning": f"Value opportunity with {value_opp['value_type']}"
             })
         
-        # Exotic suggestions
+        # Exotic suggestions (legacy fallback — kept for backward compat)
         if len(predictions) >= 4:
             top_4 = [p.get('horse_name', '') for p in predictions[:4]]
             strategy["exotic_suggestions"] = [
@@ -376,7 +669,20 @@ class AIAnalysisEnhancer:
                 {"bet_type": "trifecta", "horses": top_4[:3], "cost": "medium"},
                 {"bet_type": "superfecta", "horses": top_4, "cost": "high"}
             ]
-        
+
+        # ── Inject research-backed strategies ───────────────────────────
+        # Strategy 1: Consecutive-ranking exotic grouping
+        exotic_grouping = self._compute_exotic_grouping(predictions)
+        strategy["exotic_grouping"] = exotic_grouping or {"triggered": False}
+
+        # Strategy 2: Upset play with favourite hedge
+        upset_hedge = self._compute_upset_hedge(predictions)
+        strategy["upset_hedge"] = upset_hedge or {"triggered": False}
+
+        # Strategy 3: High-odds EV exotics
+        ev_exotics = self._compute_high_odds_value_exotics(predictions)
+        strategy["high_odds_value_exotics"] = ev_exotics if ev_exotics else []
+
         return strategy
     
     def _extract_track_conditions(self, race_data: Dict) -> Dict:

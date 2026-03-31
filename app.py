@@ -38,6 +38,7 @@ from config.config_manager import ConfigManager
 try:
     from services.session_manager import SessionManager
     from services.openrouter_client import OpenRouterClient
+    from services.ai_analysis_enhancer import AIAnalysisEnhancer
     from services.race_card_admin import (
         AdminRaceCardJSONError,
         build_equibase_card_overview_url,
@@ -56,6 +57,7 @@ except ImportError as e:
     print(f"Some services not available: {e}")
     SessionManager = None
     OpenRouterClient = None
+    AIAnalysisEnhancer = None
     AdminRaceCardJSONError = ValueError
     build_equibase_card_overview_url = None
     build_equibase_race_urls = None
@@ -1553,6 +1555,9 @@ async def auto_curate_card(request: AutoCurateRequest, http_request: Request = N
     horse_names_by_race: dict = {}  # race_number -> list of horse names
     horse_notes_by_race: dict = {}  # race_number -> {horse_name: analysis}
 
+    # Instantiate strategy engine once (methods are pure — no AI calls needed)
+    _strategy_engine = AIAnalysisEnhancer(openrouter_client) if AIAnalysisEnhancer else None
+
     for race in sorted(race_analyses, key=lambda r: r.get("race_number", 0)):
         race_num = race.get("race_number", 0)
         cached_dive = await session_manager.get_race_deep_dive(
@@ -1585,23 +1590,94 @@ async def auto_curate_card(request: AutoCurateRequest, http_request: Request = N
         for pred in predictions:
             name = (pred.get("horse_name") or pred.get("name") or "").lower()
             section += _build_horse_block(pred, dd_by_name.get(name, {}))
+
+        # ── Compute pre-built strategy signals and append to the section ──
+        if _strategy_engine and predictions:
+            try:
+                exotic_grp = _strategy_engine._compute_exotic_grouping(predictions)
+                upset_hdg = _strategy_engine._compute_upset_hedge(predictions)
+                ev_exotics = _strategy_engine._compute_high_odds_value_exotics(predictions)
+
+                section += "  [PRE-COMPUTED STRATEGY SIGNALS]\n"
+
+                # Strategy 1 — Consecutive-ranking exotic grouping
+                if exotic_grp and exotic_grp.get("triggered"):
+                    ex = exotic_grp.get("exacta", {})
+                    tri = exotic_grp.get("trifecta", {})
+                    ex_combo = "-".join(ex.get("horses", []))
+                    tri_combo = "-".join(tri.get("horses", []))
+                    section += (
+                        f"  S1-ConsecutiveGrouping ({exotic_grp.get('conviction_level','').upper()}): "
+                        f"{exotic_grp.get('trigger_reason','')} | "
+                        f"Exacta {ex_combo} (Harville prob {ex.get('harville_probability','')}) | "
+                        f"Trifecta {tri_combo} (Harville prob {tri.get('harville_probability','')})\n"
+                    )
+                else:
+                    section += "  S1-ConsecutiveGrouping: not triggered (no dominant top pick)\n"
+
+                # Strategy 2 — Upset play with favorite hedge
+                if upset_hdg and upset_hdg.get("triggered"):
+                    fav_info = upset_hdg.get("heavy_favorite", {})
+                    upset_info = upset_hdg.get("upset_candidate", {})
+                    hedge = upset_hdg.get("hedge_exacta", {})
+                    section += (
+                        f"  S2-UpsetHedge: Fade {fav_info.get('horse','')} "
+                        f"({fav_info.get('win_probability','')}% win prob, "
+                        f"ML {fav_info.get('morning_line','')}) | "
+                        f"Upset pick: {upset_info.get('horse','')} "
+                        f"(rating gap {upset_info.get('rating_gap','')}pts) | "
+                        f"{hedge.get('description','')} "
+                        f"(Harville prob {hedge.get('harville_probability','')})\n"
+                    )
+                else:
+                    section += "  S2-UpsetHedge: not triggered (no heavy favorite detected)\n"
+
+                # Strategy 3 — High-odds EV exotics (top 3 plays)
+                if ev_exotics:
+                    section += "  S3-HighOddsEV (top plays by expected value):\n"
+                    for play in ev_exotics[:3]:
+                        combo = "-".join(play.get("horses", []))
+                        ev_val = play.get("expected_value", 0.0)
+                        section += (
+                            f"    {play.get('bet_type','').upper()} "
+                            f"{combo} | "
+                            f"EV={ev_val:.3f} ({play.get('ev_margin_pct', 0):.0f}% edge) | "
+                            f"Model prob {play.get('harville_probability','')} vs "
+                            f"Market prob {play.get('market_implied_prob','')}\n"
+                        )
+                else:
+                    section += "  S3-HighOddsEV: no EV-positive combos found above threshold\n"
+
+            except Exception as _strat_err:
+                logger.warning("Strategy signal computation failed for race %s: %s", race_num, _strat_err)
+
         race_sections.append(section)
 
-    prompt = f"""You are a professional horse racing handicapper. You have the full race card for {track_full} on {request.race_date} — including the initial AI race card analysis AND deep-dive research (workouts, recent form, jockey/trainer stats) for each race.
+    prompt = f"""You are a professional horse racing handicapper. You have the full race card for {track_full} on {request.race_date} — including the initial AI race card analysis, deep-dive research (workouts, recent form, jockey/trainer stats), and pre-computed quantitative strategy signals for each race.
 
 Re-analyze the entire card using ALL of this combined information. For every race, identify the three best betting angles and write editorial-quality race notes. Then write an overall card overview.
 
-FULL RACE CARD DATA:
+FULL RACE CARD DATA (each race includes [PRE-COMPUTED STRATEGY SIGNALS]):
 {'='*60}
 {chr(10).join(race_sections)}
 {'='*60}
 
+STRATEGY SIGNAL LEGEND:
+- S1-ConsecutiveGrouping: When one horse stands apart, exacta/trifecta combos using horses ranked consecutively by composite rating. Use these as the structural backbone of exacta/trifecta tickets.
+- S2-UpsetHedge: When a heavy favorite exists, the upset candidate is identified and a hedge exacta (upset on top, favorite underneath) is pre-computed. If this signal is triggered, include the upset angle and hedge exacta in the betting strategy.
+- S3-HighOddsEV: Exotic combinations with positive expected value after takeout. If any EV plays are listed, include at least the top one as a small-investment speculative exotic in the betting strategy.
+
 For each race return:
 - top_pick: the horse name with the highest win probability after re-analysis
 - value_play: a horse with strong credentials likely undervalued at the windows
-- longshot: a horse with realistic upset potential at big odds
+- longshot: a horse with realistic upset potential at big odds (use S2-UpsetHedge candidate if triggered)
 - race_notes: 2-3 sentences of editorial analysis explaining the picks and race shape
-- betting_strategy: specific bet types (win, exacta key, trifecta, etc.) with post positions
+- betting_strategy: specific bets using POST POSITION NUMBERS only. Incorporate the pre-computed strategy signals:
+  * Always anchor the strategy on the top pick (win or exacta key)
+  * If S1 is triggered, include the consecutive-ranking exacta and/or trifecta
+  * If S2 is triggered, include the upset/hedge exacta
+  * If S3 has EV plays, include the top EV exotic as a speculative add
+  * Format: "Win on #X, exacta key X/Y,Z, trifecta X with Y,Z — hedge: upset X over Y (exacta)"
 
 Also return:
 - card_overview: 3-4 sentence overview of the overall card themes, standout races, and key angles for the day
@@ -1616,7 +1692,7 @@ Return ONLY valid JSON:
       "value_play": "Exact Horse Name",
       "longshot": "Exact Horse Name",
       "race_notes": "Editorial 2-3 sentence analysis...",
-      "betting_strategy": "Win on #X, exacta key X/Y,Z, trifecta..."
+      "betting_strategy": "Win on #X, exacta key X/Y,Z, trifecta X with Y,Z..."
     }}
   ]
 }}"""
