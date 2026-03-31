@@ -512,13 +512,20 @@ class AnalysisStatus(BaseModel):
 async def landing_page(request: Request):
     """Public landing page showing published curated betting cards."""
     session_manager = await app_state.ensure_session_manager()
+    live_cards: List[Dict] = []
     upcoming_cards: List[Dict] = []
     past_cards: List[Dict] = []
-    # Use Pacific time (UTC-7) so cards stay "live" until midnight local race time
-    # rather than midnight UTC (which is 5-7 PM Pacific, while races are still running)
+
+    # Use configured race timezone so card status is grounded in local track time
     tz_offset = int(os.environ.get("RACE_TZ_OFFSET_HOURS", "-7"))
     now_local = datetime.now(timezone(timedelta(hours=tz_offset)))
     today_str = now_local.strftime("%Y-%m-%d")
+    current_hour = now_local.hour
+
+    # After this hour (local), today's card is considered "completed"
+    # Most US tracks finish last post by ~6pm; 21:00 gives generous buffer
+    end_of_racing_hour = int(os.environ.get("RACE_DAY_END_HOUR", "21"))
+
     if session_manager:
         try:
             all_published = await asyncio.wait_for(
@@ -528,11 +535,27 @@ async def landing_page(request: Request):
                 pc["track_name"] = SUPPORTED_TRACKS.get(pc.get("track_id"), pc.get("track_id"))
                 pc["card_url"] = f"/card/{pc.get('race_date')}/{pc.get('track_id')}"
                 race_date = pc.get("race_date", "")
-                if race_date >= today_str:
+
+                if race_date > today_str:
+                    # Future card — upcoming
+                    pc["card_status"] = "upcoming"
                     upcoming_cards.append(pc)
+                elif race_date == today_str:
+                    if current_hour >= end_of_racing_hour:
+                        # Today but racing is over
+                        pc["card_status"] = "completed"
+                        past_cards.append(pc)
+                    else:
+                        # Today and racing could still be on
+                        pc["card_status"] = "live"
+                        live_cards.append(pc)
                 else:
+                    # Past date
+                    pc["card_status"] = "completed"
                     past_cards.append(pc)
-            # Upcoming: soonest first; Past: most recent first (already desc from query)
+
+            # Live: soonest first; Upcoming: soonest first; Past: most recent first
+            live_cards.sort(key=lambda c: c.get("race_date", ""))
             upcoming_cards.sort(key=lambda c: c.get("race_date", ""))
         except Exception as e:
             logger.warning(f"Failed to load published curated cards for landing page: {e}")
@@ -542,6 +565,7 @@ async def landing_page(request: Request):
         _template_context(
             request,
             BRAND_NAME,
+            live_cards=live_cards,
             upcoming_cards=upcoming_cards,
             past_cards=past_cards,
         ),
@@ -1999,6 +2023,19 @@ async def curated_card_page(request: Request, race_date: str, track_id: str):
         )
 
     track_name = SUPPORTED_TRACKS.get(track_id, track_id)
+
+    # Determine card time status for badge display
+    tz_offset = int(os.environ.get("RACE_TZ_OFFSET_HOURS", "-7"))
+    now_local = datetime.now(timezone(timedelta(hours=tz_offset)))
+    today_str = now_local.strftime("%Y-%m-%d")
+    end_of_racing_hour = int(os.environ.get("RACE_DAY_END_HOUR", "21"))
+    if race_date > today_str:
+        card_status = "upcoming"
+    elif race_date == today_str and now_local.hour < end_of_racing_hour:
+        card_status = "live"
+    else:
+        card_status = "completed"
+
     return templates.TemplateResponse(
         request,
         "curated_card.html",
@@ -2009,6 +2046,7 @@ async def curated_card_page(request: Request, race_date: str, track_id: str):
             race_date=race_date,
             track_id=track_id,
             track_name=track_name,
+            card_status=card_status,
         ),
     )
 

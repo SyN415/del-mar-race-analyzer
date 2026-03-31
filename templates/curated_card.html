@@ -295,7 +295,13 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
   <div class="cc-meta-chips">
     <span class="cc-chip">📅 {{ race_date }}</span>
     <span class="cc-chip">🏟 {{ track_name }}</span>
-    {% if card.is_published %}<span class="cc-chip is-live">● Live</span>{% endif %}
+    {% if card_status == 'live' %}
+    <span class="cc-chip is-live">● Live</span>
+    {% elif card_status == 'upcoming' %}
+    <span class="cc-chip" style="background:rgba(110,168,254,.15);color:#6ea8fe;border:1px solid rgba(110,168,254,.35)">📅 Upcoming</span>
+    {% elif card_status == 'completed' %}
+    <span class="cc-chip" style="background:rgba(108,117,125,.15);color:#adb5bd;border:1px solid rgba(108,117,125,.35)">🏁 Completed</span>
+    {% endif %}
   </div>
 </section>
 
