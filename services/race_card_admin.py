@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -562,6 +563,7 @@ def _normalize_predictions(raw_predictions: List[Dict[str, Any]]) -> List[Dict[s
             "post_position": prediction.get("post_position") or prediction.get("post") or prediction.get("program_number"),
             "jockey": prediction.get("jockey") or "",
             "trainer": prediction.get("trainer") or "",
+            "morning_line_odds": prediction.get("morning_line_odds") or prediction.get("morning_line") or "",
             "composite_rating": round(composite_rating, 1),
             "win_probability": 0.0,
             "factors": factors,
@@ -569,9 +571,12 @@ def _normalize_predictions(raw_predictions: List[Dict[str, Any]]) -> List[Dict[s
         })
 
     normalized.sort(key=lambda item: item["composite_rating"], reverse=True)
-    total_rating = sum(item["composite_rating"] for item in normalized) or 1.0
-    for item in normalized:
-        item["win_probability"] = round((item["composite_rating"] / total_rating) * 100, 1)
+    # Softmax win probability (T=15 balances spread vs. extreme compression)
+    _SOFTMAX_T = 15.0
+    _softmax_scores = [math.exp(item["composite_rating"] / _SOFTMAX_T) for item in normalized]
+    _softmax_total = sum(_softmax_scores) or 1.0
+    for item, _score in zip(normalized, _softmax_scores):
+        item["win_probability"] = round((_score / _softmax_total) * 100, 1)
 
     return normalized
 

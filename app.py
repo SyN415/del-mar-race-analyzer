@@ -1591,6 +1591,11 @@ async def auto_curate_card(request: AutoCurateRequest, http_request: Request = N
         dd_by_name = {h.get("name", "").lower(): h for h in dd_data.get("horses", [])}
 
         predictions = race.get("predictions", [])
+
+        # Apply speed-figure Bayesian adjustment to composite_rating and win_probability
+        if dd_by_name and predictions:
+            predictions = _apply_speed_figure_adjustment(list(predictions), dd_by_name)
+
         horse_names_by_race[race_num] = [
             (p.get("horse_name") or p.get("name") or "") for p in predictions
         ]
@@ -1672,6 +1677,16 @@ async def auto_curate_card(request: AutoCurateRequest, http_request: Request = N
                 else:
                     section += "  S3-HighOddsEV: no EV-positive combos found above threshold\n"
 
+                # Longshot value flags (Prelec-corrected misperception signals)
+                if _strategy_engine and predictions:
+                    longshot_flags = _strategy_engine._compute_longshot_flags(predictions)
+                    if longshot_flags:
+                        section += '  S4-LongshotValueFlags:\n'
+                        for flag in longshot_flags:
+                            section += f"    {flag.get('flag_summary','')}\n"
+                    else:
+                        section += '  S4-LongshotValueFlags: none detected (no ML odds >= 10-1 with EV signal)\n'
+
             except Exception as _strat_err:
                 logger.warning("Strategy signal computation failed for race %s: %s", race_num, _strat_err)
 
@@ -1690,6 +1705,7 @@ STRATEGY SIGNAL LEGEND:
 - S1-ConsecutiveGrouping: When one horse stands apart, exacta/trifecta combos using horses ranked consecutively by composite rating. Use these as the structural backbone of exacta/trifecta tickets.
 - S2-UpsetHedge: When a heavy favorite exists, the upset candidate is identified and a hedge exacta (upset on top, favorite underneath) is pre-computed. If this signal is triggered, include the upset angle and hedge exacta in the betting strategy.
 - S3-HighOddsEV: Exotic combinations with positive expected value after takeout. If any EV plays are listed, include at least the top one as a small-investment speculative exotic in the betting strategy.
+- S4-LongshotValueFlags: Longshots where Prelec probability correction indicates positive EV versus market. If any flags are listed, reference the longshot by name in the race analysis and include as a speculative win or exacta add in the betting strategy.
 
 For each race return:
 - top_pick: the horse name with the highest win probability after re-analysis
@@ -2135,6 +2151,62 @@ async def _safe_load_dashboard_cards(limit: int = 8) -> List[Dict]:
     return []
 
 
+def _apply_speed_figure_adjustment(
+    predictions: List[Dict],
+    dd_by_name: Dict,
+) -> List[Dict]:
+    """Bayesian blend of LLM composite_rating with normalized speed figures from deep-dive.
+
+    Formula: new_rating = 0.70 × llm_rating + 0.30 × normalized_speed_figure
+    Speed figure normalization: maps Beyer/speed fig range (55–120) onto 0–100 scale.
+    Only adjusts horses where at least one speed figure is available in recent_results.
+    Re-sorts predictions and recomputes softmax win_probability after adjustment.
+    """
+    for pred in predictions:
+        name = (pred.get("horse_name") or "").lower()
+        dd_horse = dd_by_name.get(name, {})
+        recent_results = dd_horse.get("recent_results", [])
+
+        # Extract numeric speed figures from recent results (last 4)
+        speed_figs: List[float] = []
+        for r in recent_results[:4]:
+            raw = r.get("speed_figure") or r.get("beyer") or r.get("fig") or 0
+            try:
+                val = float(raw)
+                if val > 0:
+                    speed_figs.append(val)
+            except (TypeError, ValueError):
+                pass
+
+        if not speed_figs:
+            continue  # No speed data available — do not adjust
+
+        # Weighted average (most recent = highest weight)
+        weights = [1.0, 0.8, 0.6, 0.4][: len(speed_figs)]
+        weighted_avg = sum(f * w for f, w in zip(speed_figs, weights)) / sum(weights)
+
+        # Normalize to 0–100 (Beyer 55 → 0, Beyer 120 → 100)
+        normalized_speed = min(100.0, max(0.0, (weighted_avg - 55.0) * (100.0 / 65.0)))
+
+        # Bayesian blend
+        llm_rating = pred.get("composite_rating", 50.0)
+        pred["composite_rating"] = round(0.70 * llm_rating + 0.30 * normalized_speed, 1)
+        pred["_speed_figure_used"] = round(weighted_avg, 1)  # Diagnostic field
+
+    # Re-sort by adjusted composite_rating
+    predictions.sort(key=lambda x: x.get("composite_rating", 0), reverse=True)
+
+    # Recompute softmax win_probability after adjustment
+    import math as _math
+    _T = 15.0
+    _scores = [_math.exp(p.get("composite_rating", 0) / _T) for p in predictions]
+    _total = sum(_scores) or 1.0
+    for p, s in zip(predictions, _scores):
+        p["win_probability"] = round((s / _total) * 100, 1)
+
+    return predictions
+
+
 def _build_admin_structuring_prompt(
     request: AdminRaceCardRequest,
     *,
@@ -2327,7 +2399,13 @@ Rules:
 - Order each race's predictions strongest to weakest.
 {data_source_rules}
 - Use only grounded details; leave uncertain text blank instead of inventing facts — but jockey and trainer must always be populated.
-- `composite_rating` must be numeric on a 0-100 scale.
+- `composite_rating` must be numeric on a 0-100 scale. Apply these spread rules strictly:
+  * Anchor ratings to morning_line_odds and speed data. Cross-reference: a 2-1 morning line (~33% implied win prob) should score >=20 points above a 20-1 longshot (~5% implied win prob).
+  * Heavy favorites (morning line <=2-1) must score >=80. Even-money horses must score >=85.
+  * Longshots (morning line >=15-1) must score <=55. Horses at 20-1 or greater must score <=45.
+  * The top-rated horse and the bottom-rated horse in any race must be separated by at least 25 points.
+  * The top 3 horses must span at least 15 rating points.
+  * Do NOT assign all horses ratings within 5 points of each other. Compress ratings only when the field is genuinely even — and in that case, keep the range between 50 and 70, not 80 to 90.
 {compact_rules}""".strip()
 
 

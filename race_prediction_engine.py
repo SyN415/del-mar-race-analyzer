@@ -816,10 +816,12 @@ class RacePredictionEngine:
         horse_predictions.sort(key=lambda x: x['composite_rating'], reverse=True)
 
         # Calculate win probabilities
-        total_rating = sum(h['composite_rating'] for h in horse_predictions) or 1.0
-        for horse_pred in horse_predictions:
-            probability = (horse_pred['composite_rating'] / total_rating) * 100
-            horse_pred['win_probability'] = round(probability, 1)
+        # Softmax win probability — matches race_card_admin.py formula
+        _SOFTMAX_T = 15.0
+        _softmax_scores = [math.exp(h['composite_rating'] / _SOFTMAX_T) for h in horse_predictions]
+        _softmax_total = sum(_softmax_scores) or 1.0
+        for horse_pred, _score in zip(horse_predictions, _softmax_scores):
+            horse_pred['win_probability'] = round((_score / _softmax_total) * 100, 1)
 
         prediction_result = {
             'race_number': race_data.get('race_number', 0),

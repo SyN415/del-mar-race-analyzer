@@ -110,6 +110,43 @@ class AIAnalysisEnhancer:
         if denom_c <= 0:
             return 0.0
         return p_a * (p_b / denom_b) * (p_c / denom_c)
+
+    @staticmethod
+    def _prelec_weight(p: float, beta: float = 0.9) -> float:
+        """Prelec probability weighting function (Prelec 1998).
+        Corrects for favorite-longshot bias: overweights small probabilities
+        (longshots) and underweights large ones (favorites).
+        π(p) = exp(−(−ln(p))^β), β≈0.9 per empirical racing research."""
+        import math
+        if p <= 0.0:
+            return 0.0
+        if p >= 1.0:
+            return 1.0
+        return math.exp(-((-math.log(p)) ** beta))
+
+    @staticmethod
+    def _harville_exacta_prob_discounted(p_a: float, p_b: float, discount: float = 0.85) -> float:
+        """Discounted Harville exacta: applies discount factor to 2nd-place term.
+        Reduces overestimation of longshot ordering probability."""
+        if p_a >= 1.0 or p_a <= 0.0:
+            return 0.0
+        denom = 1.0 - p_a
+        if denom <= 0:
+            return 0.0
+        return p_a * (p_b / denom) * discount
+
+    @staticmethod
+    def _harville_trifecta_prob_discounted(p_a: float, p_b: float, p_c: float, discount: float = 0.85) -> float:
+        """Discounted Harville trifecta: applies discount to both 2nd and 3rd terms."""
+        if p_a >= 1.0 or p_a <= 0.0:
+            return 0.0
+        denom_b = 1.0 - p_a
+        if denom_b <= 0:
+            return 0.0
+        denom_c = 1.0 - p_a - p_b
+        if denom_c <= 0:
+            return 0.0
+        return p_a * (p_b / denom_b) * discount * (p_c / denom_c) * discount
         
     async def enhance_race_analysis(self, race_data: Dict, horse_predictions: List[Dict],
                                   historical_data: Dict = None,
@@ -419,14 +456,14 @@ class AIAnalysisEnhancer:
         win_prob = top.get('win_probability', 0.0)
         gap = top.get('composite_rating', 0) - second.get('composite_rating', 0)
 
-        if win_prob < 35.0 or gap < 12.0:
+        if win_prob < 35.0 or gap < 15.0:
             return None  # conviction threshold not met
 
         # Normalised probabilities for Harville
         p = [h.get('win_probability', 0) / 100.0 for h in predictions[:3]]
 
-        exacta_prob = self._harville_exacta_prob(p[0], p[1])
-        trifecta_prob = self._harville_trifecta_prob(p[0], p[1], p[2])
+        exacta_prob = self._harville_exacta_prob_discounted(p[0], p[1])
+        trifecta_prob = self._harville_trifecta_prob_discounted(p[0], p[1], p[2])
 
         return {
             "triggered": True,
@@ -448,6 +485,51 @@ class AIAnalysisEnhancer:
             },
             "conviction_level": "strong" if gap >= 18 else "moderate",
         }
+
+    def _compute_longshot_flags(self, predictions: List[Dict]) -> List[Dict]:
+        """Identify longshots with misperception-corrected positive EV.
+
+        A longshot is flagged when ALL of:
+          - morning_line_odds >= 10-1 (decimal >= 11.0)
+          - Prelec-adjusted model probability exceeds ML-implied probability by >= 10%
+          - Rating gap to the field leader is < 12 points (close enough to upset)
+        """
+        if len(predictions) < 2:
+            return []
+        flags: List[Dict] = []
+        top_rating = predictions[0].get("composite_rating", 0)
+
+        for pred in predictions:
+            ml_str = pred.get("morning_line_odds", "")
+            ml_dec = self._parse_ml_odds(ml_str)
+            if ml_dec < 11.0:  # Not a longshot (10-1 = decimal 11.0)
+                continue
+
+            ml_implied = self._implied_probability(ml_dec)
+            raw_prob = pred.get("win_probability", 0) / 100.0
+            if raw_prob <= 0:
+                continue
+
+            prelec_adj = self._prelec_weight(raw_prob)
+            rating_gap = top_rating - pred.get("composite_rating", 0)
+
+            # Flag: Prelec-adjusted prob exceeds market by >= 10% AND within striking range
+            if prelec_adj > ml_implied * 1.10 and rating_gap < 12.0:
+                ev_signal = round((prelec_adj - ml_implied) / max(ml_implied, 0.001) * 100, 1)
+                flags.append({
+                    "horse_name": pred.get("horse_name", ""),
+                    "morning_line": ml_str,
+                    "ml_implied_prob_pct": round(ml_implied * 100, 1),
+                    "prelec_adjusted_prob_pct": round(prelec_adj * 100, 1),
+                    "ev_signal_pct": ev_signal,
+                    "rating_gap_to_leader": round(rating_gap, 1),
+                    "flag_summary": (
+                        f"{pred.get('horse_name','')} at {ml_str}: model ({round(prelec_adj*100,1)}%) "
+                        f"vs market ({round(ml_implied*100,1)}%) — +{ev_signal}% EV signal"
+                    ),
+                })
+
+        return sorted(flags, key=lambda x: x["ev_signal_pct"], reverse=True)
 
     # ── Strategy 2: Upset Play with Favorite Hedge ──────────────────────
 
@@ -471,26 +553,26 @@ class AIAnalysisEnhancer:
         ml_decimal = self._parse_ml_odds(ml_odds_str)
         is_heavy_by_ml = 0 < ml_decimal <= 3.0   # 2/1 → decimal 3.0
         win_gap = fav.get('win_probability', 0) - second.get('win_probability', 0)
-        is_heavy_by_gap = win_gap >= 25.0
+        is_heavy_by_gap = win_gap >= 20.0
 
         if not (is_heavy_by_ml or is_heavy_by_gap):
             return None
 
         fav_rating = fav.get('composite_rating', 0)
 
-        # Find best upset candidate (ranked 3rd-6th, within 8-12 pts)
+        # Find best upset candidate (ranked 3rd-6th, within 8-15 pts)
         upset_candidate = None
         for h in predictions[2:6]:
             diff = fav_rating - h.get('composite_rating', 0)
-            if 8.0 <= diff <= 12.0:
+            if 8.0 <= diff <= 15.0:
                 upset_candidate = h
                 break
 
         if not upset_candidate:
-            # Relax: pick closest horse in 3rd-6th within 15 pts
+            # Relax: pick closest horse in 3rd-6th within 18 pts
             for h in predictions[2:6]:
                 diff = fav_rating - h.get('composite_rating', 0)
-                if diff <= 15.0:
+                if diff <= 18.0:
                     upset_candidate = h
                     break
 
@@ -587,7 +669,7 @@ class AIAnalysisEnhancer:
                     continue
                 est_payout = (1.0 / market_p) * (1.0 - tk.get("exacta", 0.206))
                 ev = (model_p * est_payout) - 1.0
-                if ev >= 0.15:
+                if ev >= 0.18:
                     ev_plays.append({
                         "bet_type": "exacta",
                         "horses": [names[i], names[j]],
@@ -616,7 +698,7 @@ class AIAnalysisEnhancer:
                         continue
                     est_payout = (1.0 / market_p) * (1.0 - tk.get("trifecta", 0.2364))
                     ev = (model_p * est_payout) - 1.0
-                    if ev >= 0.15:
+                    if ev >= 0.18:
                         ev_plays.append({
                             "bet_type": "trifecta",
                             "horses": [names[i], names[j], names[k]],
@@ -682,6 +764,10 @@ class AIAnalysisEnhancer:
         # Strategy 3: High-odds EV exotics
         ev_exotics = self._compute_high_odds_value_exotics(predictions)
         strategy["high_odds_value_exotics"] = ev_exotics if ev_exotics else []
+
+        # Longshot value flags (Prelec misperception correction)
+        longshot_flags = self._compute_longshot_flags(predictions)
+        strategy["longshot_flags"] = longshot_flags
 
         return strategy
     
