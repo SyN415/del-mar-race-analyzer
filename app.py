@@ -2024,6 +2024,21 @@ async def curated_card_page(request: Request, race_date: str, track_id: str):
 
     track_name = SUPPORTED_TRACKS.get(track_id, track_id)
 
+    # Hydrate the curated card with horse predictions from the original session analysis
+    session_id = card.get("session_id")
+    if session_id and session_manager:
+        session_results = await session_manager.get_session_results(session_id)
+        if session_results and "error" not in session_results:
+            race_analyses = session_results.get("race_analyses", [])
+            predictions_by_race = {r.get("race_number"): r.get("predictions", []) for r in race_analyses}
+
+            races_json = card.get("races_json") or []
+            for race_obj in races_json:
+                race_num = race_obj.get("race_number")
+                if race_num in predictions_by_race:
+                    # Inject predictions so the template can render the "ENTRIES & ODDS" table
+                    race_obj["predictions"] = predictions_by_race[race_num]
+
     # Determine card time status for badge display
     tz_offset = int(os.environ.get("RACE_TZ_OFFSET_HOURS", "-7"))
     now_local = datetime.now(timezone(timedelta(hours=tz_offset)))
