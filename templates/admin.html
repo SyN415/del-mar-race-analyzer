@@ -51,6 +51,12 @@
                     🗂️ Manage
                 </button>
             </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="pipeline-tab" data-bs-toggle="tab"
+                      data-bs-target="#auto-pipeline" type="button" role="tab">
+                ⚡ Auto Pipeline
+              </button>
+            </li>
         </ul>
 
         <div class="tab-content">
@@ -199,6 +205,51 @@
                         </div>
                     </div>
                 </div>
+            </div>
+
+            <!-- ===== AUTO PIPELINE TAB ===== -->
+            <div class="tab-pane fade" id="auto-pipeline" role="tabpanel">
+              <div class="card shadow-lg border-0">
+                <div class="card-body p-4">
+                  <h5 class="fw-bold mb-1">⚡ 1-Click Full Pipeline</h5>
+                  <p class="text-muted mb-4">Select a track and date, then click Run. The system will automatically build the card, deep dive every race, curate, rewrite all notes, and publish.</p>
+
+                  <div class="row mb-3">
+                    <div class="col-md-4">
+                      <label for="pipelineDate" class="form-label">Race date</label>
+                      <input type="date" class="form-control" id="pipelineDate" value="{{ default_date }}">
+                    </div>
+                    <div class="col-md-4">
+                      <label for="pipelineTrack" class="form-label">Track</label>
+                      <select class="form-select" id="pipelineTrack">
+                        {% for track in available_tracks %}
+                        <option value="{{ track.id }}">{{ track.name }} ({{ track.id }})</option>
+                        {% endfor %}
+                      </select>
+                    </div>
+                    <div class="col-md-4 d-flex align-items-end">
+                      <button class="btn btn-warning btn-lg w-100 fw-bold" id="runPipelineBtn"
+                        {% if not openrouter_configured %}disabled{% endif %}
+                        onclick="runFullPipeline()">
+                        ⚡ Run Full Pipeline
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Step-by-step progress -->
+                  <div id="pipelineProgress" style="display:none" class="mt-3">
+                    <div class="mb-2 fw-semibold text-muted small text-uppercase letter-spacing-1">Pipeline Progress</div>
+                    <ul class="list-unstyled mb-3" id="pipelineSteps">
+                      <li id="ps_build"   class="mb-1">⬜ Step 1: Build Card</li>
+                      <li id="ps_dive"    class="mb-1">⬜ Step 2: Deep Dive All Races</li>
+                      <li id="ps_curate" class="mb-1">⬜ Step 3: Auto-Curate</li>
+                      <li id="ps_rewrite" class="mb-1">⬜ Step 4: Rewrite All Notes</li>
+                      <li id="ps_publish" class="mb-1">⬜ Step 5: Publish Card</li>
+                    </ul>
+                    <div id="pipelineResult" class="mt-2"></div>
+                  </div>
+                </div>
+              </div>
             </div>
 
         </div><!-- /tab-content -->
@@ -789,6 +840,193 @@ async function deleteManageCurated(cardId, btn) {
     } catch (err) {
         alert(`Error: ${err.message}`);
         btn.disabled = false;
+    }
+}
+
+// ── 1-CLICK AUTOMATION PIPELINE ─────────────────────────────────────────────
+
+function _pipelineStep(id, state, label) {
+    // state: 'pending' | 'running' | 'done' | 'error'
+    const el = document.getElementById(id);
+    if (!el) return;
+    const icons = { pending: '⬜', running: '⏳', done: '✅', error: '❌' };
+    el.textContent = (icons[state] || '⬜') + ' ' + label;
+    el.className = state === 'error' ? 'mb-1 text-danger' : state === 'done' ? 'mb-1 text-success' : 'mb-1';
+}
+
+async function runFullPipeline() {
+    const raceDate  = document.getElementById('pipelineDate').value;
+    const trackId   = document.getElementById('pipelineTrack').value;
+    const runBtn    = document.getElementById('runPipelineBtn');
+    const progress  = document.getElementById('pipelineProgress');
+    const resultEl  = document.getElementById('pipelineResult');
+
+    if (!raceDate || !trackId) { alert('Select a race date and track.'); return; }
+
+    runBtn.disabled = true;
+    runBtn.textContent = '⏳ Running…';
+    progress.style.display = 'block';
+    resultEl.innerHTML = '';
+
+    // Reset all step indicators
+    ['ps_build','ps_dive','ps_curate','ps_rewrite','ps_publish'].forEach(id => {
+        _pipelineStep(id, 'pending', id === 'ps_build' ? 'Step 1: Build Card'
+            : id === 'ps_dive' ? 'Step 2: Deep Dive All Races'
+            : id === 'ps_curate' ? 'Step 3: Auto-Curate'
+            : id === 'ps_rewrite' ? 'Step 4: Rewrite All Notes'
+            : 'Step 5: Publish Card');
+    });
+
+    try {
+        // ── STEP 1: Build Card ────────────────────────────────────────────────
+        _pipelineStep('ps_build', 'running', 'Step 1: Building Card…');
+        const buildResp = await fetch('/api/admin/race-cards', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                race_date:   raceDate,
+                track_id:    trackId,
+                llm_model:   'x-ai/grok-4.20-beta',
+                source_mode: 'web_search',
+                source_text: '',
+                admin_notes: '',
+                source_urls: [],
+            }),
+        });
+        const buildResult = await buildResp.json();
+        if (!buildResp.ok) throw new Error('Build Card failed: ' + (buildResult.detail || buildResp.status));
+        const sessionId = buildResult.session_id;
+        if (!sessionId) throw new Error('Build Card did not return a session_id');
+        _pipelineStep('ps_build', 'done', 'Step 1: Card Built ✓');
+
+        // ── STEP 2: Deep Dive All Races ─────────────────────────────────────────
+        _pipelineStep('ps_dive', 'running', 'Step 2: Loading race list…');
+        const sessionResp = await fetch(`/api/results-json/${sessionId}`);
+        const sessionData = await sessionResp.json();
+        if (!sessionResp.ok) throw new Error('Could not load session races');
+        const raceAnalyses = sessionData.race_analyses || [];
+        const raceNumbers  = raceAnalyses.map(r => r.race_number).filter(Boolean);
+        if (raceNumbers.length === 0) throw new Error('No races found in session');
+
+        let divesDone = 0;
+        const divesTotal = raceNumbers.length;
+        for (const raceNum of raceNumbers) {
+            _pipelineStep('ps_dive', 'running', `Step 2: Deep Diving Race ${raceNum}/${divesTotal}…`);
+            const diveResp = await fetch('/api/admin/race-deep-dive', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id:    sessionId,
+                    race_number:   raceNum,
+                    race_date:     raceDate,
+                    track_id:      trackId,
+                    force_refresh: false,
+                }),
+            });
+            // Log but don't abort on individual deep-dive failure
+            if (!diveResp.ok) {
+                console.warn(`Deep dive failed for race ${raceNum}`);
+            }
+            divesDone++;
+        }
+        _pipelineStep('ps_dive', 'done', `Step 2: All ${divesTotal} Races Deep Dived ✓`);
+
+        // ── STEP 3: Auto-Curate ───────────────────────────────────────────────
+        _pipelineStep('ps_curate', 'running', 'Step 3: Running Auto-Curation…');
+        const curateResp = await fetch('/api/admin/auto-curate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId, race_date: raceDate, track_id: trackId }),
+        });
+        const curateResult = await curateResp.json();
+        if (!curateResp.ok) throw new Error('Auto-curation failed: ' + (curateResult.detail || curateResp.status));
+        const curatedRaces    = curateResult.races || [];
+        const cardOverview    = curateResult.card_overview || '';
+        if (curatedRaces.length === 0) throw new Error('Curation returned no races');
+        _pipelineStep('ps_curate', 'done', `Step 3: ${curatedRaces.length} Races Curated ✓`);
+
+        // ── STEP 4: Rewrite All Notes ─────────────────────────────────────────
+        _pipelineStep('ps_rewrite', 'running', 'Step 4: Rewriting Race Notes…');
+        const rewrittenRaces = [];
+        let rwDone = 0;
+        for (const race of curatedRaces) {
+            _pipelineStep('ps_rewrite', 'running', `Step 4: Rewriting Race ${race.race_number}/${curatedRaces.length}…`);
+            try {
+                const rwResp = await fetch('/api/admin/rewrite-race-notes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id:   sessionId,
+                        race_date:    raceDate,
+                        track_id:     trackId,
+                        race_number:  race.race_number,
+                        top_pick:     race.top_pick    || '',
+                        value_play:   race.value_play  || '',
+                        longshot:     race.longshot     || '',
+                    }),
+                });
+                const rwResult = await rwResp.json();
+                rewrittenRaces.push({
+                    race_number:      race.race_number,
+                    top_pick:         race.top_pick    || '',
+                    value_play:       race.value_play  || '',
+                    longshot:         race.longshot     || '',
+                    race_notes:       (rwResp.ok && rwResult.race_notes)       ? rwResult.race_notes       : (race.race_notes       || ''),
+                    betting_strategy: (rwResp.ok && rwResult.betting_strategy) ? rwResult.betting_strategy : (race.betting_strategy || ''),
+                });
+            } catch (rwErr) {
+                console.warn(`Rewrite failed for race ${race.race_number}:`, rwErr);
+                // Fall back to curated data
+                rewrittenRaces.push({
+                    race_number:      race.race_number,
+                    top_pick:         race.top_pick    || '',
+                    value_play:       race.value_play  || '',
+                    longshot:         race.longshot     || '',
+                    race_notes:       race.race_notes       || '',
+                    betting_strategy: race.betting_strategy || '',
+                });
+            }
+            rwDone++;
+        }
+        _pipelineStep('ps_rewrite', 'done', `Step 4: All ${rwDone} Notes Rewritten ✓`);
+
+        // ── STEP 5: Publish ───────────────────────────────────────────────────
+        _pipelineStep('ps_publish', 'running', 'Step 5: Publishing Card…');
+        const publishResp = await fetch('/api/admin/curated-card', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id:    sessionId,
+                race_date:     raceDate,
+                track_id:      trackId,
+                card_overview: cardOverview,
+                races:         rewrittenRaces,
+                is_published:  true,
+            }),
+        });
+        const publishResult = await publishResp.json();
+        if (!publishResp.ok) throw new Error('Publish failed: ' + (publishResult.detail || publishResp.status));
+        _pipelineStep('ps_publish', 'done', 'Step 5: Card Published ✓');
+
+        const cardUrl = publishResult.card_url || '/';
+        resultEl.innerHTML = `<div class="alert alert-success mt-2 fw-semibold">
+          ✅ Pipeline complete — <a href="${cardUrl}" target="_blank" class="alert-link">View Published Card →</a>
+        </div>`;
+
+    } catch (pipelineErr) {
+        console.error('Pipeline error:', pipelineErr);
+        resultEl.innerHTML = `<div class="alert alert-danger mt-2">❌ Pipeline stopped: ${pipelineErr.message}</div>`;
+        // Mark the currently-running step as errored by checking which ones are still 'running' state
+        ['ps_build','ps_dive','ps_curate','ps_rewrite','ps_publish'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el && el.textContent.startsWith('⏳')) {
+                el.textContent = '❌' + el.textContent.slice(1);
+                el.className = 'mb-1 text-danger';
+            }
+        });
+    } finally {
+        runBtn.disabled = false;
+        runBtn.textContent = '⚡ Run Full Pipeline';
     }
 }
 </script>

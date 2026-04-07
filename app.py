@@ -7,6 +7,7 @@ protected admin workflow, and AI-assisted race-card analysis pipeline.
 """
 
 import asyncio
+import copy
 import hashlib
 import json
 import hmac
@@ -1827,6 +1828,10 @@ async def rewrite_race_notes(request: RewriteRaceNotesRequest, http_request: Req
     dd_data = cached_dive.get("deep_dive", {}) if cached_dive else {}
     dd_by_name = {h.get("name", "").lower(): h for h in dd_data.get("horses", [])}
 
+    # Apply the same Bayesian speed-figure adjustment used in auto-curation
+    if dd_by_name and predictions:
+        predictions = _apply_speed_figure_adjustment(list(predictions), dd_by_name)
+
     # ── 3. Build horse summaries ──────────────────────────────────────────────
     horse_summaries = []
     for pred in predictions:
@@ -2162,6 +2167,7 @@ def _apply_speed_figure_adjustment(
     Only adjusts horses where at least one speed figure is available in recent_results.
     Re-sorts predictions and recomputes softmax win_probability after adjustment.
     """
+    predictions = [copy.deepcopy(p) for p in predictions]
     for pred in predictions:
         name = (pred.get("horse_name") or "").lower()
         dd_horse = dd_by_name.get(name, {})

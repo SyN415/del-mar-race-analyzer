@@ -266,6 +266,18 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 .rt-horse-name{font-weight:700;font-size:1.1rem;color:var(--text);font-family:'Playfair Display',serif;}
 .rt-post{color:var(--muted);margin-right:.4rem;font-weight:600;}
 .rt-secondary{font-size:.8rem;color:var(--subtle);margin-top:.3rem;}
+.ml-odds-chip {
+  display: inline-block;
+  font-size: .78rem;
+  font-weight: 700;
+  padding: .2rem .65rem;
+  border-radius: 999px;
+  background: rgba(245, 213, 107, .08);
+  border: 1px solid rgba(245, 213, 107, .3);
+  color: var(--gold);
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
 .rt-win-prob{
   display:flex;align-items:center;justify-content:center;
   width:44px;height:44px;position:relative;
@@ -426,6 +438,7 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
             <tr>
               <th>Post &middot; Horse</th>
               <th>Jockey / Trainer</th>
+              <th style="text-align:center; white-space:nowrap">ML Odds</th>
               <th style="text-align:center">Win Prob</th>
               <th>Rating</th>
               <th>Role</th>
@@ -435,7 +448,7 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
             {% set race_preds = race.predictions or race.horses or race.entries or race.runners or [] %}
             {% if not race_preds %}
             <tr>
-              <td colspan="5" style="text-align:center; padding:3rem 1rem; color:var(--muted); font-style:italic;">
+              <td colspan="6" style="text-align:center; padding:3rem 1rem; color:var(--muted); font-style:italic;">
                 No horse data available for this race.
               </td>
             </tr>
@@ -452,6 +465,14 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
               </td>
               <td data-label="Jockey / Trainer">
                 <div class="rt-secondary">{{ prediction.jockey or 'N/A' }}<br>{{ prediction.trainer or 'N/A' }}</div>
+              </td>
+              <td data-label="ML Odds" style="text-align:center">
+                {% set ml = prediction.morning_line_odds or '' %}
+                {% if ml %}
+                <span class="ml-odds-chip">{{ ml }}</span>
+                {% else %}
+                <span style="color:var(--muted)">—</span>
+                {% endif %}
               </td>
               <td data-label="Win Prob" style="text-align:center">
                 <div class="rt-win-prob {% if is_top %}is-top{% endif %}" style="margin:0 auto">
