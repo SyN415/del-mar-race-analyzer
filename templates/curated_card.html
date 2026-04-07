@@ -432,33 +432,44 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
             </tr>
           </thead>
           <tbody>
-            {% for prediction in race.predictions %}
-            {% set is_top = prediction.horse_name == race.top_pick %}
-            {% set is_val = prediction.horse_name == race.value_play %}
-            {% set is_long = prediction.horse_name == race.longshot %}
+            {% set race_preds = race.predictions or race.horses or race.entries or race.runners or [] %}
+            {% if not race_preds %}
+            <tr>
+              <td colspan="5" style="text-align:center; padding:3rem 1rem; color:var(--muted); font-style:italic;">
+                No horse data available for this race.
+              </td>
+            </tr>
+            {% endif %}
+            {% for prediction in race_preds %}
+            {% set p_name = prediction.horse_name or prediction.name or '' %}
+            {% set is_top = p_name and race.top_pick and (p_name|lower == race.top_pick|lower) %}
+            {% set is_val = p_name and race.value_play and (p_name|lower == race.value_play|lower) %}
+            {% set is_long = p_name and race.longshot and (p_name|lower == race.longshot|lower) %}
 
             <tr class="{% if is_top %}is-top-pick{% elif is_long %}is-longshot{% endif %}">
               <td data-label="Post &middot; Horse">
-                <div class="rt-horse-name"><span class="rt-post">{{ prediction.post_position }}</span> {{ prediction.horse_name }}</div>
+                <div class="rt-horse-name"><span class="rt-post">{{ prediction.post_position or prediction.post or '?' }}</span> {{ p_name or 'Unknown' }}</div>
               </td>
               <td data-label="Jockey / Trainer">
-                <div class="rt-secondary">{{ prediction.jockey }}<br>{{ prediction.trainer }}</div>
+                <div class="rt-secondary">{{ prediction.jockey or 'N/A' }}<br>{{ prediction.trainer or 'N/A' }}</div>
               </td>
               <td data-label="Win Prob" style="text-align:center">
                 <div class="rt-win-prob {% if is_top %}is-top{% endif %}" style="margin:0 auto">
-                  {% set p_win = prediction.win_probability|default(0)|float %}
-                  {% set stroke = (p_win / 100.0) * 113.097 %}
+                  {% set p_win = prediction.win_probability or prediction.probability or prediction.win_prob or 0 %}
+                  {% set p_win_float = p_win|float %}
+                  {% set stroke = (p_win_float / 100.0) * 113.097 %}
                   <svg viewBox="0 0 40 40">
                     <circle class="bg" cx="20" cy="20" r="18"></circle>
                     <circle class="fg" cx="20" cy="20" r="18" style="stroke-dasharray: {{ stroke }} 113.097"></circle>
                   </svg>
-                  <span>{{ p_win|round|int }}<span style="font-size:.55rem">%</span></span>
+                  <span>{{ p_win_float|round|int }}<span style="font-size:.55rem">%</span></span>
                 </div>
               </td>
               <td data-label="Rating">
                 <div class="rt-rating">
-                  {% set r = prediction.composite_rating|default(0)|float %}
-                  {% if r > 80 %}★★★★★{% elif r > 60 %}★★★★☆{% elif r > 40 %}★★★☆☆{% elif r > 20 %}★★☆☆☆{% else %}★☆☆☆☆{% endif %}
+                  {% set r = prediction.composite_rating or prediction.rating or prediction.score or 0 %}
+                  {% set r_float = r|float %}
+                  {% if r_float > 80 %}★★★★★{% elif r_float > 60 %}★★★★☆{% elif r_float > 40 %}★★★☆☆{% elif r_float > 20 %}★★☆☆☆{% else %}★☆☆☆☆{% endif %}
                 </div>
               </td>
               <td data-label="Role">
@@ -474,21 +485,21 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
         </table>
       </div>
 
-      {% if race.race_notes or race.predictions %}
+      {% if race.race_notes or race_preds %}
       <div class="rp-drilldown">
         <div class="dd-tabs">
           <div class="dd-tab tab-active" onclick="switchTab(this, 'analysis-{{ race.race_number }}')">Race Analysis</div>
-          {% if race.predictions %}
+          {% if race_preds %}
           <div class="dd-tab" onclick="switchTab(this, 'breakdown-{{ race.race_number }}')">Top Pick Breakdown</div>
           {% endif %}
         </div>
         <div id="analysis-{{ race.race_number }}" class="dd-content tab-active">
           {{ race.race_notes|default('No analysis available.') }}
         </div>
-        {% if race.predictions %}
+        {% if race_preds %}
         <div id="breakdown-{{ race.race_number }}" class="dd-content">
-          {% set top_pred = race.predictions[0] %}
-          <p>{{ top_pred.notes }}</p>
+          {% set top_pred = race_preds[0] %}
+          <p>{{ top_pred.notes or '' }}</p>
           {% if top_pred.factors %}
           <ul>
             {% for k, v in top_pred.factors.items() %}
