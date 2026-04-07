@@ -441,7 +441,7 @@ class AIAnalysisEnhancer:
         """Strategy 1 — Ranking-adjacency exacta / trifecta.
 
         Trigger:  top pick win_probability >= 35 % AND composite_rating gap
-                  to #2 >= 12 pts.
+                  to #2 >= 15 pts.
         Build:    Use *predicted finish order* (composite_rating rank) rather
                   than post positions.
         Output:   dict with exacta/trifecta combos plus Harville probabilities.
@@ -537,9 +537,9 @@ class AIAnalysisEnhancer:
         """Strategy 2 — Heavy-favorite hedge.
 
         Detect:  'Heavy Favorite' = ML <= 2/1  **or**  win_probability gap
-                 between #1 and #2 >= 25 pts.
+                 between #1 and #2 >= 20 pts.
         Select:  Upset candidate = horse ranked 3rd-6th whose composite rating
-                 is within 8-12 pts of the favourite.
+                 is within 8-15 pts of the favourite.
         Build:   Exacta with upset candidate on top and favourite underneath.
         """
         if len(predictions) < 4:
@@ -582,7 +582,7 @@ class AIAnalysisEnhancer:
         # Harville probability for upset exacta (upset 1st, fav 2nd)
         p_upset = upset_candidate.get('win_probability', 0) / 100.0
         p_fav = fav.get('win_probability', 0) / 100.0
-        upset_exacta_prob = self._harville_exacta_prob(p_upset, p_fav)
+        upset_exacta_prob = self._harville_exacta_prob_discounted(p_upset, p_fav)
 
         return {
             "triggered": True,
@@ -663,7 +663,7 @@ class AIAnalysisEnhancer:
             for j in range(len(top_n)):
                 if i == j:
                     continue
-                model_p = self._harville_exacta_prob(model_probs[i], model_probs[j])
+                model_p = self._harville_exacta_prob_discounted(model_probs[i], model_probs[j])
                 market_p = self._harville_exacta_prob(market_probs[i], market_probs[j])
                 if model_p <= 0 or market_p <= 0:
                     continue
@@ -688,7 +688,7 @@ class AIAnalysisEnhancer:
                 for k in range(len(top_n)):
                     if k in (i, j):
                         continue
-                    model_p = self._harville_trifecta_prob(
+                    model_p = self._harville_trifecta_prob_discounted(
                         model_probs[i], model_probs[j], model_probs[k]
                     )
                     market_p = self._harville_trifecta_prob(

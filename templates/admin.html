@@ -845,12 +845,13 @@ async function deleteManageCurated(cardId, btn) {
 
 // ── 1-CLICK AUTOMATION PIPELINE ─────────────────────────────────────────────
 
-function _pipelineStep(id, state, label) {
+function _pipelineStep(id, state, label, elapsed) {
     // state: 'pending' | 'running' | 'done' | 'error'
     const el = document.getElementById(id);
     if (!el) return;
     const icons = { pending: '⬜', running: '⏳', done: '✅', error: '❌' };
-    el.textContent = (icons[state] || '⬜') + ' ' + label;
+    const timeTag = (state === 'done' && elapsed != null) ? ` <span class="text-muted" style="font-size:.8em;font-weight:400">(${elapsed}s)</span>` : '';
+    el.innerHTML = (icons[state] || '⬜') + ' ' + label + timeTag;
     el.className = state === 'error' ? 'mb-1 text-danger' : state === 'done' ? 'mb-1 text-success' : 'mb-1';
 }
 
@@ -878,7 +879,11 @@ async function runFullPipeline() {
     });
 
     try {
+        const _pipelineStart = Date.now();
+        let _t;
+
         // ── STEP 1: Build Card ────────────────────────────────────────────────
+        _t = Date.now();
         _pipelineStep('ps_build', 'running', 'Step 1: Building Card…');
         const buildResp = await fetch('/api/admin/race-cards', {
             method: 'POST',
@@ -897,9 +902,10 @@ async function runFullPipeline() {
         if (!buildResp.ok) throw new Error('Build Card failed: ' + (buildResult.detail || buildResp.status));
         const sessionId = buildResult.session_id;
         if (!sessionId) throw new Error('Build Card did not return a session_id');
-        _pipelineStep('ps_build', 'done', 'Step 1: Card Built ✓');
+        _pipelineStep('ps_build', 'done', 'Step 1: Card Built ✓', Math.round((Date.now() - _t) / 1000));
 
         // ── STEP 2: Deep Dive All Races ─────────────────────────────────────────
+        _t = Date.now();
         _pipelineStep('ps_dive', 'running', 'Step 2: Loading race list…');
         const sessionResp = await fetch(`/api/results-json/${sessionId}`);
         const sessionData = await sessionResp.json();
@@ -923,15 +929,19 @@ async function runFullPipeline() {
                     force_refresh: false,
                 }),
             });
-            // Log but don't abort on individual deep-dive failure
             if (!diveResp.ok) {
                 console.warn(`Deep dive failed for race ${raceNum}`);
+            } else {
+                const diveResult = await diveResp.json();
+                const cacheTag = diveResult?.from_cache ? ' (cached)' : '';
+                _pipelineStep('ps_dive', 'running', `Step 2: Deep Diving Race ${raceNum}/${divesTotal}${cacheTag}…`);
             }
             divesDone++;
         }
-        _pipelineStep('ps_dive', 'done', `Step 2: All ${divesTotal} Races Deep Dived ✓`);
+        _pipelineStep('ps_dive', 'done', `Step 2: All ${divesTotal} Races Deep Dived ✓`, Math.round((Date.now() - _t) / 1000));
 
         // ── STEP 3: Auto-Curate ───────────────────────────────────────────────
+        _t = Date.now();
         _pipelineStep('ps_curate', 'running', 'Step 3: Running Auto-Curation…');
         const curateResp = await fetch('/api/admin/auto-curate', {
             method: 'POST',
@@ -943,9 +953,10 @@ async function runFullPipeline() {
         const curatedRaces    = curateResult.races || [];
         const cardOverview    = curateResult.card_overview || '';
         if (curatedRaces.length === 0) throw new Error('Curation returned no races');
-        _pipelineStep('ps_curate', 'done', `Step 3: ${curatedRaces.length} Races Curated ✓`);
+        _pipelineStep('ps_curate', 'done', `Step 3: ${curatedRaces.length} Races Curated ✓`, Math.round((Date.now() - _t) / 1000));
 
         // ── STEP 4: Rewrite All Notes ─────────────────────────────────────────
+        _t = Date.now();
         _pipelineStep('ps_rewrite', 'running', 'Step 4: Rewriting Race Notes…');
         const rewrittenRaces = [];
         let rwDone = 0;
@@ -988,9 +999,10 @@ async function runFullPipeline() {
             }
             rwDone++;
         }
-        _pipelineStep('ps_rewrite', 'done', `Step 4: All ${rwDone} Notes Rewritten ✓`);
+        _pipelineStep('ps_rewrite', 'done', `Step 4: All ${rwDone} Notes Rewritten ✓`, Math.round((Date.now() - _t) / 1000));
 
         // ── STEP 5: Publish ───────────────────────────────────────────────────
+        _t = Date.now();
         _pipelineStep('ps_publish', 'running', 'Step 5: Publishing Card…');
         const publishResp = await fetch('/api/admin/curated-card', {
             method: 'POST',
@@ -1006,11 +1018,12 @@ async function runFullPipeline() {
         });
         const publishResult = await publishResp.json();
         if (!publishResp.ok) throw new Error('Publish failed: ' + (publishResult.detail || publishResp.status));
-        _pipelineStep('ps_publish', 'done', 'Step 5: Card Published ✓');
+        _pipelineStep('ps_publish', 'done', 'Step 5: Card Published ✓', Math.round((Date.now() - _t) / 1000));
 
         const cardUrl = publishResult.card_url || '/';
+        const totalSec = Math.round((Date.now() - _pipelineStart) / 1000);
         resultEl.innerHTML = `<div class="alert alert-success mt-2 fw-semibold">
-          ✅ Pipeline complete — <a href="${cardUrl}" target="_blank" class="alert-link">View Published Card →</a>
+          ✅ Pipeline complete in ${totalSec}s — <a href="${cardUrl}" target="_blank" class="alert-link">View Published Card →</a>
         </div>`;
 
     } catch (pipelineErr) {

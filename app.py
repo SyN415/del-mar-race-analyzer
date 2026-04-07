@@ -1352,8 +1352,10 @@ Return ONLY a valid JSON object with this exact structure:
                     },
                 )
 
-        annotations = response.get("annotations", []) if isinstance(response, dict) else []
-        source_urls = [a.get("url") for a in annotations if isinstance(a, dict) and a.get("url")]
+        source_urls = merge_source_urls(
+            source_urls=[],
+            annotations=response.get("annotations", []) if isinstance(response, dict) else [],
+        )
 
         logger.info(
             "✅ Deep-dive complete | race=%s | horses_enriched=%s | sources=%s",
