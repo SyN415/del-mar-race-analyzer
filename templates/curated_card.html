@@ -83,7 +83,12 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
   font-size:.78rem;font-weight:600;padding:.3rem .9rem;border-radius:999px;
   border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--subtle);
 }
-.cc-chip.is-live{border-color:rgba(34,197,94,.4);background:rgba(34,197,94,.08);color:var(--emerald)}
+@keyframes pulse {
+  0% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.05); opacity: 0.8; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.cc-chip.is-live{border-color:rgba(34,197,94,.4);background:rgba(34,197,94,.08);color:var(--emerald);animation:pulse 2s ease-in-out infinite;}
 
 /* ── PICKS GRID ────────────────────────── */
 .cc-picks{
@@ -189,81 +194,154 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
   font-size:.7rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
   color:var(--gold);margin-bottom:.75rem;
 }
-.overview-body{font-size:1.05rem;line-height:1.8;color:var(--subtle)}
+.overview-body{font-size:1.05rem;line-height:1.8;color:var(--subtle);max-height:120px;overflow:hidden;transition:max-height .3s}
+.overview-body.is-expanded{max-height:1000px;}
+.overview-toggle{background:none;border:none;color:var(--sky);font-size:.85rem;font-weight:600;cursor:pointer;margin-top:.75rem;padding:0;text-decoration:none}
+.overview-toggle:hover{text-decoration:underline;}
 
-/* ── RACE SECTIONS ─────────────────────── */
-.cc-races{
+/* ── DASHBOARD LAYOUT ──────────────────── */
+.cc-dashboard{
   position:relative;z-index:1;
-  max-width:1100px;margin-inline:auto;
+  max-width:1200px;margin-inline:auto;
   padding:0 clamp(1rem,4vw,2.5rem) 3rem;
-  display:flex;flex-direction:column;gap:1.5rem;
+  display:grid;grid-template-columns:64px 1fr;gap:1.5rem;
+  align-items:start;
 }
-.cc-race-section{
-  border-radius:var(--r-lg);
-  background:rgba(11,23,40,.85);
-  border:1px solid var(--border);
-  overflow:hidden;
-  transition:box-shadow .25s;
+@media(max-width:767px){
+  .cc-dashboard{grid-template-columns:1fr}
 }
-.cc-race-section:hover{box-shadow:0 4px 40px rgba(96,165,250,.08)}
-.race-header{
-  padding:.85rem 1.5rem;
-  border-bottom:1px solid var(--border);
-  background:rgba(255,255,255,.025);
-  display:flex;align-items:center;gap:1rem;
+.race-rail{
+  display:flex;flex-direction:column;gap:.5rem;
+  position:sticky;top:1.5rem;
 }
-.race-num-badge{
+.race-rail-item{
+  width:64px;height:64px;display:flex;align-items:center;justify-content:center;
+  border-radius:12px;border:1px solid var(--border);background:var(--bg3);
+  color:var(--muted);font-size:1.1rem;font-weight:700;cursor:pointer;
+  transition:all .2s;position:relative;overflow:hidden;
+}
+.race-rail-item:hover{background:rgba(150,170,205,.1)}
+.race-rail-item.is-active{
+  border-color:var(--gold);background:rgba(245,213,107,.08);color:var(--gold);
+}
+.race-rail-item.is-active::before{
+  content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--gold);
+}
+@media(max-width:767px){
+  .race-rail{flex-direction:row;overflow-x:auto;padding-bottom:.5rem;scrollbar-width:none}
+  .race-rail::-webkit-scrollbar{display:none}
+  .race-rail-item{min-width:64px}
+}
+
+.race-panel{
+  display:none;background:rgba(11,23,40,.85);border:1px solid var(--border);
+  border-radius:var(--r-lg);overflow:hidden;box-shadow:0 4px 40px rgba(0,0,0,.2);
+}
+.race-panel.is-active{display:block;}
+.rp-header{
+  padding:1.25rem 1.5rem;border-bottom:1px solid var(--border);
+  background:rgba(255,255,255,.025);display:flex;align-items:center;justify-content:space-between;
+}
+.rp-title-wrap{display:flex;align-items:center;gap:1rem;}
+.rp-title{font-size:1.1rem;font-weight:700;color:var(--text);letter-spacing:.05em;margin:0;}
+.rp-badge{
   font-size:.72rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
   color:var(--sky);padding:.25rem .75rem;border-radius:999px;
   background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.25);
 }
-.race-meta-text{font-size:.8rem;color:var(--muted)}
-.race-picks-row{
-  display:grid;grid-template-columns:repeat(3,1fr);
+.rp-icon{font-size:1.4rem;opacity:.8;}
+
+/* Picks Table */
+.rp-table-wrap{width:100%;overflow-x:auto;}
+.rp-table{width:100%;border-collapse:collapse;text-align:left;}
+.rp-table th{
+  padding:1rem 1.5rem;font-size:.75rem;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.1em;border-bottom:1px solid var(--border);
+  white-space:nowrap;
 }
-.race-pick-item{
-  padding:1.25rem 1.5rem;position:relative;
-  border-right:1px solid var(--border);
+.rp-table td{
+  padding:1.25rem 1.5rem;border-bottom:1px solid var(--border);vertical-align:middle;
 }
-.race-pick-item:last-child{border-right:none}
-.race-pick-item::before{
-  content:"";position:absolute;top:0;left:0;right:0;height:2px;
+.rp-table tr:last-child td{border-bottom:none;}
+.rt-horse-name{font-weight:700;font-size:1.1rem;color:var(--text);font-family:'Playfair Display',serif;}
+.rt-post{color:var(--muted);margin-right:.4rem;font-weight:600;}
+.rt-secondary{font-size:.8rem;color:var(--subtle);margin-top:.3rem;}
+.rt-win-prob{
+  display:flex;align-items:center;justify-content:center;
+  width:44px;height:44px;position:relative;
 }
-.rpi-gold::before{background:linear-gradient(90deg,var(--gold),#fbbf24)}
-.rpi-emerald::before{background:linear-gradient(90deg,var(--emerald),#34d399)}
-.rpi-violet::before{background:linear-gradient(90deg,var(--violet),#a78bfa)}
-.rpi-badge{
-  font-size:.6rem;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
-  margin-bottom:.45rem;
+.rt-win-prob svg{width:100%;height:100%;transform:rotate(-90deg);}
+.rt-win-prob circle.bg{fill:none;stroke:var(--border);stroke-width:3;}
+.rt-win-prob circle.fg{
+  fill:none;stroke:var(--sky);stroke-width:3;stroke-linecap:round;
+  transition:stroke-dasharray 1s ease;
 }
-.rpi-gold .rpi-badge{color:var(--gold)}
-.rpi-emerald .rpi-badge{color:var(--emerald)}
-.rpi-violet .rpi-badge{color:var(--violet)}
-.rpi-name{
-  font-family:'Playfair Display',Georgia,serif;
-  font-size:clamp(.95rem,1.8vw,1.25rem);font-weight:700;line-height:1.2;
-  color:var(--text);
+.rt-win-prob.is-top circle.fg{stroke:var(--emerald);}
+.rt-win-prob span{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:.75rem;font-weight:700;color:var(--text);
 }
-.rpi-empty{color:var(--muted);font-style:italic;font-size:.85rem}
-.race-notes{
-  padding:1rem 1.5rem;
-  font-size:.875rem;line-height:1.75;color:var(--subtle);font-style:italic;
-  border-top:1px solid var(--border);
+.rt-rating{color:var(--gold);font-size:.9rem;letter-spacing:.1em;white-space:nowrap;}
+.rt-role{
+  font-size:.65rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
+  padding:.3rem .7rem;border-radius:999px;display:inline-block;white-space:nowrap;
 }
-.race-strategy{
-  padding:.75rem 1.5rem;
-  font-size:.83rem;color:var(--text);line-height:1.6;
-  background:rgba(245,213,107,.04);
-  border-top:1px solid rgba(245,213,107,.12);
+.rt-role.top-pick{background:rgba(245,213,107,.15);color:var(--gold);border:1px solid rgba(245,213,107,.35);}
+.rt-role.value-play{background:rgba(34,197,94,.12);color:var(--emerald);border:1px solid rgba(34,197,94,.35);}
+.rt-role.longshot{background:rgba(192,132,252,.12);color:var(--violet);border:1px solid rgba(192,132,252,.35);}
+
+.rp-table tr.is-top-pick{background:rgba(245,213,107,.07);}
+.rp-table tr.is-top-pick td:first-child{border-left:3px solid var(--gold);padding-left:calc(1.5rem - 3px);}
+.rp-table tr.is-longshot td:first-child{border-left:2px solid var(--violet);padding-left:calc(1.5rem - 2px);}
+
+/* Drill Down */
+.rp-drilldown{
+  background:var(--bg3);border-top:1px solid var(--border);padding:1.5rem;
 }
-.race-strategy-label{
-  font-size:.62rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
-  color:var(--gold);margin-right:.5rem;
+.dd-tabs{
+  display:flex;gap:1.5rem;border-bottom:1px solid var(--border);margin-bottom:1.5rem;
 }
-@media(max-width:600px){
-  .race-picks-row{grid-template-columns:1fr}
-  .race-pick-item{border-right:none;border-bottom:1px solid var(--border)}
-  .race-pick-item:last-child{border-bottom:none}
+.dd-tab{
+  padding-bottom:.75rem;color:var(--muted);font-size:.85rem;font-weight:600;
+  cursor:pointer;text-transform:uppercase;letter-spacing:.1em;
+  border-bottom:2px solid transparent;transition:all .2s;
+}
+.dd-tab:hover{color:var(--text);}
+.dd-tab.tab-active{color:var(--sky);border-bottom-color:var(--sky);}
+.dd-content{display:none;font-size:.95rem;line-height:1.7;color:var(--subtle);}
+.dd-content.tab-active{display:block;}
+.dd-content ul{padding-left:1.5rem;margin-top:.75rem;}
+.dd-content li{margin-bottom:.5rem;}
+.dd-content strong{color:var(--text);font-weight:600;}
+
+/* Strategy Footer */
+.rp-footer{
+  padding:1.5rem;background:rgba(245,213,107,.04);border-top:1px solid rgba(245,213,107,.12);
+  display:flex;flex-direction:column;gap:1.25rem;
+}
+.rp-strategy-text{flex:1;font-size:.95rem;line-height:1.6;color:var(--text);font-weight:500;}
+.rp-strategy-label{
+  font-size:.7rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--gold);display:block;margin-bottom:.5rem;
+}
+.rp-actions{display:flex;gap:.75rem;flex-wrap:wrap;align-items:center;}
+.rp-btn{
+  background:transparent;border-radius:6px;padding:.5rem 1rem;font-size:.8rem;font-weight:700;
+  cursor:pointer;transition:all .2s;display:inline-flex;align-items:center;justify-content:center;
+  min-width:110px;text-align:center;white-space:nowrap;
+}
+.rp-btn.btn-win{color:var(--gold);border:1px solid var(--gold);}
+.rp-btn.btn-win:hover{background:rgba(245,213,107,.15);}
+.rp-btn.btn-exa{color:var(--emerald);border:1px solid var(--emerald);}
+.rp-btn.btn-exa:hover{background:rgba(34,197,94,.15);}
+.rp-btn.btn-tri{color:var(--violet);border:1px solid var(--violet);}
+.rp-btn.btn-tri:hover{background:rgba(192,132,252,.15);}
+@media(min-width:768px){
+  .rp-footer{flex-direction:row;align-items:center;justify-content:space-between;}
+  .rp-actions{flex-shrink:0;flex-direction:column;}
+}
+@media(min-width:900px){
+  .rp-actions{flex-direction:row;}
 }
 
 /* ── FOOTER ────────────────────────────── */
@@ -312,45 +390,134 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 <div class="cc-overview">
   <div class="overview-inner">
     <div class="overview-eyebrow">Card Overview</div>
-    <div class="overview-body">{{ card.card_overview }}</div>
+    <div class="overview-body" id="overview-body">{{ card.card_overview }}</div>
+    <button class="overview-toggle" onclick="toggleOverview(this)">Show more</button>
   </div>
 </div>
 {% endif %}
 
 <!-- MULTI-RACE SECTIONS -->
-<div class="cc-races">
-  {% for race in card.races_json %}
-  <div class="cc-race-section">
-    <div class="race-header">
-      <span class="race-num-badge">Race {{ race.race_number }}</span>
+<div class="cc-dashboard">
+  <!-- Sidebar -->
+  <div class="race-rail">
+    {% for race in card.races_json %}
+    <div class="race-rail-item {% if loop.first %}is-active{% endif %}" data-race="{{ race.race_number }}">
+      {{ race.race_number }}
     </div>
-    <div class="race-picks-row">
-      <div class="race-pick-item rpi-gold">
-        <div class="rpi-badge">Top Pick</div>
-        {% if race.top_pick %}<div class="rpi-name">{{ race.top_pick }}</div>
-        {% else %}<div class="rpi-empty">—</div>{% endif %}
-      </div>
-      <div class="race-pick-item rpi-emerald">
-        <div class="rpi-badge">Value Play</div>
-        {% if race.value_play %}<div class="rpi-name">{{ race.value_play }}</div>
-        {% else %}<div class="rpi-empty">—</div>{% endif %}
-      </div>
-      <div class="race-pick-item rpi-violet">
-        <div class="rpi-badge">Longshot</div>
-        {% if race.longshot %}<div class="rpi-name">{{ race.longshot }}</div>
-        {% else %}<div class="rpi-empty">—</div>{% endif %}
-      </div>
-    </div>
-    {% if race.race_notes %}
-    <div class="race-notes">{{ race.race_notes }}</div>
-    {% endif %}
-    {% if race.betting_strategy %}
-    <div class="race-strategy">
-      <span class="race-strategy-label">Strategy</span>{{ race.betting_strategy }}
-    </div>
-    {% endif %}
+    {% endfor %}
   </div>
-  {% endfor %}
+
+  <!-- Main Content -->
+  <div class="race-panels-container">
+    {% for race in card.races_json %}
+    <div class="race-panel {% if loop.first %}is-active{% endif %}" data-race="{{ race.race_number }}">
+
+      <div class="rp-header">
+        <div class="rp-title-wrap">
+          <h2 class="rp-title">ENTRIES &amp; ODDS</h2>
+          <span class="rp-badge">RACE {{ race.race_number }}</span>
+        </div>
+        <i class="fa-solid fa-horse rp-icon"></i>
+      </div>
+
+      <div class="rp-table-wrap">
+        <table class="rp-table">
+          <thead>
+            <tr>
+              <th>Post &middot; Horse</th>
+              <th>Jockey / Trainer</th>
+              <th style="text-align:center">Win Prob</th>
+              <th>Rating</th>
+              <th>Role</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for prediction in race.predictions %}
+            {% set is_top = prediction.horse_name == race.top_pick %}
+            {% set is_val = prediction.horse_name == race.value_play %}
+            {% set is_long = prediction.horse_name == race.longshot %}
+
+            <tr class="{% if is_top %}is-top-pick{% elif is_long %}is-longshot{% endif %}">
+              <td data-label="Post &middot; Horse">
+                <div class="rt-horse-name"><span class="rt-post">{{ prediction.post_position }}</span> {{ prediction.horse_name }}</div>
+              </td>
+              <td data-label="Jockey / Trainer">
+                <div class="rt-secondary">{{ prediction.jockey }}<br>{{ prediction.trainer }}</div>
+              </td>
+              <td data-label="Win Prob" style="text-align:center">
+                <div class="rt-win-prob {% if is_top %}is-top{% endif %}" style="margin:0 auto">
+                  {% set p_win = prediction.win_probability|default(0)|float %}
+                  {% set stroke = (p_win / 100.0) * 113.097 %}
+                  <svg viewBox="0 0 40 40">
+                    <circle class="bg" cx="20" cy="20" r="18"></circle>
+                    <circle class="fg" cx="20" cy="20" r="18" style="stroke-dasharray: {{ stroke }} 113.097"></circle>
+                  </svg>
+                  <span>{{ p_win|round|int }}<span style="font-size:.55rem">%</span></span>
+                </div>
+              </td>
+              <td data-label="Rating">
+                <div class="rt-rating">
+                  {% set r = prediction.composite_rating|default(0)|float %}
+                  {% if r > 80 %}★★★★★{% elif r > 60 %}★★★★☆{% elif r > 40 %}★★★☆☆{% elif r > 20 %}★★☆☆☆{% else %}★☆☆☆☆{% endif %}
+                </div>
+              </td>
+              <td data-label="Role">
+                {% if is_top %}<span class="rt-role top-pick">Top Pick</span>
+                {% elif is_val %}<span class="rt-role value-play">Value Play</span>
+                {% elif is_long %}<span class="rt-role longshot">Longshot</span>
+                {% else %}&nbsp;
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      {% if race.race_notes or race.predictions %}
+      <div class="rp-drilldown">
+        <div class="dd-tabs">
+          <div class="dd-tab tab-active" onclick="switchTab(this, 'analysis-{{ race.race_number }}')">Race Analysis</div>
+          {% if race.predictions %}
+          <div class="dd-tab" onclick="switchTab(this, 'breakdown-{{ race.race_number }}')">Top Pick Breakdown</div>
+          {% endif %}
+        </div>
+        <div id="analysis-{{ race.race_number }}" class="dd-content tab-active">
+          {{ race.race_notes|default('No analysis available.') }}
+        </div>
+        {% if race.predictions %}
+        <div id="breakdown-{{ race.race_number }}" class="dd-content">
+          {% set top_pred = race.predictions[0] %}
+          <p>{{ top_pred.notes }}</p>
+          {% if top_pred.factors %}
+          <ul>
+            {% for k, v in top_pred.factors.items() %}
+            <li><strong>{{ k }}:</strong> {{ v }}</li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {% if race.betting_strategy %}
+      <div class="rp-footer">
+        <div class="rp-strategy-text">
+          <span class="rp-strategy-label">Strategy</span>
+          <span id="strategy-text-{{ race.race_number }}">{{ race.betting_strategy }}</span>
+        </div>
+        <div class="rp-actions">
+          <button class="rp-btn btn-win" onclick="copyStrategy('{{ race.race_number }}', this, 'Win')">Win</button>
+          <button class="rp-btn btn-exa" onclick="copyStrategy('{{ race.race_number }}', this, 'Exacta Key')">Exacta Key</button>
+          <button class="rp-btn btn-tri" onclick="copyStrategy('{{ race.race_number }}', this, 'Trifecta Box')">Trifecta Box</button>
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+    {% endfor %}
+  </div>
 </div>
 
 {% else %}
@@ -445,6 +612,66 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
   <p>Built by <a href="/">{{ brand_name }}</a> &mdash; AI-curated picks for serious horseplayers.</p>
   <p style="margin-top:.4rem;font-size:.72rem">For entertainment and research purposes. Always wager responsibly.</p>
 </footer>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  const railItems = document.querySelectorAll('.race-rail-item');
+  const panels = document.querySelectorAll('.race-panel');
+
+  railItems.forEach(item => {
+    item.addEventListener('click', () => {
+      const raceNum = item.getAttribute('data-race');
+
+      railItems.forEach(ri => ri.classList.remove('is-active'));
+      panels.forEach(p => p.classList.remove('is-active'));
+
+      item.classList.add('is-active');
+      const activePanel = document.querySelector(`.race-panel[data-race="${raceNum}"]`);
+      if(activePanel) activePanel.classList.add('is-active');
+    });
+  });
+});
+
+function toggleOverview(btn) {
+  const body = document.getElementById('overview-body');
+  if (body) {
+    body.classList.toggle('is-expanded');
+    btn.textContent = body.classList.contains('is-expanded') ? 'Show less' : 'Show more';
+  }
+}
+
+function switchTab(clickedTab, contentId) {
+  const tabsContainer = clickedTab.parentElement;
+  const drilldownContainer = tabsContainer.parentElement;
+
+  const allTabs = tabsContainer.querySelectorAll('.dd-tab');
+  const allContents = drilldownContainer.querySelectorAll('.dd-content');
+
+  allTabs.forEach(t => t.classList.remove('tab-active'));
+  allContents.forEach(c => c.classList.remove('tab-active'));
+
+  clickedTab.classList.add('tab-active');
+  const activeContent = document.getElementById(contentId);
+  if(activeContent) activeContent.classList.add('tab-active');
+}
+
+function copyStrategy(raceNum, btn, type) {
+  const strategySpan = document.getElementById('strategy-text-' + raceNum);
+  if (!strategySpan) return;
+
+  const textToCopy = strategySpan.innerText || strategySpan.textContent;
+
+  navigator.clipboard.writeText(textToCopy).then(() => {
+    const originalText = btn.textContent;
+    btn.textContent = '✓ Copied';
+    setTimeout(() => {
+      btn.textContent = originalText;
+    }, 1500);
+  }).catch(err => {
+    console.error('Failed to copy text: ', err);
+  });
+}
+</script>
 
 </body>
 </html>
