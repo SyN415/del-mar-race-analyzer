@@ -1673,23 +1673,39 @@ async def admin_recompute_ratings(request: AdminRecomputeRequest, http_request: 
             if not ep:
                 continue
 
-            pred["_llm_composite_rating"] = pred.get("composite_rating")
-            pred["_llm_factors"] = pred.get("factors")
-            pred["composite_rating"] = ep.get("composite_rating", pred["composite_rating"])
-            pred["win_probability"] = ep.get("win_probability", pred.get("win_probability", 0))
+            llm_rating = pred.get("composite_rating", 50.0)
+            engine_rating = ep.get("composite_rating", 50.0)
 
-            engine_factors = ep.get("factors")
-            if engine_factors:
-                pred["factors"] = {
-                    "speed_rating": engine_factors.get("speed_rating", engine_factors.get("speed", 0)),
-                    "form_rating": engine_factors.get("form_rating", engine_factors.get("form", 0)),
-                    "class_rating": engine_factors.get("class_rating", engine_factors.get("class", 0)),
-                    "workout_rating": engine_factors.get("workout_rating", engine_factors.get("workout", 0)),
-                }
+            # Store original values for audit
+            pred["_llm_composite_rating"] = llm_rating
+            pred["_engine_composite_rating"] = engine_rating
+            pred["_llm_factors"] = pred.get("factors") or {}
+
+            # 75/25 Blend
+            pred["composite_rating"] = round(0.75 * llm_rating + 0.25 * engine_rating, 1)
+
+            # Blend factors similarly
+            llm_factors = pred["_llm_factors"]
+            engine_factors = ep.get("factors") or {}
+            pred["factors"] = {
+                "speed_rating": round(0.75 * llm_factors.get("speed_rating", 0) + 0.25 * engine_factors.get("speed_rating", engine_factors.get("speed", 0)), 1),
+                "form_rating": round(0.75 * llm_factors.get("form_rating", 0) + 0.25 * engine_factors.get("form_rating", engine_factors.get("form", 0)), 1),
+                "class_rating": round(0.75 * llm_factors.get("class_rating", 0) + 0.25 * engine_factors.get("class_rating", engine_factors.get("class", 0)), 1),
+                "workout_rating": round(0.75 * llm_factors.get("workout_rating", 0) + 0.25 * engine_factors.get("workout_rating", engine_factors.get("workout", 0)), 1),
+            }
             horses_updated += 1
 
-        # Re-sort predictions by composite_rating (engine may reorder them)
+        # Re-sort predictions by blended composite_rating
         predictions.sort(key=lambda p: p.get("composite_rating", 0), reverse=True)
+
+        # Recompute softmax win_probability for the race
+        import math as _math
+        _T = 15.0
+        _scores = [_math.exp(p.get("composite_rating", 0) / _T) for p in predictions]
+        _total = sum(_scores) or 1.0
+        for p, s in zip(predictions, _scores):
+            p["win_probability"] = round((s / _total) * 100, 1)
+
         race["predictions"] = predictions
         recomputed_count += 1
 
