@@ -38,17 +38,19 @@ async def run_track_workflow(
     *,
     app_module: Any,
 ) -> bool:
-    """Execute the full 4-step admin workflow for one track/date.
+    """Execute the full 5-step admin workflow for one track/date.
 
     Returns True on success, False on failure.
     """
     from app import (
         AdminRaceCardRequest,
         AdminDeepDiveRequest,
+        AdminRecomputeRequest,
         AutoCurateRequest,
         CuratedCardRequest,
         create_admin_race_card,
         admin_race_deep_dive,
+        admin_recompute_ratings,
         auto_curate_card,
         save_curated_card,
         app_state,
@@ -58,7 +60,7 @@ async def run_track_workflow(
     log_prefix = f"[AUTO {track_id} {race_date}]"
 
     # ── Step 1: Build the race card ──────────────────────────────────────────
-    logger.info("%s Step 1/4 — building race card …", log_prefix)
+    logger.info("%s Step 1/5 — building race card …", log_prefix)
     t0 = time.perf_counter()
     try:
         card_req = AdminRaceCardRequest(
@@ -77,7 +79,7 @@ async def run_track_workflow(
         return False
 
     # ── Step 2: Deep-dive each race ──────────────────────────────────────────
-    logger.info("%s Step 2/4 — deep-diving races …", log_prefix)
+    logger.info("%s Step 2/5 — deep-diving races …", log_prefix)
     session_manager = await app_state.ensure_session_manager()
     if not session_manager:
         logger.error("%s   session manager unavailable", log_prefix)
@@ -101,8 +103,27 @@ async def run_track_workflow(
         except Exception as exc:
             logger.warning("%s   deep-dive race %d failed (continuing): %s", log_prefix, rn, exc)
 
-    # ── Step 3: Auto-curate the full card ────────────────────────────────────
-    logger.info("%s Step 3/4 — auto-curating …", log_prefix)
+    # ── Step 3: Algorithmic re-rating ────────────────────────────────────────
+    logger.info("%s Step 3/5 — algorithmic re-rating …", log_prefix)
+    try:
+        rerate_req = AdminRecomputeRequest(
+            session_id=session_id,
+            race_date=race_date,
+            track_id=track_id,
+        )
+        rerate_resp = await admin_recompute_ratings(rerate_req, http_request=http_request)
+        rerate_data = json.loads(rerate_resp.body)
+        logger.info(
+            "%s   re-rating complete — %d horses across %d races",
+            log_prefix,
+            rerate_data.get("horses_updated", 0),
+            rerate_data.get("races_recomputed", 0),
+        )
+    except Exception as exc:
+        logger.warning("%s   re-rating failed (continuing): %s", log_prefix, exc)
+
+    # ── Step 4: Auto-curate the full card ────────────────────────────────────
+    logger.info("%s Step 4/5 — auto-curating …", log_prefix)
     try:
         curate_req = AutoCurateRequest(
             session_id=session_id,
@@ -113,11 +134,11 @@ async def run_track_workflow(
         curate_data = json.loads(curate_resp.body)
         logger.info("%s   auto-curate complete — %d races curated", log_prefix, len(curate_data.get("races", [])))
     except Exception as exc:
-        logger.error("%s   FAILED at step 3 (auto-curate): %s", log_prefix, exc, exc_info=True)
+        logger.error("%s   FAILED at step 4 (auto-curate): %s", log_prefix, exc, exc_info=True)
         return False
 
-    # ── Step 4: Save and publish ─────────────────────────────────────────────
-    logger.info("%s Step 4/4 — saving & publishing …", log_prefix)
+    # ── Step 5: Save and publish ─────────────────────────────────────────────
+    logger.info("%s Step 5/5 — saving & publishing …", log_prefix)
     try:
         races_payload = curate_data.get("races", [])
         card_overview = curate_data.get("card_overview", "")

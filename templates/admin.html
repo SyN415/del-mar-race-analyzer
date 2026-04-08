@@ -242,9 +242,10 @@
                     <ul class="list-unstyled mb-3" id="pipelineSteps">
                       <li id="ps_build"   class="mb-1">⬜ Step 1: Build Card</li>
                       <li id="ps_dive"    class="mb-1">⬜ Step 2: Deep Dive All Races</li>
-                      <li id="ps_curate" class="mb-1">⬜ Step 3: Auto-Curate</li>
-                      <li id="ps_rewrite" class="mb-1">⬜ Step 4: Rewrite All Notes</li>
-                      <li id="ps_publish" class="mb-1">⬜ Step 5: Publish Card</li>
+                      <li id="ps_rerate"  class="mb-1">⬜ Step 3: Algorithmic Re-Rating</li>
+                      <li id="ps_curate"  class="mb-1">⬜ Step 4: Auto-Curate</li>
+                      <li id="ps_rewrite" class="mb-1">⬜ Step 5: Rewrite All Notes</li>
+                      <li id="ps_publish" class="mb-1">⬜ Step 6: Publish Card</li>
                     </ul>
                     <div id="pipelineResult" class="mt-2"></div>
                   </div>
@@ -870,12 +871,13 @@ async function runFullPipeline() {
     resultEl.innerHTML = '';
 
     // Reset all step indicators
-    ['ps_build','ps_dive','ps_curate','ps_rewrite','ps_publish'].forEach(id => {
+    ['ps_build','ps_dive','ps_rerate','ps_curate','ps_rewrite','ps_publish'].forEach(id => {
         _pipelineStep(id, 'pending', id === 'ps_build' ? 'Step 1: Build Card'
             : id === 'ps_dive' ? 'Step 2: Deep Dive All Races'
-            : id === 'ps_curate' ? 'Step 3: Auto-Curate'
-            : id === 'ps_rewrite' ? 'Step 4: Rewrite All Notes'
-            : 'Step 5: Publish Card');
+            : id === 'ps_rerate' ? 'Step 3: Algorithmic Re-Rating'
+            : id === 'ps_curate' ? 'Step 4: Auto-Curate'
+            : id === 'ps_rewrite' ? 'Step 5: Rewrite All Notes'
+            : 'Step 6: Publish Card');
     });
 
     try {
@@ -940,9 +942,21 @@ async function runFullPipeline() {
         }
         _pipelineStep('ps_dive', 'done', `Step 2: All ${divesTotal} Races Deep Dived ✓`, Math.round((Date.now() - _t) / 1000));
 
-        // ── STEP 3: Auto-Curate ───────────────────────────────────────────────
+        // ── STEP 3: Algorithmic Re-Rating ───────────────────────────────────────
         _t = Date.now();
-        _pipelineStep('ps_curate', 'running', 'Step 3: Running Auto-Curation…');
+        _pipelineStep('ps_rerate', 'running', 'Step 3: Re-rating with prediction engine…');
+        const rerateResp = await fetch('/api/admin/recompute-ratings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: sessionId, race_date: raceDate, track_id: trackId }),
+        });
+        const rerateResult = await rerateResp.json();
+        if (!rerateResp.ok) throw new Error('Re-rating failed: ' + (rerateResult.detail || rerateResp.status));
+        _pipelineStep('ps_rerate', 'done', `Step 3: ${rerateResult.horses_updated} Horses Re-Rated ✓`, Math.round((Date.now() - _t) / 1000));
+
+        // ── STEP 4: Auto-Curate ───────────────────────────────────────────────
+        _t = Date.now();
+        _pipelineStep('ps_curate', 'running', 'Step 4: Running Auto-Curation…');
         const curateResp = await fetch('/api/admin/auto-curate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -953,15 +967,15 @@ async function runFullPipeline() {
         const curatedRaces    = curateResult.races || [];
         const cardOverview    = curateResult.card_overview || '';
         if (curatedRaces.length === 0) throw new Error('Curation returned no races');
-        _pipelineStep('ps_curate', 'done', `Step 3: ${curatedRaces.length} Races Curated ✓`, Math.round((Date.now() - _t) / 1000));
+        _pipelineStep('ps_curate', 'done', `Step 4: ${curatedRaces.length} Races Curated ✓`, Math.round((Date.now() - _t) / 1000));
 
-        // ── STEP 4: Rewrite All Notes ─────────────────────────────────────────
+        // ── STEP 5: Rewrite All Notes ─────────────────────────────────────────
         _t = Date.now();
-        _pipelineStep('ps_rewrite', 'running', 'Step 4: Rewriting Race Notes…');
+        _pipelineStep('ps_rewrite', 'running', 'Step 5: Rewriting Race Notes…');
         const rewrittenRaces = [];
         let rwDone = 0;
         for (const race of curatedRaces) {
-            _pipelineStep('ps_rewrite', 'running', `Step 4: Rewriting Race ${race.race_number}/${curatedRaces.length}…`);
+            _pipelineStep('ps_rewrite', 'running', `Step 5: Rewriting Race ${race.race_number}/${curatedRaces.length}…`);
             try {
                 const rwResp = await fetch('/api/admin/rewrite-race-notes', {
                     method: 'POST',
@@ -999,11 +1013,11 @@ async function runFullPipeline() {
             }
             rwDone++;
         }
-        _pipelineStep('ps_rewrite', 'done', `Step 4: All ${rwDone} Notes Rewritten ✓`, Math.round((Date.now() - _t) / 1000));
+        _pipelineStep('ps_rewrite', 'done', `Step 5: All ${rwDone} Notes Rewritten ✓`, Math.round((Date.now() - _t) / 1000));
 
-        // ── STEP 5: Publish ───────────────────────────────────────────────────
+        // ── STEP 6: Publish ───────────────────────────────────────────────────
         _t = Date.now();
-        _pipelineStep('ps_publish', 'running', 'Step 5: Publishing Card…');
+        _pipelineStep('ps_publish', 'running', 'Step 6: Publishing Card…');
         const publishResp = await fetch('/api/admin/curated-card', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1018,7 +1032,7 @@ async function runFullPipeline() {
         });
         const publishResult = await publishResp.json();
         if (!publishResp.ok) throw new Error('Publish failed: ' + (publishResult.detail || publishResp.status));
-        _pipelineStep('ps_publish', 'done', 'Step 5: Card Published ✓', Math.round((Date.now() - _t) / 1000));
+        _pipelineStep('ps_publish', 'done', 'Step 6: Card Published ✓', Math.round((Date.now() - _t) / 1000));
 
         const cardUrl = publishResult.card_url || '/';
         const totalSec = Math.round((Date.now() - _pipelineStart) / 1000);
@@ -1030,7 +1044,7 @@ async function runFullPipeline() {
         console.error('Pipeline error:', pipelineErr);
         resultEl.innerHTML = `<div class="alert alert-danger mt-2">❌ Pipeline stopped: ${pipelineErr.message}</div>`;
         // Mark the currently-running step as errored by checking which ones are still 'running' state
-        ['ps_build','ps_dive','ps_curate','ps_rewrite','ps_publish'].forEach(id => {
+        ['ps_build','ps_dive','ps_rerate','ps_curate','ps_rewrite','ps_publish'].forEach(id => {
             const el = document.getElementById(id);
             if (el && el.textContent.startsWith('⏳')) {
                 el.textContent = '❌' + el.textContent.slice(1);

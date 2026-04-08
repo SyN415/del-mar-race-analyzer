@@ -187,7 +187,7 @@ class AppState:
                 return None
 
         return self.orchestration_service
-        
+
     async def initialize(self):
         """Initialize only lightweight services needed for first HTTP readiness."""
         try:
@@ -495,6 +495,11 @@ class RewriteRaceNotesRequest(BaseModel):
     value_play: str = ""
     longshot: str = ""
 
+class AdminRecomputeRequest(BaseModel):
+    session_id: str
+    race_date: str
+    track_id: str = "DMR"
+
 class AutoCurateRequest(BaseModel):
     session_id: str
     race_date: str
@@ -670,7 +675,7 @@ async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundT
         else:
             # Fallback session ID generation
             session_id = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        
+
         # Create and track the background task
         task = asyncio.create_task(
             run_analysis_pipeline(
@@ -687,7 +692,7 @@ async def start_analysis(request: AnalysisRequest, background_tasks: BackgroundT
             "status": "started",
             "message": f"Analysis started for {request.date}"
         })
-        
+
     except Exception as e:
         logger.error(f"Failed to start analysis: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1473,7 +1478,7 @@ async def results_page(request: Request, session_id: str):
             results = await session_manager.get_session_results(session_id)
         else:
             results = {"error": "Session manager not available"}
-            
+
         return templates.TemplateResponse(request, "results.html", {
             "request": request,
             "session_id": session_id,
@@ -1503,6 +1508,206 @@ async def health_check():
             "kelly_optimizer": app_state.kelly_optimizer is not None
         }
     }
+
+
+# ---------------------------------------------------------------------------
+# Algorithmic Re-Rating — replaces LLM-subjective ratings with engine-computed
+# ratings derived from deep-dive data (speed figures, form, jockey/trainer stats).
+# ---------------------------------------------------------------------------
+
+def _map_deep_dive_to_engine_format(cached: Dict) -> Dict:
+    """Map deep-dive horse_data_cache record → RacePredictionEngine input.
+
+    Deep-dive stores:
+        last3_results: [{finish, speed_figure, distance, surface, …}]
+        workouts:      [{distance, time, type, …}]
+        smartpick:     {jockey_stats: {track_win_pct, …}, trainer_stats: …}
+
+    Prediction engine expects:
+        results:  [{speed_score, finish_position, distance, surface}]
+        workouts: [{distance, time, workout_type}]
+        smartpick: {jockey_stats: {win_percentage, …}, …}
+    """
+    results = []
+    for r in cached.get("last3_results") or []:
+        finish = r.get("finish", 10)
+        if isinstance(finish, str):
+            # Parse "1st of 8", "2nd", or just "3" formats
+            import re as _re
+            m = _re.match(r"(\d+)", finish)
+            finish = int(m.group(1)) if m else 10
+        results.append({
+            "speed_score": r.get("speed_figure") or 0,
+            "finish_position": int(finish) if isinstance(finish, (int, float)) else 10,
+            "distance": r.get("distance", ""),
+            "surface": r.get("surface", ""),
+        })
+
+    workouts = []
+    for w in cached.get("workouts") or []:
+        workouts.append({
+            "distance": w.get("distance", ""),
+            "time": w.get("time", ""),
+            "workout_type": w.get("type", ""),
+        })
+
+    smartpick = cached.get("smartpick") or {}
+    jockey_raw = smartpick.get("jockey_stats") or {}
+    trainer_raw = smartpick.get("trainer_stats") or {}
+
+    return {
+        "results": results,
+        "workouts": workouts,
+        "smartpick": {
+            "jockey_stats": {
+                "win_percentage": jockey_raw.get("track_win_pct", 0),
+                **jockey_raw,
+            },
+            "trainer_stats": {
+                "win_percentage": trainer_raw.get("track_win_pct", 0),
+                **trainer_raw,
+            },
+        },
+    }
+
+
+@app.post("/api/admin/recompute-ratings")
+async def admin_recompute_ratings(request: AdminRecomputeRequest, http_request: Request = None):
+    """Re-compute all race ratings using the algorithmic prediction engine and deep-dive data.
+
+    After deep-dives populate the horse_data_cache with real speed figures,
+    workouts, and jockey/trainer stats, this endpoint runs RacePredictionEngine
+    to replace the LLM's subjective composite_rating values with algorithmically
+    grounded ones using a transparent weighted formula.
+    """
+    if not _auth_enabled():
+        raise HTTPException(status_code=503, detail="Admin access is not configured on the server")
+    if http_request is None or not _is_admin(http_request):
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+
+    session_manager = await app_state.ensure_session_manager()
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager is not available")
+
+    engine = app_state.prediction_engine
+    if not engine:
+        raise HTTPException(status_code=503, detail="Prediction engine is not available")
+
+    # ── 1. Load session results ──────────────────────────────────────────────
+    session_results = await session_manager.get_session_results(request.session_id)
+    if "error" in session_results:
+        raise HTTPException(status_code=404, detail=session_results["error"])
+
+    race_analyses = session_results.get("race_analyses", [])
+    if not race_analyses:
+        raise HTTPException(status_code=404, detail="No race analyses found in session")
+
+    recomputed_count = 0
+    horses_updated = 0
+
+    for race in race_analyses:
+        predictions = race.get("predictions", [])
+        if not predictions:
+            continue
+
+        # ── 2. Build engine inputs from cached deep-dive data ────────────────
+        race_info = {
+            "race_type": race.get("race_type", ""),
+            "distance": race.get("distance", ""),
+            "surface": race.get("surface", ""),
+            "conditions": race.get("conditions", ""),
+        }
+
+        horses_for_engine = []
+        horse_data_collection = {}
+        has_deep_dive_data = False
+
+        for pred in predictions:
+            horse_name = pred.get("horse_name", "")
+            if not horse_name:
+                continue
+
+            cached = await session_manager.get_cached_horse_data(
+                request.race_date, horse_name
+            )
+
+            horses_for_engine.append({
+                "name": horse_name,
+                "jockey": pred.get("jockey", ""),
+                "trainer": pred.get("trainer", ""),
+                "post_position": pred.get("post_position", 0),
+                "morning_line_odds": pred.get("morning_line_odds", ""),
+            })
+
+            if cached:
+                mapped = _map_deep_dive_to_engine_format(cached)
+                horse_data_collection[horse_name] = mapped
+                if mapped.get("results"):
+                    has_deep_dive_data = True
+            else:
+                horse_data_collection[horse_name] = {}
+
+        # Only re-rate if we actually have deep-dive data for this race
+        if not has_deep_dive_data:
+            logger.info(
+                "⏭ Skipping re-rating for race %s — no deep-dive data",
+                race.get("race_number"),
+            )
+            continue
+
+        # ── 3. Run the prediction engine ─────────────────────────────────────
+        race_data_for_engine = {**race_info, "horses": horses_for_engine}
+        engine_result = engine.predict_race(race_data_for_engine, horse_data_collection)
+        engine_predictions = engine_result.get("predictions", [])
+
+        # Build lookup by horse name
+        engine_lookup = {
+            ep.get("horse_name", ep.get("name", "")).strip().lower(): ep
+            for ep in engine_predictions
+        }
+
+        # ── 4. Merge engine ratings back into the session predictions ────────
+        for pred in predictions:
+            horse_key = pred.get("horse_name", "").strip().lower()
+            ep = engine_lookup.get(horse_key)
+            if not ep:
+                continue
+
+            pred["_llm_composite_rating"] = pred.get("composite_rating")
+            pred["_llm_factors"] = pred.get("factors")
+            pred["composite_rating"] = ep.get("composite_rating", pred["composite_rating"])
+            pred["win_probability"] = ep.get("win_probability", pred.get("win_probability", 0))
+
+            engine_factors = ep.get("factors")
+            if engine_factors:
+                pred["factors"] = {
+                    "speed_rating": engine_factors.get("speed_rating", engine_factors.get("speed", 0)),
+                    "form_rating": engine_factors.get("form_rating", engine_factors.get("form", 0)),
+                    "class_rating": engine_factors.get("class_rating", engine_factors.get("class", 0)),
+                    "workout_rating": engine_factors.get("workout_rating", engine_factors.get("workout", 0)),
+                }
+            horses_updated += 1
+
+        # Re-sort predictions by composite_rating (engine may reorder them)
+        predictions.sort(key=lambda p: p.get("composite_rating", 0), reverse=True)
+        race["predictions"] = predictions
+        recomputed_count += 1
+
+    # ── 5. Save updated session results ──────────────────────────────────────
+    await session_manager.save_session_results(request.session_id, session_results)
+
+    logger.info(
+        "✅ Algorithmic re-rating complete | session=%s | races=%d | horses=%d",
+        request.session_id, recomputed_count, horses_updated,
+    )
+
+    return JSONResponse({
+        "session_id": request.session_id,
+        "races_recomputed": recomputed_count,
+        "horses_updated": horses_updated,
+        "message": f"Re-rated {horses_updated} horses across {recomputed_count} races using prediction engine",
+    })
+
 
 
 @app.post("/api/admin/auto-curate")
