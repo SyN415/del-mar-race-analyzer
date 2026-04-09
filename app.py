@@ -578,6 +578,34 @@ async def landing_page(request: Request):
     )
 
 
+@app.get("/record", response_class=HTMLResponse)
+async def record_page(request: Request):
+    """Public 30-day track record page."""
+    session_manager = await app_state.ensure_session_manager()
+    summary = {}
+    records = []
+    if session_manager:
+        try:
+            data = await asyncio.wait_for(
+                session_manager.get_recap_summary_30d(), timeout=5.0
+            )
+            summary = data.get("summary", {})
+            records = data.get("records", [])
+        except Exception as e:
+            logger.warning(f"Failed to load recap summary for record page: {e}")
+
+    return templates.TemplateResponse(
+        request,
+        "record.html",
+        _template_context(
+            request,
+            "30-Day Track Record",
+            summary=summary,
+            records=records,
+        ),
+    )
+
+
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     """Login page for admin access."""
@@ -1673,39 +1701,23 @@ async def admin_recompute_ratings(request: AdminRecomputeRequest, http_request: 
             if not ep:
                 continue
 
-            llm_rating = pred.get("composite_rating", 50.0)
-            engine_rating = ep.get("composite_rating", 50.0)
+            pred["_llm_composite_rating"] = pred.get("composite_rating")
+            pred["_llm_factors"] = pred.get("factors")
+            pred["composite_rating"] = ep.get("composite_rating", pred["composite_rating"])
+            pred["win_probability"] = ep.get("win_probability", pred.get("win_probability", 0))
 
-            # Store original values for audit
-            pred["_llm_composite_rating"] = llm_rating
-            pred["_engine_composite_rating"] = engine_rating
-            pred["_llm_factors"] = pred.get("factors") or {}
-
-            # 75/25 Blend
-            pred["composite_rating"] = round(0.75 * llm_rating + 0.25 * engine_rating, 1)
-
-            # Blend factors similarly
-            llm_factors = pred["_llm_factors"]
-            engine_factors = ep.get("factors") or {}
-            pred["factors"] = {
-                "speed_rating": round(0.75 * llm_factors.get("speed_rating", 0) + 0.25 * engine_factors.get("speed_rating", engine_factors.get("speed", 0)), 1),
-                "form_rating": round(0.75 * llm_factors.get("form_rating", 0) + 0.25 * engine_factors.get("form_rating", engine_factors.get("form", 0)), 1),
-                "class_rating": round(0.75 * llm_factors.get("class_rating", 0) + 0.25 * engine_factors.get("class_rating", engine_factors.get("class", 0)), 1),
-                "workout_rating": round(0.75 * llm_factors.get("workout_rating", 0) + 0.25 * engine_factors.get("workout_rating", engine_factors.get("workout", 0)), 1),
-            }
+            engine_factors = ep.get("factors")
+            if engine_factors:
+                pred["factors"] = {
+                    "speed_rating": engine_factors.get("speed_rating", engine_factors.get("speed", 0)),
+                    "form_rating": engine_factors.get("form_rating", engine_factors.get("form", 0)),
+                    "class_rating": engine_factors.get("class_rating", engine_factors.get("class", 0)),
+                    "workout_rating": engine_factors.get("workout_rating", engine_factors.get("workout", 0)),
+                }
             horses_updated += 1
 
-        # Re-sort predictions by blended composite_rating
+        # Re-sort predictions by composite_rating (engine may reorder them)
         predictions.sort(key=lambda p: p.get("composite_rating", 0), reverse=True)
-
-        # Recompute softmax win_probability for the race
-        import math as _math
-        _T = 15.0
-        _scores = [_math.exp(p.get("composite_rating", 0) / _T) for p in predictions]
-        _total = sum(_scores) or 1.0
-        for p, s in zip(predictions, _scores):
-            p["win_probability"] = round((s / _total) * 100, 1)
-
         race["predictions"] = predictions
         recomputed_count += 1
 
@@ -2220,9 +2232,20 @@ async def list_curated_cards(request: Request):
         raise HTTPException(status_code=503, detail="Session manager is not available")
 
     cards = await session_manager.get_all_curated_cards(limit=50)
+
+    # Cross-reference recap records so the UI can show has_recap flag
     for card in cards:
         card["track_name"] = SUPPORTED_TRACKS.get(card.get("track_id"), card.get("track_id"))
         card["card_url"] = f"/card/{card.get('race_date')}/{card.get('track_id')}"
+        recap = await session_manager.get_recap_record(card.get("race_date", ""), card.get("track_id", ""))
+        if recap:
+            card["has_recap"] = True
+            card["recap_daily_score"] = recap.get("daily_score", 0)
+            card["recap_top_pick_wins"] = recap.get("top_pick_wins", 0)
+            card["recap_top_pick_total"] = recap.get("top_pick_total", 0)
+        else:
+            card["has_recap"] = False
+
     return JSONResponse(cards)
 
 
@@ -2244,6 +2267,271 @@ async def delete_curated_card_endpoint(card_id: str, request: Request):
 
     logger.info("🗑️ Admin deleted curated card %s", card_id)
     return JSONResponse({"status": "deleted", "id": card_id})
+
+
+@app.post("/api/admin/generate-recap")
+async def generate_recap(request: GenerateRecapRequest, http_request: Request = None):
+    """Generate a recap for a past curated card by comparing picks to official Equibase results via Grok web search."""
+    if not _auth_enabled():
+        raise HTTPException(status_code=503, detail="Admin access is not configured on the server")
+    if http_request is None or not _is_admin(http_request):
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+
+    session_manager = await app_state.ensure_session_manager()
+    openrouter_client = app_state.ensure_openrouter_client()
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager is not available")
+    if not openrouter_client or not openrouter_client.api_key:
+        raise HTTPException(status_code=503, detail="OPENROUTER_API_KEY is not configured on the server")
+
+    # ── 1. Load the curated card ──────────────────────────────────────────────
+    card = await session_manager.get_curated_card(request.race_date, request.track_id)
+    if not card:
+        raise HTTPException(status_code=404, detail=f"No curated card found for {request.race_date} / {request.track_id}")
+
+    races = card.get("races_json") or []
+    if not races:
+        raise HTTPException(status_code=400, detail="Curated card has no races data")
+
+    track_full = SUPPORTED_TRACKS.get(request.track_id, request.track_id)
+
+    # ── 2. Build per-race picks summary for Grok ─────────────────────────────
+    picks_summary = []
+    for race in races:
+        rn = race.get("race_number", "?")
+        picks_summary.append(
+            f"Race {rn}: Top Pick={race.get('top_pick','N/A')}, "
+            f"Value Play={race.get('value_play','N/A')}, "
+            f"Longshot={race.get('longshot','N/A')}, "
+            f"Betting Strategy={race.get('betting_strategy','N/A')}"
+        )
+
+    prompt = f"""You are auditing horse racing picks against official results. Look up the official race results for {track_full} on {request.race_date} from Equibase or any reliable source.
+
+For each race below, compare our picks to the actual results. Return a JSON object with the structure shown below.
+
+OUR PICKS:
+{chr(10).join(picks_summary)}
+
+For each race, determine:
+1. Did the top_pick WIN (finish 1st)?
+2. Did the value_play WIN (finish 1st)?
+3. Did the longshot WIN (finish 1st)?
+4. Did the top_pick finish in the exacta (1st or 2nd)?
+5. Was our exacta bet correct (if betting_strategy mentions an exacta)?
+6. Was our trifecta bet correct (if betting_strategy mentions a trifecta)?
+7. The actual winner's name and odds
+8. Official exacta and trifecta payouts (per $2 base)
+
+Return ONLY valid JSON:
+{{
+  "races": [
+    {{
+      "race_number": 1,
+      "winner": "Horse Name",
+      "winner_odds": "5-2",
+      "place_horse": "2nd Place Horse",
+      "show_horse": "3rd Place Horse",
+      "top_pick_won": true,
+      "value_play_won": false,
+      "longshot_won": false,
+      "exacta_hit": false,
+      "trifecta_hit": false,
+      "exacta_payout": 0.0,
+      "trifecta_payout": 0.0,
+      "recap_note": "Brief note on the outcome...",
+      "data_available": true
+    }}
+  ]
+}}
+
+If results for a race are not available, set data_available=false and leave other fields at defaults. Do NOT guess — only report confirmed results."""
+
+    logger.info(
+        "📊 GENERATE-RECAP: date=%s | track=%s | races=%d",
+        request.race_date, request.track_id, len(races),
+    )
+
+    try:
+        response = await openrouter_client.call_model(
+            model="x-ai/grok-4.20-beta",
+            task_type="analysis",
+            prompt=prompt,
+            context={"race_date": request.race_date, "track_id": request.track_id},
+            max_tokens=4000,
+            temperature=0.1,
+            return_metadata=True,
+            response_format={"type": "json_object"},
+            plugins=[{"id": "web"}],
+        )
+
+        content = response.get("content", "") if isinstance(response, dict) else str(response)
+        if not content:
+            raise HTTPException(status_code=502, detail="Grok returned empty content for recap")
+
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            import re as _re
+            match = _re.search(r'\{.*\}', content, _re.DOTALL)
+            if match:
+                parsed = json.loads(match.group())
+            else:
+                raise HTTPException(status_code=502, detail="Could not parse Grok recap response as JSON")
+
+        recap_races = parsed.get("races", [])
+
+        # ── 3. Score the recap ────────────────────────────────────────────────
+        # 13 max points per race:
+        #   top_pick_won=3, value_play_won=2, longshot_won=2,
+        #   exacta_hit=3, trifecta_hit=3
+        total_score = 0.0
+        max_possible = 0.0
+        top_pick_wins = 0
+        top_pick_total = 0
+        value_play_wins = 0
+        value_play_total = 0
+        longshot_wins = 0
+        longshot_total = 0
+        exacta_hits = 0
+        exacta_total = 0
+        trifecta_hits = 0
+        trifecta_total = 0
+        best_winner_horse = ""
+        best_winner_odds = ""
+        best_winner_race = 0
+        best_exacta_payout = 0.0
+        best_exacta_race = 0
+        best_trifecta_payout = 0.0
+        best_trifecta_race = 0
+
+        for rr in recap_races:
+            if not rr.get("data_available", True):
+                continue
+
+            rn = rr.get("race_number", 0)
+            max_possible += 13
+
+            if rr.get("top_pick_won"):
+                total_score += 3
+                top_pick_wins += 1
+            top_pick_total += 1
+
+            if rr.get("value_play_won"):
+                total_score += 2
+                value_play_wins += 1
+            value_play_total += 1
+
+            if rr.get("longshot_won"):
+                total_score += 2
+                longshot_wins += 1
+            longshot_total += 1
+
+            if rr.get("exacta_hit"):
+                total_score += 3
+                exacta_hits += 1
+            exacta_total += 1
+
+            if rr.get("trifecta_hit"):
+                total_score += 3
+                trifecta_hits += 1
+            trifecta_total += 1
+
+            # Track best winner odds (parse "X-Y" to numeric)
+            odds_str = rr.get("winner_odds", "")
+            if odds_str and rr.get("top_pick_won"):
+                try:
+                    parts = str(odds_str).replace("/", "-").split("-")
+                    odds_val = float(parts[0]) / float(parts[1]) if len(parts) >= 2 else float(parts[0])
+                except (ValueError, ZeroDivisionError, IndexError):
+                    odds_val = 0
+                # Compare to current best
+                try:
+                    best_parts = str(best_winner_odds).replace("/", "-").split("-") if best_winner_odds else ["0"]
+                    best_val = float(best_parts[0]) / float(best_parts[1]) if len(best_parts) >= 2 else float(best_parts[0])
+                except (ValueError, ZeroDivisionError, IndexError):
+                    best_val = 0
+                if odds_val > best_val:
+                    best_winner_odds = odds_str
+                    best_winner_horse = rr.get("winner", "")
+                    best_winner_race = rn
+
+            ep = rr.get("exacta_payout", 0) or 0
+            if ep > best_exacta_payout:
+                best_exacta_payout = ep
+                best_exacta_race = rn
+
+            tp = rr.get("trifecta_payout", 0) or 0
+            if tp > best_trifecta_payout:
+                best_trifecta_payout = tp
+                best_trifecta_race = rn
+
+        # Normalize to 0-100 scale
+        daily_score = round((total_score / max_possible * 100), 1) if max_possible > 0 else 0.0
+
+        # ── 4. Persist to DB ──────────────────────────────────────────────────
+        # Build enriched recap JSON for storage
+        for rr in recap_races:
+            rn = rr.get("race_number", 0)
+            orig = next((r for r in races if r.get("race_number") == rn), {})
+            rr["our_top_pick"] = orig.get("top_pick", "")
+            rr["our_value_play"] = orig.get("value_play", "")
+            rr["our_longshot"] = orig.get("longshot", "")
+            rr["hits"] = {
+                "top_pick_won": rr.get("top_pick_won", False),
+                "value_play_won": rr.get("value_play_won", False),
+                "longshot_won": rr.get("longshot_won", False),
+                "exacta_hit": rr.get("exacta_hit", False),
+                "trifecta_hit": rr.get("trifecta_hit", False),
+            }
+
+        record_id = await session_manager.save_recap_record(
+            race_date=request.race_date,
+            track_id=request.track_id,
+            races_recap_json=json.dumps(recap_races),
+            daily_score=daily_score,
+            max_possible_score=max_possible,
+            top_pick_wins=top_pick_wins,
+            top_pick_total=top_pick_total,
+            value_play_wins=value_play_wins,
+            value_play_total=value_play_total,
+            longshot_wins=longshot_wins,
+            longshot_total=longshot_total,
+            exacta_hits=exacta_hits,
+            exacta_total=exacta_total,
+            trifecta_hits=trifecta_hits,
+            trifecta_total=trifecta_total,
+            best_winner_horse=best_winner_horse,
+            best_winner_odds=best_winner_odds,
+            best_winner_race=best_winner_race,
+            best_exacta_payout=best_exacta_payout,
+            best_exacta_race=best_exacta_race,
+            best_trifecta_payout=best_trifecta_payout,
+            best_trifecta_race=best_trifecta_race,
+        )
+
+        logger.info(
+            "✅ RECAP saved | date=%s | track=%s | score=%.1f | id=%s",
+            request.race_date, request.track_id, daily_score, record_id,
+        )
+
+        return JSONResponse({
+            "id": record_id,
+            "daily_score": daily_score,
+            "races": recap_races,
+            "summary": {
+                "top_pick_wins": top_pick_wins,
+                "top_pick_total": top_pick_total,
+                "exacta_hits": exacta_hits,
+                "trifecta_hits": trifecta_hits,
+            },
+        })
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"Generate recap failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/card/{race_date}/{track_id}", response_class=HTMLResponse)

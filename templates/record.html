@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ page_title }} | TrackStarAI</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<style>
+:root{
+  --bg:#07111f;--bg2:#0b1728;--bg3:#132238;
+  --gold:#f5d56b;--emerald:#22c55e;--violet:#c084fc;--sky:#60a5fa;
+  --text:#f8fafc;--muted:#7f93b2;--subtle:#b6c4da;
+  --border:rgba(150,170,205,.18);
+  --r:18px;--r-lg:26px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--bg)}
+body{font-family:'Inter',system-ui,sans-serif;color:var(--text);line-height:1.5;min-height:100vh;display:flex;flex-direction:column;background:var(--bg)}
+a{text-decoration:none;color:inherit}
+
+/* ── NAV ───────────────────────────────── */
+.cc-nav{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:1rem clamp(1rem,5vw,3rem);border-bottom:1px solid var(--border);
+  background:rgba(11,23,40,.8);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  position:sticky;top:0;z-index:50;
+}
+.cc-brand{
+  font-family:'Playfair Display',serif;font-weight:900;font-size:1.3rem;
+  letter-spacing:-.02em;color:var(--text);display:flex;align-items:center;gap:.5rem;
+}
+.cc-nav-back{
+  font-size:.82rem;color:var(--muted);text-decoration:none;
+  display:flex;align-items:center;gap:.35rem;transition:color .2s;
+}
+.cc-nav-back:hover{color:var(--sky)}
+
+/* ── HERO ──────────────────────────────── */
+.cc-hero{
+  position:relative;z-index:1;
+  text-align:center;padding:clamp(2.5rem,7vw,4rem) clamp(1rem,4vw,2rem) clamp(2rem,5vw,3rem);
+}
+.cc-hero::before{
+  content:"";position:absolute;top:-2rem;left:-2rem;right:-2rem;bottom:0;z-index:-1;
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%,rgba(192,132,252,.22) 0%,transparent 70%),
+    radial-gradient(ellipse 70% 50% at 50% 110%,rgba(245,213,107,.07) 0%,transparent 60%);
+}
+.cc-eyebrow{
+  display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--gold);margin-bottom:1rem;
+  padding:.35rem 1rem;border-radius:999px;
+  border:1px solid rgba(245,213,107,.3);
+  background:rgba(245,213,107,.08);
+}
+.cc-hero-title{
+  font-family:'Playfair Display',Georgia,serif;
+  font-size:clamp(2rem,6vw,3.5rem);font-weight:900;
+  line-height:1.1;margin-bottom:.75rem;
+  background:linear-gradient(135deg,#f8fafc 30%,var(--gold) 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+}
+.cc-hero-sub{
+  font-size:clamp(.9rem,2vw,1.1rem);color:var(--subtle);
+  margin-bottom:0;max-width:520px;margin-inline:auto;
+}
+
+/* ── STATS BOARD ────────────────────── */
+.stats-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:1rem;max-width:1200px;margin:0 auto 3rem;padding:0 clamp(1rem,4vw,2rem);
+}
+.stat-card{
+  background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);
+  padding:1.5rem;text-align:center;
+}
+.stat-val{font-size:2rem;font-weight:800;color:var(--gold);line-height:1.1;margin-bottom:.25rem}
+.stat-val.em{color:var(--emerald)}
+.stat-val.sky{color:var(--sky)}
+.stat-lbl{font-size:.75rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+
+/* ── RECORD TABLE ───────────────────── */
+.record-container{
+  max-width:1200px;margin:0 auto 4rem;padding:0 clamp(1rem,4vw,2rem);
+}
+.rec-table-wrap{
+  background:var(--bg2);border:1px solid var(--border);
+  border-radius:var(--r);overflow-x:auto;
+}
+.rec-table{
+  width:100%;border-collapse:collapse;text-align:left;min-width:800px;
+}
+.rec-table th{
+  padding:1rem 1.5rem;font-size:.75rem;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);
+  background:rgba(255,255,255,.02);
+}
+.rec-table td{
+  padding:1rem 1.5rem;border-bottom:1px solid var(--border);vertical-align:middle;
+  color:var(--subtle);font-size:.9rem;
+}
+.rec-table tbody tr:hover{background:rgba(255,255,255,.02);cursor:pointer;}
+.rec-table tbody tr:last-child td{border-bottom:none;}
+.rec-score{font-weight:800;font-size:1.1rem;}
+.score-high{color:var(--emerald)}
+.score-mid{color:var(--gold)}
+.score-low{color:var(--muted)}
+
+/* ── EXPANDED VIEW ──────────────────── */
+.rec-detail-row{display:none;}
+.rec-detail-row.open{display:table-row;}
+.rec-detail-content{padding:1.5rem;background:var(--bg3);border-bottom:1px solid var(--border);}
+.detail-race{
+  margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px dashed var(--border);
+}
+.detail-race:last-child{margin-bottom:0;padding-bottom:0;border-bottom:none;}
+.dr-head{font-weight:700;color:var(--text);margin-bottom:.25rem;font-size:.95rem;}
+.dr-note{color:var(--subtle);font-size:.85rem;}
+.dr-hits{display:flex;gap:.5rem;margin-top:.4rem;}
+.hit-badge{
+  font-size:.65rem;font-weight:700;padding:.15rem .5rem;border-radius:999px;
+  background:rgba(34,197,94,.1);color:var(--emerald);border:1px solid rgba(34,197,94,.3);
+}
+
+</style>
+</head>
+<body>
+
+<nav class="cc-nav">
+  <a href="/" class="cc-brand">
+    <i class="fa-solid fa-horse-head" style="color:var(--gold)"></i>
+    <span>TrackStar AI</span>
+  </a>
+  <a class="cc-nav-back" href="/">← Home</a>
+</nav>
+
+<section class="cc-hero">
+  <div class="cc-eyebrow">✦ Verified Performance ✦</div>
+  <h1 class="cc-hero-title">30-Day Track Record</h1>
+  <p class="cc-hero-sub">Transparent, auditable results comparing our AI curated betting cards against official Equibase race outcomes.</p>
+</section>
+
+<div class="stats-grid">
+  <div class="stat-card">
+    <div class="stat-val">{{ summary.top_pick_win_rate_pct }}%</div>
+    <div class="stat-lbl">Top Pick Win Rate</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val em">{{ summary.average_daily_score }}</div>
+    <div class="stat-lbl">Avg Daily Score (/100)</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val sky">{{ summary.exacta_hit_rate_pct }}%</div>
+    <div class="stat-lbl">Exacta Hit Rate</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val sky">{{ summary.trifecta_hit_rate_pct }}%</div>
+    <div class="stat-lbl">Trifecta Hit Rate</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val">{{ summary.best_winner_odds_overall or '—' }}</div>
+    <div class="stat-lbl">Best Winner Odds</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val em">${{ summary.best_exacta_payout_overall|round(2) if summary.best_exacta_payout_overall else '—' }}</div>
+    <div class="stat-lbl">Best Exacta Payout</div>
+  </div>
+</div>
+
+<div class="record-container">
+  <div class="rec-table-wrap">
+    <table class="rec-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Track</th>
+          <th>Daily Score</th>
+          <th>Top Picks Won</th>
+          <th>Exactas</th>
+          <th>Trifectas</th>
+          <th>Best Winner</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in records %}
+        <tr onclick="document.getElementById('detail-{{ r.id }}').classList.toggle('open')">
+          <td style="color:var(--text);font-weight:600;">{{ r.race_date }}</td>
+          <td>{{ r.track_id }}</td>
+          <td>
+            <span class="rec-score {% if r.daily_score >= 70 %}score-high{% elif r.daily_score >= 40 %}score-mid{% else %}score-low{% endif %}">
+              {{ r.daily_score }}
+            </span>
+          </td>
+          <td>{{ r.top_pick_wins }} / {{ r.top_pick_total }}</td>
+          <td>{{ r.exacta_hits }}</td>
+          <td>{{ r.trifecta_hits }}</td>
+          <td>{{ r.best_winner_horse }} {% if r.best_winner_odds %}({{ r.best_winner_odds }}){% endif %}</td>
+        </tr>
+        <tr class="rec-detail-row" id="detail-{{ r.id }}">
+          <td colspan="7" style="padding:0">
+            <div class="rec-detail-content">
+              {% for race in (r.races_recap_json or []) %}
+              <div class="detail-race">
+                <div class="dr-head">Race {{ race.race_number }} — Winner: {{ race.winner or 'N/A' }}</div>
+                <div class="dr-note">{{ race.recap_note or '' }}</div>
+                {% if race.hits %}
+                <div class="dr-hits">
+                  {% if race.hits.top_pick_won %}<span class="hit-badge">Top Pick</span>{% endif %}
+                  {% if race.hits.value_play_won %}<span class="hit-badge">Value Play</span>{% endif %}
+                  {% if race.hits.longshot_won %}<span class="hit-badge">Longshot</span>{% endif %}
+                  {% if race.hits.exacta_hit %}<span class="hit-badge">Exacta (${{ race.exacta_payout }})</span>{% endif %}
+                  {% if race.hits.trifecta_hit %}<span class="hit-badge">Trifecta (${{ race.trifecta_payout }})</span>{% endif %}
+                  {% if race.hits.hedge_exacta_hit %}<span class="hit-badge">Hedge Exacta</span>{% endif %}
+                </div>
+                {% endif %}
+              </div>
+              {% else %}
+              <div class="dr-note text-muted">No race details available.</div>
+              {% endfor %}
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="7" style="text-align:center;padding:3rem 1rem;color:var(--muted)">No recap records found.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+</body>
+</html>

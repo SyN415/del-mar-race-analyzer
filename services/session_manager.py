@@ -202,6 +202,38 @@ class SessionManager:
                     is_published INTEGER DEFAULT 0,
                     races_json TEXT,
                     card_overview TEXT DEFAULT '',
+                    betting_strategy_json TEXT DEFAULT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (race_date, track_id)
+                )
+            """)
+
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS race_recap_records (
+                    id TEXT PRIMARY KEY,
+                    race_date TEXT NOT NULL,
+                    track_id TEXT NOT NULL,
+                    races_recap_json TEXT,
+                    daily_score REAL,
+                    max_possible_score REAL,
+                    top_pick_wins INTEGER DEFAULT 0,
+                    top_pick_total INTEGER DEFAULT 0,
+                    value_play_wins INTEGER DEFAULT 0,
+                    value_play_total INTEGER DEFAULT 0,
+                    longshot_wins INTEGER DEFAULT 0,
+                    longshot_total INTEGER DEFAULT 0,
+                    exacta_hits INTEGER DEFAULT 0,
+                    exacta_total INTEGER DEFAULT 0,
+                    trifecta_hits INTEGER DEFAULT 0,
+                    trifecta_total INTEGER DEFAULT 0,
+                    best_winner_horse TEXT DEFAULT '',
+                    best_winner_odds TEXT DEFAULT '',
+                    best_winner_race INTEGER DEFAULT 0,
+                    best_exacta_payout REAL DEFAULT 0,
+                    best_exacta_race INTEGER DEFAULT 0,
+                    best_trifecta_payout REAL DEFAULT 0,
+                    best_trifecta_race INTEGER DEFAULT 0,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE (race_date, track_id)
@@ -212,6 +244,7 @@ class SessionManager:
             for col, defn in [
                 ("races_json", "TEXT"),
                 ("card_overview", "TEXT DEFAULT ''"),
+                ("betting_strategy_json", "TEXT DEFAULT NULL"),
             ]:
                 try:
                     await db.execute(f"ALTER TABLE curated_cards ADD COLUMN {col} {defn}")
@@ -622,6 +655,7 @@ class SessionManager:
         longshot: Optional[Dict],
         admin_notes: str,
         betting_strategy: str,
+        betting_strategy_json: Optional[List],
         is_published: bool,
         races: Optional[List] = None,
         card_overview: str = '',
@@ -646,6 +680,7 @@ class SessionManager:
                         'longshot_json': longshot,
                         'admin_notes': admin_notes,
                         'betting_strategy': betting_strategy,
+                        'betting_strategy_json': betting_strategy_json,
                         'is_published': is_published,
                         'races_json': races,
                         'card_overview': card_overview,
@@ -660,9 +695,9 @@ class SessionManager:
                 await db.execute("""
                     INSERT INTO curated_cards
                     (id, race_date, track_id, session_id, top_pick_json, value_play_json,
-                     longshot_json, admin_notes, betting_strategy, is_published,
+                     longshot_json, admin_notes, betting_strategy, betting_strategy_json, is_published,
                      races_json, card_overview, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                     ON CONFLICT(race_date, track_id) DO UPDATE SET
                         session_id=excluded.session_id,
                         top_pick_json=excluded.top_pick_json,
@@ -670,6 +705,7 @@ class SessionManager:
                         longshot_json=excluded.longshot_json,
                         admin_notes=excluded.admin_notes,
                         betting_strategy=excluded.betting_strategy,
+                        betting_strategy_json=excluded.betting_strategy_json,
                         is_published=excluded.is_published,
                         races_json=excluded.races_json,
                         card_overview=excluded.card_overview,
@@ -680,6 +716,7 @@ class SessionManager:
                     json.dumps(value_play) if value_play else None,
                     json.dumps(longshot) if longshot else None,
                     admin_notes, betting_strategy,
+                    json.dumps(betting_strategy_json) if betting_strategy_json else None,
                     1 if is_published else 0,
                     json.dumps(races) if races else None,
                     card_overview,
@@ -717,7 +754,7 @@ class SessionManager:
             if not row:
                 return None
             d = dict(row)
-            for field in ('top_pick_json', 'value_play_json', 'longshot_json', 'races_json'):
+            for field in ('top_pick_json', 'value_play_json', 'longshot_json', 'races_json', 'betting_strategy_json'):
                 if d.get(field):
                     try:
                         d[field] = json.loads(d[field])
@@ -756,7 +793,7 @@ class SessionManager:
             result = []
             for row in rows:
                 d = dict(row)
-                for field in ('top_pick_json', 'value_play_json', 'longshot_json', 'races_json'):
+                for field in ('top_pick_json', 'value_play_json', 'longshot_json', 'races_json', 'betting_strategy_json'):
                     if d.get(field):
                         try:
                             d[field] = json.loads(d[field])
@@ -791,7 +828,7 @@ class SessionManager:
             result = []
             for row in rows:
                 d = dict(row)
-                for field in ('top_pick_json', 'value_play_json', 'longshot_json', 'races_json'):
+                for field in ('top_pick_json', 'value_play_json', 'longshot_json', 'races_json', 'betting_strategy_json'):
                     if d.get(field):
                         try:
                             d[field] = json.loads(d[field])
@@ -1015,3 +1052,260 @@ class SessionManager:
 
         except Exception as e:
             logger.error(f"Failed to cleanup old sessions: {e}")
+
+    async def save_recap_record(
+        self,
+        race_date: str,
+        track_id: str,
+        races_recap_json: str,
+        daily_score: float,
+        max_possible_score: float,
+        top_pick_wins: int,
+        top_pick_total: int,
+        value_play_wins: int,
+        value_play_total: int,
+        longshot_wins: int,
+        longshot_total: int,
+        exacta_hits: int,
+        exacta_total: int,
+        trifecta_hits: int,
+        trifecta_total: int,
+        best_winner_horse: str,
+        best_winner_odds: str,
+        best_winner_race: int,
+        best_exacta_payout: float,
+        best_exacta_race: int,
+        best_trifecta_payout: float,
+        best_trifecta_race: int,
+    ) -> str:
+        """Upsert a recap record. Returns the record id."""
+        record_id = str(uuid.uuid4())
+        now = self._utcnow_iso()
+        try:
+            if self.storage_backend == 'supabase':
+                await self._supabase_request(
+                    'POST',
+                    'race_recap_records',
+                    params={'on_conflict': 'race_date,track_id'},
+                    prefer='resolution=merge-duplicates',
+                    payload={
+                        'id': record_id,
+                        'race_date': race_date,
+                        'track_id': track_id,
+                        'races_recap_json': races_recap_json,
+                        'daily_score': daily_score,
+                        'max_possible_score': max_possible_score,
+                        'top_pick_wins': top_pick_wins,
+                        'top_pick_total': top_pick_total,
+                        'value_play_wins': value_play_wins,
+                        'value_play_total': value_play_total,
+                        'longshot_wins': longshot_wins,
+                        'longshot_total': longshot_total,
+                        'exacta_hits': exacta_hits,
+                        'exacta_total': exacta_total,
+                        'trifecta_hits': trifecta_hits,
+                        'trifecta_total': trifecta_total,
+                        'best_winner_horse': best_winner_horse,
+                        'best_winner_odds': best_winner_odds,
+                        'best_winner_race': best_winner_race,
+                        'best_exacta_payout': best_exacta_payout,
+                        'best_exacta_race': best_exacta_race,
+                        'best_trifecta_payout': best_trifecta_payout,
+                        'best_trifecta_race': best_trifecta_race,
+                        'created_at': now,
+                        'updated_at': now,
+                    },
+                )
+                logger.info("💾 Upserted recap record to Supabase | date=%s | track=%s", race_date, track_id)
+                return record_id
+
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute("""
+                    INSERT INTO race_recap_records
+                    (id, race_date, track_id, races_recap_json, daily_score, max_possible_score,
+                     top_pick_wins, top_pick_total, value_play_wins, value_play_total,
+                     longshot_wins, longshot_total, exacta_hits, exacta_total, trifecta_hits, trifecta_total,
+                     best_winner_horse, best_winner_odds, best_winner_race,
+                     best_exacta_payout, best_exacta_race, best_trifecta_payout, best_trifecta_race,
+                     created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT(race_date, track_id) DO UPDATE SET
+                        races_recap_json=excluded.races_recap_json,
+                        daily_score=excluded.daily_score,
+                        max_possible_score=excluded.max_possible_score,
+                        top_pick_wins=excluded.top_pick_wins,
+                        top_pick_total=excluded.top_pick_total,
+                        value_play_wins=excluded.value_play_wins,
+                        value_play_total=excluded.value_play_total,
+                        longshot_wins=excluded.longshot_wins,
+                        longshot_total=excluded.longshot_total,
+                        exacta_hits=excluded.exacta_hits,
+                        exacta_total=excluded.exacta_total,
+                        trifecta_hits=excluded.trifecta_hits,
+                        trifecta_total=excluded.trifecta_total,
+                        best_winner_horse=excluded.best_winner_horse,
+                        best_winner_odds=excluded.best_winner_odds,
+                        best_winner_race=excluded.best_winner_race,
+                        best_exacta_payout=excluded.best_exacta_payout,
+                        best_exacta_race=excluded.best_exacta_race,
+                        best_trifecta_payout=excluded.best_trifecta_payout,
+                        best_trifecta_race=excluded.best_trifecta_race,
+                        updated_at=CURRENT_TIMESTAMP
+                """, (
+                    record_id, race_date, track_id, races_recap_json, daily_score, max_possible_score,
+                    top_pick_wins, top_pick_total, value_play_wins, value_play_total,
+                    longshot_wins, longshot_total, exacta_hits, exacta_total, trifecta_hits, trifecta_total,
+                    best_winner_horse, best_winner_odds, best_winner_race,
+                    best_exacta_payout, best_exacta_race, best_trifecta_payout, best_trifecta_race
+                ))
+                await db.commit()
+            logger.info("💾 Upserted recap record to SQLite | date=%s | track=%s", race_date, track_id)
+            return record_id
+        except Exception as e:
+            logger.error(f"Failed to save recap record: {e}")
+            raise
+
+    async def get_recap_record(self, race_date: str, track_id: str) -> Optional[Dict]:
+        """Return the single recap record for this date and track or None. Parse races_recap_json."""
+        try:
+            if self.storage_backend == 'supabase':
+                rows = await self._supabase_request(
+                    'GET',
+                    'race_recap_records',
+                    params={
+                        'race_date': f'eq.{race_date}',
+                        'track_id': f'eq.{track_id}',
+                        'limit': 1,
+                    },
+                )
+                row = rows[0] if rows else None
+            else:
+                async with aiosqlite.connect(self.db_path) as db:
+                    db.row_factory = aiosqlite.Row
+                    async with db.execute("""
+                        SELECT * FROM race_recap_records
+                        WHERE race_date = ? AND track_id = ?
+                        LIMIT 1
+                    """, (race_date, track_id)) as cursor:
+                        sql_row = await cursor.fetchone()
+                row = dict(sql_row) if sql_row else None
+
+            if not row:
+                return None
+
+            if row.get('races_recap_json'):
+                try:
+                    row['races_recap_json'] = json.loads(row['races_recap_json'])
+                except (TypeError, json.JSONDecodeError):
+                    pass
+            return row
+        except Exception as e:
+            logger.error(f"Failed to get recap record: {e}")
+            return None
+
+    async def get_recap_summary_30d(self, track_id: Optional[str] = None) -> Dict:
+        """Return all recap records from the past 30 calendar days ordered by race_date descending."""
+        try:
+            thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).strftime('%Y-%m-%d')
+            rows = []
+            if self.storage_backend == 'supabase':
+                params = {
+                    'race_date': f'gte.{thirty_days_ago}',
+                    'order': 'race_date.desc'
+                }
+                if track_id:
+                    params['track_id'] = f'eq.{track_id}'
+                rows = await self._supabase_request('GET', 'race_recap_records', params=params)
+                if not rows:
+                    rows = []
+            else:
+                async with aiosqlite.connect(self.db_path) as db:
+                    db.row_factory = aiosqlite.Row
+                    query = "SELECT * FROM race_recap_records WHERE race_date >= ?"
+                    params = [thirty_days_ago]
+                    if track_id:
+                        query += " AND track_id = ?"
+                        params.append(track_id)
+                    query += " ORDER BY race_date DESC"
+                    async with db.execute(query, params) as cursor:
+                        sql_rows = await cursor.fetchall()
+                        rows = [dict(r) for r in sql_rows]
+
+            records = []
+            total_top_pick_wins = 0
+            total_top_pick_races = 0
+            total_exacta_hits = 0
+            total_exacta_races = 0
+            total_trifecta_hits = 0
+            total_trifecta_races = 0
+            total_daily_score = 0.0
+
+            best_single_day_score = 0.0
+            best_single_day_date = ""
+            best_winner_odds_overall = ""
+            best_exacta_payout_overall = 0.0
+            best_trifecta_payout_overall = 0.0
+
+            for row in rows:
+                if row.get('races_recap_json'):
+                    try:
+                        row['races_recap_json'] = json.loads(row['races_recap_json'])
+                    except:
+                        pass
+                records.append(row)
+
+                total_top_pick_wins += row.get('top_pick_wins', 0)
+                total_top_pick_races += row.get('top_pick_total', 0)
+                total_exacta_hits += row.get('exacta_hits', 0)
+                total_exacta_races += row.get('exacta_total', 0)
+                total_trifecta_hits += row.get('trifecta_hits', 0)
+                total_trifecta_races += row.get('trifecta_total', 0)
+                total_daily_score += row.get('daily_score', 0.0)
+
+                if row.get('daily_score', 0) > best_single_day_score:
+                    best_single_day_score = row.get('daily_score', 0)
+                    best_single_day_date = row.get('race_date', '')
+
+                # Parse odds string (e.g. "8-1") to numeric for comparison
+                if row.get('best_winner_odds'):
+                    try:
+                        _parts = str(row['best_winner_odds']).replace('/', '-').split('-')
+                        _odds_val = float(_parts[0]) / float(_parts[1]) if len(_parts) >= 2 else float(_parts[0])
+                    except (ValueError, ZeroDivisionError, IndexError):
+                        _odds_val = 0
+                    try:
+                        _best_parts = str(best_winner_odds_overall).replace('/', '-').split('-') if best_winner_odds_overall else ['0']
+                        _best_val = float(_best_parts[0]) / float(_best_parts[1]) if len(_best_parts) >= 2 else float(_best_parts[0])
+                    except (ValueError, ZeroDivisionError, IndexError):
+                        _best_val = 0
+                    if _odds_val > _best_val:
+                        best_winner_odds_overall = row['best_winner_odds']
+
+                if row.get('best_exacta_payout', 0) > best_exacta_payout_overall:
+                    best_exacta_payout_overall = row.get('best_exacta_payout', 0)
+
+                if row.get('best_trifecta_payout', 0) > best_trifecta_payout_overall:
+                    best_trifecta_payout_overall = row.get('best_trifecta_payout', 0)
+
+            n_records = len(records)
+            summary = {
+                'total_top_pick_wins': total_top_pick_wins,
+                'total_top_pick_races': total_top_pick_races,
+                'top_pick_win_rate_pct': round((total_top_pick_wins / total_top_pick_races * 100), 1) if total_top_pick_races > 0 else 0.0,
+                'total_exacta_hits': total_exacta_hits,
+                'exacta_hit_rate_pct': round((total_exacta_hits / total_exacta_races * 100), 1) if total_exacta_races > 0 else 0.0,
+                'total_trifecta_hits': total_trifecta_hits,
+                'trifecta_hit_rate_pct': round((total_trifecta_hits / total_trifecta_races * 100), 1) if total_trifecta_races > 0 else 0.0,
+                'average_daily_score': round(total_daily_score / n_records, 1) if n_records > 0 else 0.0,
+                'best_single_day_score': best_single_day_score,
+                'best_single_day_date': best_single_day_date,
+                'best_winner_odds_overall': best_winner_odds_overall,
+                'best_exacta_payout_overall': best_exacta_payout_overall,
+                'best_trifecta_payout_overall': best_trifecta_payout_overall,
+                'total_days_recapped': n_records
+            }
+            return {'records': records, 'summary': summary}
+
+        except Exception as e:
+            logger.error(f"Failed to get recap summary: {e}")
+            return {'records': [], 'summary': {}}

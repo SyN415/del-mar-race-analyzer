@@ -690,8 +690,11 @@ async function submitFullCard(publish) {
 
     const cardOverview = document.getElementById('fc_cardOverview')?.value || '';
 
+    const allBets = [];
     const racesPayload = races.map((race, idx) => {
         const rn = race.race_number || (idx + 1);
+        const raceBets = race.bets || [];
+        raceBets.forEach(b => allBets.push(Object.assign({race_number: rn}, b)));
         return {
             race_number:      rn,
             top_pick:         document.getElementById(`fc_top_${rn}`)?.value  || '',
@@ -699,16 +702,18 @@ async function submitFullCard(publish) {
             longshot:         document.getElementById(`fc_ls_${rn}`)?.value   || '',
             race_notes:       document.getElementById(`fc_notes_${rn}`)?.value || '',
             betting_strategy: document.getElementById(`fc_strat_${rn}`)?.value || '',
+            bets:             raceBets,
         };
     });
 
     const payload = {
-        race_date:     raceDate,
-        track_id:      trackId,
-        session_id:    sessionId,
-        races:         racesPayload,
-        card_overview: cardOverview,
-        is_published:  publish,
+        race_date:              raceDate,
+        track_id:               trackId,
+        session_id:             sessionId,
+        races:                  racesPayload,
+        card_overview:          cardOverview,
+        is_published:           publish,
+        betting_strategy_json:  allBets.length > 0 ? allBets : null,
     };
 
     try {
@@ -813,11 +818,34 @@ async function loadManageCurated() {
             const pubBadge = c.is_published
                 ? '<span class="badge bg-success">Yes</span>'
                 : '<span class="badge bg-secondary">Draft</span>';
+
+            let recapArea = '';
+            if (c.is_published) {
+                // only show for past dates relative to now
+                const cardDate = new Date(c.race_date + 'T00:00:00');
+                const today = new Date();
+                today.setHours(0,0,0,0);
+                if (cardDate < today) {
+                    if (c.has_recap) {
+                        recapArea = `<div id="recap-area-${c.id}" class="mt-1 small">
+                            <span class="text-success fw-bold">✅ Recap saved — Score: ${c.recap_daily_score} | Top Picks: ${c.recap_top_pick_wins}/${c.recap_top_pick_total}</span>
+                            <button class="btn btn-sm btn-outline-secondary ms-2" onclick="generateRecap('${c.id}', '${c.race_date}', '${c.track_id}', '${c.session_id}')">Re-run Recap</button>
+                        </div>`;
+                    } else {
+                        recapArea = `<div id="recap-area-${c.id}" class="mt-1">
+                            <button class="btn btn-sm btn-outline-success" onclick="generateRecap('${c.id}', '${c.race_date}', '${c.track_id}', '${c.session_id}')">Generate Recap</button>
+                        </div>`;
+                    }
+                }
+            }
+
             html += `<tr id="card-row-${c.id}">
                 <td class="small">${c.race_date || '—'}</td>
                 <td class="small">${c.track_name || c.track_id || '—'}</td>
                 <td>${pubBadge}</td>
-                <td class="small">${escHtml(topPick)}</td>
+                <td class="small">${escHtml(topPick)}
+                    ${recapArea}
+                </td>
                 <td class="text-end">
                     <a href="${c.card_url || '#'}" target="_blank" class="btn btn-sm btn-outline-primary me-1">View</a>
                     <button class="btn btn-sm btn-outline-danger" onclick="deleteManageCurated('${c.id}', this)">🗑️</button>
@@ -841,6 +869,38 @@ async function deleteManageCurated(cardId, btn) {
     } catch (err) {
         alert(`Error: ${err.message}`);
         btn.disabled = false;
+    }
+}
+
+async function generateRecap(cardId, raceDate, trackId, sessionId) {
+    const area = document.getElementById(`recap-area-${cardId}`);
+    if (!area) return;
+
+    area.innerHTML = '<span class="text-muted small">⏳ Generating recap...</span>';
+
+    try {
+        const resp = await fetch('/api/admin/generate-recap', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                session_id: sessionId,
+                race_date: raceDate,
+                track_id: trackId
+            })
+        });
+
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.detail || 'Recap failed');
+
+        area.innerHTML = `
+            <span class="text-success fw-bold">✅ Recap saved — Score: ${data.daily_score} | Top Picks: ${data.summary.top_pick_wins}/${data.summary.top_pick_total}</span>
+            <button class="btn btn-sm btn-outline-secondary ms-2" onclick="generateRecap('${cardId}', '${raceDate}', '${trackId}', '${sessionId}')">Re-run Recap</button>
+        `;
+    } catch (err) {
+        area.innerHTML = `
+            <span class="text-danger small">❌ ${err.message}</span>
+            <button class="btn btn-sm btn-outline-success ms-2" onclick="generateRecap('${cardId}', '${raceDate}', '${trackId}', '${sessionId}')">Try Again</button>
+        `;
     }
 }
 
@@ -998,6 +1058,7 @@ async function runFullPipeline() {
                     longshot:         race.longshot     || '',
                     race_notes:       (rwResp.ok && rwResult.race_notes)       ? rwResult.race_notes       : (race.race_notes       || ''),
                     betting_strategy: (rwResp.ok && rwResult.betting_strategy) ? rwResult.betting_strategy : (race.betting_strategy || ''),
+                    bets:             race.bets || [],
                 });
             } catch (rwErr) {
                 console.warn(`Rewrite failed for race ${race.race_number}:`, rwErr);
@@ -1009,6 +1070,7 @@ async function runFullPipeline() {
                     longshot:         race.longshot     || '',
                     race_notes:       race.race_notes       || '',
                     betting_strategy: race.betting_strategy || '',
+                    bets:             race.bets || [],
                 });
             }
             rwDone++;
@@ -1018,16 +1080,19 @@ async function runFullPipeline() {
         // ── STEP 6: Publish ───────────────────────────────────────────────────
         _t = Date.now();
         _pipelineStep('ps_publish', 'running', 'Step 6: Publishing Card…');
+        const pipeAllBets = [];
+        rewrittenRaces.forEach(r => (r.bets || []).forEach(b => pipeAllBets.push(Object.assign({race_number: r.race_number}, b))));
         const publishResp = await fetch('/api/admin/curated-card', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                session_id:    sessionId,
-                race_date:     raceDate,
-                track_id:      trackId,
-                card_overview: cardOverview,
-                races:         rewrittenRaces,
-                is_published:  true,
+                session_id:             sessionId,
+                race_date:              raceDate,
+                track_id:               trackId,
+                card_overview:          cardOverview,
+                races:                  rewrittenRaces,
+                is_published:           true,
+                betting_strategy_json:  pipeAllBets.length > 0 ? pipeAllBets : null,
             }),
         });
         const publishResult = await publishResp.json();
