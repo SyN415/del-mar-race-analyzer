@@ -482,6 +482,7 @@ class CuratedCardRequest(BaseModel):
     longshot: Optional[Dict] = None
     admin_notes: str = ""
     betting_strategy: str = ""
+    betting_strategy_json: Optional[List] = None
     is_published: bool = False
     races: Optional[List] = None
     card_overview: str = ""
@@ -501,6 +502,11 @@ class AdminRecomputeRequest(BaseModel):
     track_id: str = "DMR"
 
 class AutoCurateRequest(BaseModel):
+    session_id: str
+    race_date: str
+    track_id: str = "DMR"
+
+class GenerateRecapRequest(BaseModel):
     session_id: str
     race_date: str
     track_id: str = "DMR"
@@ -565,6 +571,19 @@ async def landing_page(request: Request):
             upcoming_cards.sort(key=lambda c: c.get("race_date", ""))
         except Exception as e:
             logger.warning(f"Failed to load published curated cards for landing page: {e}")
+    # Fetch 30-day track record summary for the stats widget
+    track_record_summary = None
+    if session_manager:
+        try:
+            track_record_summary = await asyncio.wait_for(
+                session_manager.get_recap_summary_30d(), timeout=2.0
+            )
+            if not track_record_summary or not track_record_summary.get("records"):
+                track_record_summary = None
+        except Exception as e:
+            logger.warning(f"Failed to load track record summary for landing page: {e}")
+            track_record_summary = None
+
     return templates.TemplateResponse(
         request,
         "landing.html",
@@ -574,6 +593,7 @@ async def landing_page(request: Request):
             live_cards=live_cards,
             upcoming_cards=upcoming_cards,
             past_cards=past_cards,
+            track_record_summary=track_record_summary,
         ),
     )
 
@@ -1958,6 +1978,13 @@ For each race return:
 Also return:
 - card_overview: 3-4 sentence overview of the overall card themes, standout races, and key angles for the day
 
+Also return for each race a structured `bets` array that decomposes the free-text betting_strategy into individually trackable wagers. Each element must use this exact schema:
+  {{ "type": "WIN"|"EXACTA"|"TRIFECTA"|"EXACTA_HEDGE", "keys": [post_numbers...], "with": [post_numbers...], "amount_suggestion": "$2" }}
+  - WIN: keys=[single post], with=[]
+  - EXACTA: keys=[key horse post], with=[other posts]
+  - TRIFECTA: keys=[key horse post], with=[other posts]
+  - EXACTA_HEDGE: keys=[upset post, favorite post], with=[]
+
 Return ONLY valid JSON:
 {{
   "card_overview": "Overall card analysis...",
@@ -1968,7 +1995,12 @@ Return ONLY valid JSON:
       "value_play": "Exact Horse Name",
       "longshot": "Exact Horse Name",
       "race_notes": "Editorial 2-3 sentence analysis...",
-      "betting_strategy": "Win on #X, exacta key X/Y,Z, trifecta X with Y,Z..."
+      "betting_strategy": "Win on #X, exacta key X/Y,Z, trifecta X with Y,Z...",
+      "bets": [
+        {{ "type": "WIN", "keys": [5], "with": [], "amount_suggestion": "$2" }},
+        {{ "type": "EXACTA", "keys": [5], "with": [3, 8], "amount_suggestion": "$1" }},
+        {{ "type": "TRIFECTA", "keys": [5], "with": [3, 8, 2], "amount_suggestion": "$1" }}
+      ]
     }}
   ]
 }}"""
@@ -2198,6 +2230,7 @@ async def save_curated_card(request: CuratedCardRequest, http_request: Request =
             longshot=request.longshot,
             admin_notes=request.admin_notes,
             betting_strategy=request.betting_strategy,
+            betting_strategy_json=request.betting_strategy_json,
             is_published=request.is_published,
             races=request.races,
             card_overview=request.card_overview,
