@@ -45,6 +45,7 @@ try:
         build_equibase_card_overview_url,
         build_equibase_race_urls,
         extract_json_object,
+        fetch_equibase_entry_details_by_race,
         fetch_equibase_expected_horses_by_race,
         fetch_equibase_expected_race_numbers,
         find_missing_horses_by_race,
@@ -63,6 +64,7 @@ except ImportError as e:
     build_equibase_card_overview_url = None
     build_equibase_race_urls = None
     extract_json_object = None
+    fetch_equibase_entry_details_by_race = None
     fetch_equibase_expected_horses_by_race = None
     fetch_equibase_expected_race_numbers = None
     find_missing_horses_by_race = None
@@ -861,6 +863,11 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
             if is_web_search_mode
             else {}
         )
+        equibase_entry_details = (
+            fetch_equibase_entry_details_by_race(request.track_id, request.race_date, country=track_country)
+            if is_web_search_mode and fetch_equibase_entry_details_by_race
+            else {}
+        )
         expected_race_numbers = (
             fetch_equibase_expected_race_numbers(request.track_id, request.race_date, country=track_country)
             if is_web_search_mode
@@ -891,6 +898,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                 expected_horses_by_race=expected_horses_by_race,
                 official_card_url=official_card_url,
                 per_race_urls=per_race_urls,
+                equibase_entry_details=equibase_entry_details,
             ),
             context=_build_admin_structuring_context(
                 request,
@@ -949,6 +957,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                     expected_horses_by_race=expected_horses_by_race,
                     official_card_url=official_card_url,
                     per_race_urls=per_race_urls,
+                    equibase_entry_details=equibase_entry_details,
                     compact_response=True,
                 ),
                 context=_build_admin_structuring_context(
@@ -1020,6 +1029,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                     missing_horses_by_race=missing_horses_by_race,
                     official_card_url=official_card_url,
                     per_race_urls=per_race_urls,
+                    equibase_entry_details=equibase_entry_details,
                 ),
                 context=_build_admin_structuring_context(
                     request,
@@ -1131,6 +1141,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
             track_id=request.track_id,
             llm_model=request.llm_model,
             expected_horses_by_race=expected_horses_by_race,
+            equibase_entry_details=equibase_entry_details,
             source_urls=merged_urls,
             admin_notes=request.admin_notes,
             workflow="admin_openrouter_web_search" if is_web_search_mode else "admin_openrouter_manual",
@@ -2766,6 +2777,7 @@ def _build_admin_structuring_prompt(
     missing_horses_by_race: Optional[Dict[int, List[str]]] = None,
     official_card_url: Optional[str] = None,
     per_race_urls: Optional[Dict[int, Dict[str, str]]] = None,
+    equibase_entry_details: Optional[Dict[int, list]] = None,
     compact_response: bool = False,
 ) -> str:
     track_country = get_track_country(request.track_id)
@@ -2826,7 +2838,7 @@ def _build_admin_structuring_prompt(
         discovery_requirements = "Include every race you can identify from the supplied material."
 
     official_url_line = f"Official card overview URL: {official_card_url}" if official_card_url else ""
-    official_field_summary = _format_expected_field_summary(expected_horses_by_race)
+    official_field_summary = _format_expected_field_summary(expected_horses_by_race, equibase_entry_details)
 
     # Build per-race URL reference block for the prompt
     smartpick_url_block = ""
@@ -3027,18 +3039,48 @@ def _build_admin_structuring_context(
     return context
 
 
-def _format_expected_field_summary(expected_horses_by_race: Dict[int, List[str]]) -> str:
+def _format_expected_field_summary(
+    expected_horses_by_race: Dict[int, List[str]],
+    equibase_entry_details: Optional[Dict[int, list]] = None,
+) -> str:
     if not expected_horses_by_race:
         return ""
 
+    entry_details = equibase_entry_details or {}
     race_summaries = []
     for race_number in sorted(expected_horses_by_race):
         horse_names = expected_horses_by_race[race_number]
-        if horse_names:
-            race_summaries.append(f"Race {race_number} ({len(horse_names)}): {', '.join(horse_names)}")
+        if not horse_names:
+            continue
+
+        # If we have detailed entry data for this race, include PP/jockey/trainer
+        race_entries = entry_details.get(race_number, [])
+        if race_entries:
+            entry_strs = []
+            for entry in race_entries:
+                if entry.get("scratched"):
+                    continue
+                parts = [entry.get("name", "?")]
+                if entry.get("post_position"):
+                    parts[0] = f"PP{entry['post_position']}-{parts[0]}"
+                if entry.get("jockey"):
+                    parts.append(f"J:{entry['jockey']}")
+                if entry.get("trainer"):
+                    parts.append(f"T:{entry['trainer']}")
+                entry_strs.append(" ".join(parts))
+            if entry_strs:
+                race_summaries.append(f"Race {race_number} ({len(entry_strs)} runners): {'; '.join(entry_strs)}")
+                continue
+
+        # Fallback: just horse names
+        race_summaries.append(f"Race {race_number} ({len(horse_names)}): {', '.join(horse_names)}")
+
     if not race_summaries:
         return ""
-    return "Official horse fields by race: " + " | ".join(race_summaries)
+    return (
+        "Official horse fields by race (use these EXACT post positions, jockeys, and trainers): "
+        + " | ".join(race_summaries)
+    )
 
 
 def _filter_missing_horses_by_race(

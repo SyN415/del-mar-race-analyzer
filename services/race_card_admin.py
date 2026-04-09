@@ -448,6 +448,7 @@ def normalize_admin_results(
     track_id: str,
     llm_model: str,
     expected_horses_by_race: Optional[Dict[int, List[str]]] = None,
+    equibase_entry_details: Optional[Dict[int, List[Dict[str, Any]]]] = None,
     source_urls: Optional[List[str]] = None,
     admin_notes: str = "",
     workflow: str = "admin_openrouter",
@@ -459,8 +460,10 @@ def normalize_admin_results(
 
     for index, race in enumerate(raw_races, start=1):
         race_number = _to_int(race.get("race_number") or race.get("number"), index)
+        race_entries = (equibase_entry_details or {}).get(race_number)
         predictions = _normalize_predictions(
-            race.get("predictions") or race.get("entries") or race.get("horses") or []
+            race.get("predictions") or race.get("entries") or race.get("horses") or [],
+            equibase_entries=race_entries,
         )
         if not predictions:
             continue
@@ -544,12 +547,35 @@ def summarize_race_analyses(race_analyses: List[Dict[str, Any]]) -> Dict[str, An
     }
 
 
-def _normalize_predictions(raw_predictions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def _normalize_predictions(
+    raw_predictions: List[Dict[str, Any]],
+    equibase_entries: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    # Build a lookup of Equibase-sourced entry details by horse name key
+    _equibase_lookup: Dict[str, Dict[str, Any]] = {}
+    _equibase_scratches: set = set()
+    if equibase_entries:
+        for entry in equibase_entries:
+            key = _horse_name_key(entry.get("name"))
+            if not key:
+                continue
+            if entry.get("scratched"):
+                _equibase_scratches.add(key)
+            else:
+                _equibase_lookup[key] = entry
+
     normalized: List[Dict[str, Any]] = []
 
     for rank, prediction in enumerate(raw_predictions, start=1):
         horse_name = prediction.get("horse_name") or prediction.get("name") or prediction.get("horse")
         if not horse_name:
+            continue
+
+        norm_name = _normalize_horse_name(horse_name)
+        name_key = _horse_name_key(norm_name)
+
+        # Skip scratched horses
+        if name_key in _equibase_scratches:
             continue
 
         composite_rating = _to_float(
@@ -558,12 +584,30 @@ def _normalize_predictions(raw_predictions: List[Dict[str, Any]]) -> List[Dict[s
         )
         factors = _normalize_factors(prediction.get("factors"))
 
+        # Get LLM values first
+        pp = prediction.get("post_position") or prediction.get("post") or prediction.get("program_number")
+        jockey = prediction.get("jockey") or ""
+        trainer = prediction.get("trainer") or ""
+        ml_odds = prediction.get("morning_line_odds") or prediction.get("morning_line") or ""
+
+        # Override with authoritative Equibase data when available
+        equibase_entry = _equibase_lookup.get(name_key)
+        if equibase_entry:
+            if equibase_entry.get("post_position"):
+                pp = equibase_entry["post_position"]
+            if equibase_entry.get("jockey"):
+                jockey = equibase_entry["jockey"]
+            if equibase_entry.get("trainer"):
+                trainer = equibase_entry["trainer"]
+            if equibase_entry.get("morning_line") and not ml_odds:
+                ml_odds = equibase_entry["morning_line"]
+
         normalized.append({
-            "horse_name": _normalize_horse_name(horse_name),
-            "post_position": prediction.get("post_position") or prediction.get("post") or prediction.get("program_number"),
-            "jockey": prediction.get("jockey") or "",
-            "trainer": prediction.get("trainer") or "",
-            "morning_line_odds": prediction.get("morning_line_odds") or prediction.get("morning_line") or "",
+            "horse_name": norm_name,
+            "post_position": pp,
+            "jockey": jockey,
+            "trainer": trainer,
+            "morning_line_odds": ml_odds,
             "composite_rating": round(composite_rating, 1),
             "win_probability": 0.0,
             "factors": factors,
@@ -732,10 +776,149 @@ def _extract_equibase_refno(value: Any) -> str:
     return match.group(1) if match else ""
 
 
+def _parse_equibase_entry_details(html: str) -> Dict[int, List[Dict[str, Any]]]:
+    """Parse the Equibase overview HTML to extract full entry details per race.
+
+    Uses a sequential regex scan that is robust against DOM structure changes.
+    Extracts post position, jockey, trainer, M/L odds, and scratch status
+    directly from the structured text blocks in the Equibase overview page.
+
+    Returns a dict mapping race number → list of entry dicts with keys:
+    ``name``, ``post_position``, ``program_number``, ``jockey``, ``trainer``,
+    ``morning_line``, ``scratched``.
+    """
+    if not html:
+        return {}
+
+    details_by_race: Dict[int, List[Dict[str, Any]]] = {}
+
+    # Step 1: Find all horse-name anchors (Results.cfm?type=Horse) and their
+    # positions in the HTML.  Also find all race-number markers and
+    # structured data labels so we can associate each horse with its race
+    # and its jockey/trainer/PP/ML by proximity.
+
+    # Race section markers — tab-style links or headings containing "Race N"
+    race_markers: List[tuple] = []
+    for m in re.finditer(r'>\s*Race\s+(\d{1,2})\s*<', html):
+        race_markers.append((m.start(), int(m.group(1))))
+
+    # Horse name anchors (e.g. <a href="...Results.cfm?type=Horse...">May Gray (CA)</a>)
+    horse_pattern = re.compile(
+        r'<a[^>]+Results\.cfm[^>]*type=Horse[^>]*>([^<]+)</a>', re.IGNORECASE
+    )
+    horse_anchors = [(m.start(), m.group(1).strip()) for m in horse_pattern.finditer(html)]
+
+    # Scratched markers — "Scratched" text near a horse entry
+    scratch_positions = {m.start() for m in re.finditer(r'-{3,}\s*Scratched\s*-{3,}', html, re.IGNORECASE)}
+
+    # Structured data patterns
+    pp_pattern = re.compile(r'Post Position:\s*(\d+)')
+    jockey_pattern = re.compile(r'Jockey:\s*\n?\s*(?:<[^>]*>\s*)*([^<\n]+)', re.IGNORECASE)
+    trainer_pattern = re.compile(r'Trainer:\s*\n?\s*(?:<[^>]*>\s*)*([^<\n]+)', re.IGNORECASE)
+    ml_pattern = re.compile(r'M/L Odds:\s*(\d+/\d+)')
+
+    if not horse_anchors:
+        return {}
+
+    # Step 2: For each horse anchor, determine the race number and extract
+    # the associated structured data from the nearby HTML region.
+    for h_idx, (h_pos, raw_name) in enumerate(horse_anchors):
+        horse_name = _normalize_horse_name(raw_name)
+        if not horse_name:
+            continue
+
+        # Determine race number: find the latest race marker before this horse
+        current_race = 0
+        for r_pos, r_num in race_markers:
+            if r_pos < h_pos:
+                current_race = r_num
+            else:
+                break
+        if current_race <= 0:
+            continue
+
+        details_by_race.setdefault(current_race, [])
+
+        # Define search region: from this horse to the next horse (or end)
+        region_end = horse_anchors[h_idx + 1][0] if h_idx + 1 < len(horse_anchors) else len(html)
+        region = html[h_pos:region_end]
+
+        # Check if scratched
+        is_scratched = any(sp > h_pos and sp < region_end for sp in scratch_positions)
+
+        if is_scratched:
+            details_by_race[current_race].append({
+                "name": horse_name,
+                "post_position": 0,
+                "program_number": 0,
+                "jockey": "",
+                "trainer": "",
+                "morning_line": "",
+                "scratched": True,
+            })
+            continue
+
+        # Extract structured fields from the region
+        pp_match = pp_pattern.search(region)
+        post_position = int(pp_match.group(1)) if pp_match else 0
+
+        jockey_match = jockey_pattern.search(region)
+        jockey = jockey_match.group(1).strip() if jockey_match else ""
+        # Clean up multi-space jockey names (e.g. "D   Sheehy" → "D Sheehy")
+        jockey = re.sub(r'\s{2,}', ' ', jockey)
+
+        trainer_match = trainer_pattern.search(region)
+        trainer = trainer_match.group(1).strip() if trainer_match else ""
+        trainer = re.sub(r'\s{2,}', ' ', trainer)
+
+        ml_match = ml_pattern.search(region)
+        morning_line = ml_match.group(1) if ml_match else ""
+
+        details_by_race[current_race].append({
+            "name": horse_name,
+            "post_position": post_position,
+            "program_number": post_position,
+            "jockey": jockey,
+            "trainer": trainer,
+            "morning_line": morning_line,
+            "scratched": False,
+        })
+
+    return details_by_race
+
+
+def fetch_equibase_entry_details_by_race(
+    track_id: str,
+    race_date: str,
+    timeout_seconds: float = 12.0,
+    country: str = "USA",
+) -> Dict[int, List[Dict[str, Any]]]:
+    """Fetch the Equibase overview and parse full entry details per race."""
+    html = _fetch_equibase_card_overview_html(track_id, race_date, timeout_seconds=timeout_seconds, country=country)
+    if not html:
+        return {}
+    return _parse_equibase_entry_details(html)
+
+
 def _parse_equibase_expected_horses_by_race(html: str) -> Dict[int, List[str]]:
     if not html:
         return {}
 
+    # Try the detailed parser first — it handles scratches correctly
+    entry_details = _parse_equibase_entry_details(html)
+    if entry_details:
+        expected_horses_by_race: Dict[int, List[str]] = {}
+        for race_number, entries in entry_details.items():
+            horses = [
+                entry["name"] for entry in entries
+                if not entry.get("scratched") and entry.get("name")
+            ]
+            if horses:
+                expected_horses_by_race[race_number] = horses
+        if expected_horses_by_race:
+            return expected_horses_by_race
+
+    # Fallback: use the original RaceEntryScraper approach
     valid_runner_refnos = _extract_equibase_runner_refnos(html)
 
     try:
@@ -745,7 +928,7 @@ def _parse_equibase_expected_horses_by_race(html: str) -> Dict[int, List[str]]:
     except Exception:
         parsed_races = []
 
-    expected_horses_by_race: Dict[int, List[str]] = {}
+    expected_horses_by_race = {}
     for race in parsed_races or []:
         race_number = _to_int(race.get("race_number"), 0)
         if race_number <= 0:
