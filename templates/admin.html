@@ -821,11 +821,11 @@ async function loadManageCurated() {
 
             let recapArea = '';
             if (c.is_published) {
-                // only show for past dates relative to now
+                // show for today and past dates (admin can recap same-day cards once results are in)
                 const cardDate = new Date(c.race_date + 'T00:00:00');
                 const today = new Date();
                 today.setHours(0,0,0,0);
-                if (cardDate < today) {
+                if (cardDate <= today) {
                     if (c.has_recap) {
                         recapArea = `<div id="recap-area-${c.id}" class="mt-1 small">
                             <span class="text-success fw-bold">✅ Recap saved — Score: ${c.recap_daily_score} | Top Picks: ${c.recap_top_pick_wins}/${c.recap_top_pick_total}</span>
