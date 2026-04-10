@@ -691,6 +691,8 @@ async def admin_page(request: Request):
             available_tracks=[{"id": track_id, "name": track_name} for track_id, track_name in SUPPORTED_TRACKS.items()],
             default_date=datetime.now().strftime("%Y-%m-%d"),
             openrouter_configured=bool(app_state.ensure_openrouter_client() and app_state.openrouter_client.api_key),
+            model_options=_get_configured_model_options(),
+            default_model=_get_default_model(DEFAULT_ADMIN_LLM_MODEL),
         ),
     )
 
