@@ -45,6 +45,7 @@ try:
         build_equibase_card_overview_url,
         build_equibase_race_urls,
         extract_json_object,
+        fetch_equibase_all_data,
         fetch_equibase_entry_details_by_race,
         fetch_equibase_expected_horses_by_race,
         fetch_equibase_expected_race_numbers,
@@ -64,6 +65,7 @@ except ImportError as e:
     build_equibase_card_overview_url = None
     build_equibase_race_urls = None
     extract_json_object = None
+    fetch_equibase_all_data = None
     fetch_equibase_entry_details_by_race = None
     fetch_equibase_expected_horses_by_race = None
     fetch_equibase_expected_race_numbers = None
@@ -858,23 +860,29 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
             if is_web_search_mode
             else None
         )
-        expected_horses_by_race = (
-            fetch_equibase_expected_horses_by_race(request.track_id, request.race_date, country=track_country)
-            if is_web_search_mode
-            else {}
-        )
-        equibase_entry_details = (
-            fetch_equibase_entry_details_by_race(request.track_id, request.race_date, country=track_country)
-            if is_web_search_mode and fetch_equibase_entry_details_by_race
-            else {}
-        )
-        expected_race_numbers = (
-            fetch_equibase_expected_race_numbers(request.track_id, request.race_date, country=track_country)
-            if is_web_search_mode
-            else []
-        )
-        if expected_horses_by_race and not expected_race_numbers:
+        # Fetch expected horses AND entry details in a single HTTP call
+        if is_web_search_mode and fetch_equibase_all_data:
+            expected_horses_by_race, equibase_entry_details = fetch_equibase_all_data(
+                request.track_id, request.race_date, country=track_country
+            )
+            logger.info(
+                "📊 Equibase data: expected_horses=%d races | entry_details=%d races | details_entries=%d",
+                len(expected_horses_by_race),
+                len(equibase_entry_details),
+                sum(len(v) for v in equibase_entry_details.values()),
+            )
+        else:
+            expected_horses_by_race = {}
+            equibase_entry_details = {}
+        # Derive race numbers from the data we already fetched — avoids another HTTP call
+        if expected_horses_by_race:
             expected_race_numbers = sorted(expected_horses_by_race)
+        elif is_web_search_mode:
+            expected_race_numbers = fetch_equibase_expected_race_numbers(
+                request.track_id, request.race_date, country=track_country
+            )
+        else:
+            expected_race_numbers = []
         per_race_urls = (
             build_equibase_race_urls(request.track_id, request.race_date, expected_race_numbers, country=track_country)
             if is_web_search_mode and expected_race_numbers and build_equibase_race_urls
@@ -1093,6 +1101,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                     request,
                     incomplete_field_races=incomplete_field_races,
                     per_race_urls=incomplete_per_race_urls,
+                    equibase_entry_details=equibase_entry_details,
                 ),
                 context=_build_admin_structuring_context(
                     request,
@@ -3109,6 +3118,7 @@ def _build_jockey_trainer_retry_prompt(
     *,
     incomplete_field_races: Dict[int, List[str]],
     per_race_urls: Optional[Dict[int, Dict[str, str]]] = None,
+    equibase_entry_details: Optional[Dict[int, list]] = None,
 ) -> str:
     """Build a targeted prompt to fill in missing jockey/trainer data for specific races."""
     per_race_urls = per_race_urls or {}
@@ -3143,6 +3153,32 @@ def _build_jockey_trainer_retry_prompt(
     else:
         search_instruction = "Use web search before answering. Search the Equibase SmartPick and entry pages for each race listed below."
 
+    # Build Equibase-sourced hints for the incomplete races
+    equibase_hints = ""
+    entry_details = equibase_entry_details or {}
+    if entry_details:
+        hint_lines = []
+        for rn in sorted(incomplete_field_races):
+            entries = entry_details.get(rn, [])
+            if entries:
+                entry_strs = []
+                for e in entries:
+                    if e.get("scratched"):
+                        continue
+                    parts = [e.get("name", "?")]
+                    if e.get("jockey"):
+                        parts.append(f"J:{e['jockey']}")
+                    if e.get("trainer"):
+                        parts.append(f"T:{e['trainer']}")
+                    entry_strs.append(" ".join(parts))
+                if entry_strs:
+                    hint_lines.append(f"  Race {rn}: {'; '.join(entry_strs)}")
+        if hint_lines:
+            equibase_hints = (
+                "\nIMPORTANT — We already parsed these jockey/trainer values from Equibase. "
+                "Use these as authoritative data:\n" + "\n".join(hint_lines)
+            )
+
     return f"""
 You are filling in missing jockey and trainer data for a horse racing card.
 
@@ -3152,6 +3188,7 @@ Race date: {request.race_date}
 
 {search_instruction}
 {url_block}
+{equibase_hints}
 
 The following races have horses with missing jockey and/or trainer names:
 {chr(10).join(gap_lines)}

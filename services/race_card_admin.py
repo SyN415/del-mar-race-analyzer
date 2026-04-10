@@ -4,11 +4,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from urllib import request as urllib_request
+
+logger = logging.getLogger(__name__)
 
 
 class AdminRaceCardJSONError(ValueError):
@@ -301,6 +304,25 @@ def fetch_equibase_expected_horses_by_race(
     return _parse_equibase_expected_horses_by_race(html)
 
 
+def fetch_equibase_all_data(
+    track_id: str,
+    race_date: str,
+    timeout_seconds: float = 12.0,
+    country: str = "USA",
+) -> tuple:
+    """Fetch the Equibase overview page ONCE and return both expected_horses and entry_details.
+
+    Returns (expected_horses_by_race, entry_details_by_race) to avoid duplicate HTTP calls.
+    """
+    html = _fetch_equibase_card_overview_html(track_id, race_date, timeout_seconds=timeout_seconds, country=country)
+    if not html:
+        return {}, {}
+
+    entry_details = _parse_equibase_entry_details(html)
+    expected_horses = _parse_equibase_expected_horses_by_race(html)
+    return expected_horses, entry_details
+
+
 def extract_structured_race_numbers(structured_card: Dict[str, Any]) -> List[int]:
     """Extract normalized race numbers from a structured card payload."""
     raw_races = structured_card.get("race_analyses") or structured_card.get("races") or []
@@ -458,15 +480,39 @@ def normalize_admin_results(
     raw_races = structured_card.get("race_analyses") or structured_card.get("races") or []
     race_analyses: List[Dict[str, Any]] = []
 
+    has_entry_details = bool(equibase_entry_details)
+    logger.info(
+        "🔧 normalize_admin_results: %d raw races | equibase_entry_details=%s",
+        len(raw_races), f"{len(equibase_entry_details)} races" if has_entry_details else "NONE",
+    )
+
     for index, race in enumerate(raw_races, start=1):
         race_number = _to_int(race.get("race_number") or race.get("number"), index)
         race_entries = (equibase_entry_details or {}).get(race_number)
-        predictions = _normalize_predictions(
-            race.get("predictions") or race.get("entries") or race.get("horses") or [],
-            equibase_entries=race_entries,
-        )
+        raw_preds = race.get("predictions") or race.get("entries") or race.get("horses") or []
+        predictions = _normalize_predictions(raw_preds, equibase_entries=race_entries)
         if not predictions:
             continue
+
+        # Log Equibase override effects for this race
+        if race_entries:
+            scratched = [e["name"] for e in race_entries if e.get("scratched")]
+            if scratched:
+                logger.info(
+                    "   Race %d: filtered %d scratched horses: %s",
+                    race_number, len(scratched), scratched,
+                )
+            override_count = sum(
+                1 for p in predictions
+                if any(
+                    e.get("name") and _horse_name_key(e["name"]) == _horse_name_key(p["horse_name"])
+                    for e in race_entries if not e.get("scratched")
+                )
+            )
+            logger.info(
+                "   Race %d: %d predictions | %d with Equibase overrides",
+                race_number, len(predictions), override_count,
+            )
 
         expected_horses = (expected_horses_by_race or {}).get(race_number, [])
         missing_horses = _find_missing_expected_horses(predictions, expected_horses)
@@ -591,6 +637,8 @@ def _normalize_predictions(
         ml_odds = prediction.get("morning_line_odds") or prediction.get("morning_line") or ""
 
         # Override with authoritative Equibase data when available
+        # Equibase post positions are ALWAYS preferred over LLM guesses
+        # Jockey/trainer from Equibase override empty, Unknown, or TBA values
         equibase_entry = _equibase_lookup.get(name_key)
         if equibase_entry:
             if equibase_entry.get("post_position"):
@@ -599,8 +647,14 @@ def _normalize_predictions(
                 jockey = equibase_entry["jockey"]
             if equibase_entry.get("trainer"):
                 trainer = equibase_entry["trainer"]
-            if equibase_entry.get("morning_line") and not ml_odds:
+            if equibase_entry.get("morning_line"):
                 ml_odds = equibase_entry["morning_line"]
+
+        # Clean up sentinel values
+        if isinstance(jockey, str) and jockey.lower() in ("unknown", "tba", "n/a", ""):
+            jockey = ""
+        if isinstance(trainer, str) and trainer.lower() in ("unknown", "tba", "n/a", ""):
+            trainer = ""
 
         normalized.append({
             "horse_name": norm_name,
@@ -817,7 +871,13 @@ def _parse_equibase_entry_details(html: str) -> Dict[int, List[Dict[str, Any]]]:
     trainer_pattern = re.compile(r'Trainer:\s*\n?\s*(?:<[^>]*>\s*)*([^<\n]+)', re.IGNORECASE)
     ml_pattern = re.compile(r'M/L Odds:\s*(\d+/\d+)')
 
+    logger.info(
+        "🔍 Equibase entry parser: html_len=%d | race_markers=%d | horse_anchors=%d | scratch_positions=%d",
+        len(html), len(race_markers), len(horse_anchors), len(scratch_positions),
+    )
+
     if not horse_anchors:
+        logger.warning("⚠️ Equibase entry parser: no horse anchors found in HTML (len=%d)", len(html))
         return {}
 
     # Step 2: For each horse anchor, determine the race number and extract
@@ -883,6 +943,25 @@ def _parse_equibase_entry_details(html: str) -> Dict[int, List[Dict[str, Any]]]:
             "morning_line": morning_line,
             "scratched": False,
         })
+
+    # Log summary
+    total_entries = sum(len(entries) for entries in details_by_race.values())
+    scratched_count = sum(
+        1 for entries in details_by_race.values() for e in entries if e.get("scratched")
+    )
+    logger.info(
+        "✅ Equibase entry parser: %d races | %d entries | %d scratched",
+        len(details_by_race), total_entries, scratched_count,
+    )
+    for rn in sorted(details_by_race):
+        entries = details_by_race[rn]
+        active = [e for e in entries if not e.get("scratched")]
+        scr = [e for e in entries if e.get("scratched")]
+        logger.info(
+            "   Race %d: %d active, %d scratched | PPs: %s",
+            rn, len(active), len(scr),
+            [e.get("post_position") for e in active],
+        )
 
     return details_by_race
 

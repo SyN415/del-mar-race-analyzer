@@ -32,6 +32,15 @@ def _install_app_import_stubs():
         def post(self, *args, **kwargs):
             return lambda func: func
 
+        def delete(self, *args, **kwargs):
+            return lambda func: func
+
+        def patch(self, *args, **kwargs):
+            return lambda func: func
+
+        def put(self, *args, **kwargs):
+            return lambda func: func
+
         def on_event(self, *args, **kwargs):
             return lambda func: func
 
