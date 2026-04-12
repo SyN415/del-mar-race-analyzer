@@ -42,6 +42,7 @@ try:
     from services.ai_analysis_enhancer import AIAnalysisEnhancer
     from services.race_card_admin import (
         AdminRaceCardJSONError,
+        _EMPTY_FIELD_VALUES,
         build_equibase_card_overview_url,
         build_equibase_race_urls,
         extract_json_object,
@@ -62,6 +63,7 @@ except ImportError as e:
     OpenRouterClient = None
     AIAnalysisEnhancer = None
     AdminRaceCardJSONError = ValueError
+    _EMPTY_FIELD_VALUES: set = set()
     build_equibase_card_overview_url = None
     build_equibase_race_urls = None
     extract_json_object = None
@@ -1383,7 +1385,7 @@ Return ONLY a valid JSON object with this exact structure:
 
     try:
         response = await openrouter_client.call_model(
-            model="x-ai/grok-4.20-beta",
+            model=_get_default_model(DEFAULT_ADMIN_LLM_MODEL),
             task_type="analysis",
             prompt=prompt,
             context={
@@ -2035,7 +2037,7 @@ Return ONLY valid JSON:
     # ── 3. Call Grok (no web plugins — data is already in hand) ──────────────
     try:
         response = await openrouter_client.call_model(
-            model="x-ai/grok-4.20-beta",
+            model=_get_default_model(DEFAULT_ADMIN_LLM_MODEL),
             task_type="analysis",
             prompt=prompt,
             context={"race_date": request.race_date, "track_id": request.track_id},
@@ -2188,7 +2190,7 @@ Return ONLY valid JSON:
 
     try:
         response = await openrouter_client.call_model(
-            model="x-ai/grok-4.20-beta",
+            model=_get_default_model(DEFAULT_ADMIN_LLM_MODEL),
             task_type="analysis",
             prompt=prompt,
             context={
@@ -2409,7 +2411,7 @@ If results for a race are not available, set data_available=false and leave othe
 
     try:
         response = await openrouter_client.call_model(
-            model="x-ai/grok-4.20-beta",
+            model=_get_default_model(DEFAULT_ADMIN_LLM_MODEL),
             task_type="analysis",
             prompt=prompt,
             context={"race_date": request.race_date, "track_id": request.track_id},
@@ -2613,18 +2615,45 @@ async def curated_card_page(request: Request, race_date: str, track_id: str):
 
     # Hydrate the curated card with horse predictions from the original session analysis
     session_id = card.get("session_id")
+    races_json = card.get("races_json") or []
     if session_id and session_manager:
         session_results = await session_manager.get_session_results(session_id)
         if session_results and "error" not in session_results:
             race_analyses = session_results.get("race_analyses", [])
             predictions_by_race = {r.get("race_number"): r.get("predictions", []) for r in race_analyses}
 
-            races_json = card.get("races_json") or []
             for race_obj in races_json:
                 race_num = race_obj.get("race_number")
                 if race_num in predictions_by_race:
                     # Inject predictions so the template can render the "ENTRIES & ODDS" table
                     race_obj["predictions"] = predictions_by_race[race_num]
+
+    # Enrich jockey/trainer from deep dive cache — fills gaps left by incomplete LLM build output
+    _JT_SENTINELS = _EMPTY_FIELD_VALUES  # re-use the shared sentinel set from race_card_admin
+    if session_manager and races_json:
+        for race_obj in races_json:
+            race_num = race_obj.get("race_number")
+            if not race_num:
+                continue
+            cached_dive = await session_manager.get_race_deep_dive(race_date, track_id, race_num)
+            if not cached_dive:
+                continue
+            dd_horses = cached_dive.get("deep_dive", {}).get("horses", [])
+            dd_by_name = {(h.get("name") or "").strip().lower(): h for h in dd_horses}
+            for pred in race_obj.get("predictions", []):
+                pname = (pred.get("horse_name") or pred.get("name") or "").strip().lower()
+                dd_horse = dd_by_name.get(pname)
+                if not dd_horse:
+                    continue
+                dd_jockey = (dd_horse.get("jockey") or "").strip()
+                dd_trainer = (dd_horse.get("trainer") or "").strip()
+                cur_jockey = (pred.get("jockey") or "").strip()
+                cur_trainer = (pred.get("trainer") or "").strip()
+                # Only override if current value is a known sentinel/placeholder
+                if dd_jockey and cur_jockey.lower() in _JT_SENTINELS:
+                    pred["jockey"] = dd_jockey
+                if dd_trainer and cur_trainer.lower() in _JT_SENTINELS:
+                    pred["trainer"] = dd_trainer
 
     # Determine card time status for badge display
     tz_offset = int(os.environ.get("RACE_TZ_OFFSET_HOURS", "-7"))

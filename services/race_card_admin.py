@@ -394,7 +394,11 @@ def find_missing_horses_by_race(
     return missing_horses_by_race
 
 
-_EMPTY_FIELD_VALUES = {"", "n/a", "na", "unknown", "tbd", "tba", "none", "-"}
+_EMPTY_FIELD_VALUES = {
+    "", "n/a", "na", "unknown", "tbd", "tba", "none", "-",
+    "not specified", "not available", "unspecified", "unavailable",
+    "to be announced", "to be determined",
+}
 
 
 def _is_empty_field(value: Any) -> bool:
@@ -650,10 +654,14 @@ def _normalize_predictions(
             if equibase_entry.get("morning_line"):
                 ml_odds = equibase_entry["morning_line"]
 
-        # Clean up sentinel values
-        if isinstance(jockey, str) and jockey.lower() in ("unknown", "tba", "n/a", ""):
+        # Clean up sentinel/placeholder values (reuse the shared set + catch LLM "X connections" patterns)
+        if isinstance(jockey, str) and (
+            _is_empty_field(jockey) or jockey.lower().endswith(" connections")
+        ):
             jockey = ""
-        if isinstance(trainer, str) and trainer.lower() in ("unknown", "tba", "n/a", ""):
+        if isinstance(trainer, str) and (
+            _is_empty_field(trainer) or trainer.lower().endswith(" connections")
+        ):
             trainer = ""
 
         normalized.append({

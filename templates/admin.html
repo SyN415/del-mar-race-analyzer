@@ -1000,30 +1000,38 @@ async function runFullPipeline() {
         if (raceNumbers.length === 0) throw new Error('No races found in session');
 
         let divesDone = 0;
+        let divesFailed = 0;
         const divesTotal = raceNumbers.length;
         for (const raceNum of raceNumbers) {
             _pipelineStep('ps_dive', 'running', `Step 2: Deep Diving Race ${raceNum}/${divesTotal}…`);
-            const diveResp = await fetch('/api/admin/race-deep-dive', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    session_id:    sessionId,
-                    race_number:   raceNum,
-                    race_date:     raceDate,
-                    track_id:      trackId,
-                    force_refresh: false,
-                }),
-            });
-            if (!diveResp.ok) {
-                console.warn(`Deep dive failed for race ${raceNum}`);
-            } else {
-                const diveResult = await diveResp.json();
-                const cacheTag = diveResult?.from_cache ? ' (cached)' : '';
-                _pipelineStep('ps_dive', 'running', `Step 2: Deep Diving Race ${raceNum}/${divesTotal}${cacheTag}…`);
+            try {
+                const diveResp = await fetch('/api/admin/race-deep-dive', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id:    sessionId,
+                        race_number:   raceNum,
+                        race_date:     raceDate,
+                        track_id:      trackId,
+                        force_refresh: false,
+                    }),
+                });
+                if (!diveResp.ok) {
+                    console.warn(`Deep dive failed for race ${raceNum}: HTTP ${diveResp.status}`);
+                    divesFailed++;
+                } else {
+                    const diveResult = await diveResp.json();
+                    const cacheTag = diveResult?.from_cache ? ' (cached)' : '';
+                    _pipelineStep('ps_dive', 'running', `Step 2: Deep Diving Race ${raceNum}/${divesTotal}${cacheTag}…`);
+                }
+            } catch (diveErr) {
+                console.warn(`Deep dive network error for race ${raceNum}:`, diveErr);
+                divesFailed++;
             }
             divesDone++;
         }
-        _pipelineStep('ps_dive', 'done', `Step 2: All ${divesTotal} Races Deep Dived ✓`, Math.round((Date.now() - _t) / 1000));
+        const failNote = divesFailed > 0 ? ` (${divesFailed} skipped)` : '';
+        _pipelineStep('ps_dive', 'done', `Step 2: ${divesTotal - divesFailed}/${divesTotal} Races Deep Dived ✓${failNote}`, Math.round((Date.now() - _t) / 1000));
 
         // ── STEP 3: Algorithmic Re-Rating ───────────────────────────────────────
         _t = Date.now();
