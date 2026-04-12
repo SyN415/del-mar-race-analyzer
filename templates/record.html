@@ -150,7 +150,7 @@ a{text-decoration:none;color:inherit}
   </div>
   <div class="stat-card">
     <div class="stat-val em">{{ summary.average_daily_score }}</div>
-    <div class="stat-lbl">Avg Daily Score (/100)</div>
+    <div class="stat-lbl">Profitability Score (/100)</div>
   </div>
   <div class="stat-card">
     <div class="stat-val sky">{{ summary.exacta_hit_rate_pct }}%</div>
@@ -167,6 +167,10 @@ a{text-decoration:none;color:inherit}
   <div class="stat-card">
     <div class="stat-val em">${{ summary.best_exacta_payout_overall|round(2) if summary.best_exacta_payout_overall else '—' }}</div>
     <div class="stat-lbl">Best Exacta Payout</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val em">${{ summary.best_trifecta_payout_overall|round(2) if summary.best_trifecta_payout_overall else '—' }}</div>
+    <div class="stat-lbl">Best Trifecta Payout</div>
   </div>
 </div>
 

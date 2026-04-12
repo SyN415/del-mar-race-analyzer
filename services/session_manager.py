@@ -1288,6 +1288,18 @@ class SessionManager:
                     best_trifecta_payout_overall = row.get('best_trifecta_payout', 0)
 
             n_records = len(records)
+
+            # Profitability-weighted score: weights exotic hits much more heavily
+            # than straight top-pick wins since exotics generate far higher ROI.
+            # Weights: top_pick_win=2, exacta_hit=5, trifecta_hit=8 (max 15 per race)
+            profit_points = (
+                total_top_pick_wins * 2
+                + total_exacta_hits * 5
+                + total_trifecta_hits * 8
+            )
+            profit_max = total_top_pick_races * 15  # same total races denominator
+            average_daily_score = round(profit_points / profit_max * 100, 1) if profit_max > 0 else 0.0
+
             summary = {
                 'total_top_pick_wins': total_top_pick_wins,
                 'total_top_pick_races': total_top_pick_races,
@@ -1296,7 +1308,7 @@ class SessionManager:
                 'exacta_hit_rate_pct': round((total_exacta_hits / total_exacta_races * 100), 1) if total_exacta_races > 0 else 0.0,
                 'total_trifecta_hits': total_trifecta_hits,
                 'trifecta_hit_rate_pct': round((total_trifecta_hits / total_trifecta_races * 100), 1) if total_trifecta_races > 0 else 0.0,
-                'average_daily_score': round(total_daily_score / n_records, 1) if n_records > 0 else 0.0,
+                'average_daily_score': average_daily_score,
                 'best_single_day_score': best_single_day_score,
                 'best_single_day_date': best_single_day_date,
                 'best_winner_odds_overall': best_winner_odds_overall,

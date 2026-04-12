@@ -2374,11 +2374,10 @@ For each race, determine:
 1. Did the top_pick WIN (finish 1st)?
 2. Did the value_play WIN (finish 1st)?
 3. Did the longshot WIN (finish 1st)?
-4. Did the top_pick finish in the exacta (1st or 2nd)?
-5. Was our exacta bet correct (if betting_strategy mentions an exacta)?
-6. Was our trifecta bet correct (if betting_strategy mentions a trifecta)?
-7. The actual winner's name and odds
-8. Official exacta and trifecta payouts (per $2 base)
+4. exacta_hit: Set to true ONLY if the betting_strategy explicitly specifies an exacta wager AND the exact combination mentioned finished in the correct 1st-2nd order (or boxed). Do NOT set true simply because the top pick placed — exacta_hit requires both a stated exacta bet in the strategy AND that specific combo hitting. If the betting_strategy does not mention an exacta, set exacta_hit=false.
+5. trifecta_hit: Set to true ONLY if the betting_strategy explicitly specifies a trifecta wager AND that exact 1st-2nd-3rd combination hit. If the betting_strategy does not mention a trifecta, set trifecta_hit=false.
+6. The actual winner's name and odds
+7. The official exacta and trifecta payouts for the race (per $2 base) — report the actual race result payouts regardless of whether our bet hit. Set to 0.0 if not available.
 
 Return ONLY valid JSON:
 {{
@@ -2513,13 +2512,14 @@ If results for a race are not available, set data_available=false and leave othe
                     best_winner_horse = rr.get("winner", "")
                     best_winner_race = rn
 
+            # Only track best payout when OUR bet actually hit
             ep = rr.get("exacta_payout", 0) or 0
-            if ep > best_exacta_payout:
+            if rr.get("exacta_hit") and ep > best_exacta_payout:
                 best_exacta_payout = ep
                 best_exacta_race = rn
 
             tp = rr.get("trifecta_payout", 0) or 0
-            if tp > best_trifecta_payout:
+            if rr.get("trifecta_hit") and tp > best_trifecta_payout:
                 best_trifecta_payout = tp
                 best_trifecta_race = rn
 
