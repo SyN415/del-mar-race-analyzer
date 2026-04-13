@@ -7,6 +7,7 @@ Uses Supabase/PostgREST when configured and falls back to local SQLite.
 
 import json
 import logging
+import math
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -1401,24 +1402,42 @@ class SessionManager:
                     if _odds_val > _best_val:
                         best_winner_odds_overall = row['best_winner_odds']
 
-                if row.get('best_exacta_payout', 0) > best_exacta_payout_overall:
-                    best_exacta_payout_overall = row.get('best_exacta_payout', 0)
-
-                if row.get('best_trifecta_payout', 0) > best_trifecta_payout_overall:
-                    best_trifecta_payout_overall = row.get('best_trifecta_payout', 0)
+                # Recompute best payouts from race-level JSON (only actual hits).
+                # The stored best_exacta_payout / best_trifecta_payout columns may have
+                # been set by old code that didn't guard on the hit flag, so we derive
+                # the truth directly from the per-race data which always carries the flags.
+                races_json = row.get('races_recap_json', [])
+                if isinstance(races_json, list):
+                    for race in races_json:
+                        if race.get('exacta_hit'):
+                            ep = float(race.get('exacta_payout') or 0)
+                            if ep > best_exacta_payout_overall:
+                                best_exacta_payout_overall = ep
+                        if race.get('trifecta_hit'):
+                            tp = float(race.get('trifecta_payout') or 0)
+                            if tp > best_trifecta_payout_overall:
+                                best_trifecta_payout_overall = tp
 
             n_records = len(records)
 
-            # Profitability-weighted score: weights exotic hits much more heavily
-            # than straight top-pick wins since exotics generate far higher ROI.
-            # Weights: top_pick_win=2, exacta_hit=5, trifecta_hit=8 (max 15 per race)
-            profit_points = (
-                total_top_pick_wins * 2
-                + total_exacta_hits * 5
-                + total_trifecta_hits * 8
-            )
-            profit_max = total_top_pick_races * 15  # same total races denominator
-            average_daily_score = round(profit_points / profit_max * 100, 1) if profit_max > 0 else 0.0
+            # ── TrackStar Performance Index (TPI) ────────────────────────────
+            # Rewards frequency, exotic depth, and payout magnitude on one scale.
+            #   Base = W×1.5 + E×3 + T×5
+            #   Raw Efficiency = Base ÷ total races
+            #   Payout Impact  = log10(max(best_exotic_payout, $10))  ← floor avoids log<1
+            #   TPI = Raw Efficiency × Payout Impact × 20, capped at 100
+            tpi = 0.0
+            if total_top_pick_races > 0:
+                base = (
+                    total_top_pick_wins * 1.5
+                    + total_exacta_hits * 3
+                    + total_trifecta_hits * 5
+                )
+                raw_efficiency = base / total_top_pick_races
+                max_payout = max(best_exacta_payout_overall, best_trifecta_payout_overall)
+                payout_impact = math.log10(max(max_payout, 10.0))  # floor at log10($10)=1.0
+                tpi = round(min(100.0, raw_efficiency * payout_impact * 20), 1)
+            average_daily_score = tpi
 
             summary = {
                 'total_top_pick_wins': total_top_pick_wins,

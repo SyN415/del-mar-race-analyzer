@@ -80,6 +80,10 @@ a{text-decoration:none;color:inherit}
 .stat-val{font-size:2rem;font-weight:800;color:var(--gold);line-height:1.1;margin-bottom:.25rem}
 .stat-val.em{color:var(--emerald)}
 .stat-val.sky{color:var(--sky)}
+/* TPI tier colours: Cold 0-40 (sky), Sharp 41-70 (emerald), Elite 71-100 (gold) */
+.stat-val.tpi-cold{color:var(--sky)}
+.stat-val.tpi-sharp{color:var(--emerald)}
+.stat-val.tpi-elite{color:var(--gold)}
 .stat-lbl{font-size:.75rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
 
 /* ── RECORD TABLE ───────────────────── */
@@ -149,7 +153,7 @@ a{text-decoration:none;color:inherit}
     <div class="stat-lbl">Top Pick Win Rate</div>
   </div>
   <div class="stat-card">
-    <div class="stat-val em">{{ summary.average_daily_score }}</div>
+    <div class="stat-val {% if summary.average_daily_score >= 71 %}tpi-elite{% elif summary.average_daily_score >= 41 %}tpi-sharp{% else %}tpi-cold{% endif %}">{{ summary.average_daily_score }}</div>
     <div class="stat-lbl">Profitability Score (/100)</div>
   </div>
   <div class="stat-card">
