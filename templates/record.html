@@ -10,10 +10,10 @@
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 <style>
 :root{
-  --bg:#0a1a12;--bg2:#0f231a;--bg3:#162e22;
-  --gold:#C9A84C;--emerald:#2D6A4F;--violet:#C1666B;--sky:#2E86AB;
-  --text:#f5f0e8;--muted:#8a9a80;--subtle:#c4bfaa;
-  --border:rgba(45,106,79,.25);
+  --bg:#0c1f0e;--bg2:#122a14;--bg3:#1a381c;
+  --gold:#C9A84C;--emerald:#4CAF50;--violet:#C1666B;--sky:#2E86AB;
+  --text:#f5f0e8;--muted:#8fa888;--subtle:#c8c4b0;
+  --border:rgba(76,175,80,.22);
   --r:18px;--r-lg:26px;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -25,7 +25,7 @@ a{text-decoration:none;color:inherit}
 .cc-nav{
   display:flex;align-items:center;justify-content:space-between;
   padding:1rem clamp(1rem,5vw,3rem);border-bottom:1px solid var(--border);
-  background:rgba(10,26,18,.88);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  background:rgba(12,31,14,.88);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
   position:sticky;top:0;z-index:50;
 }
 .cc-brand{
@@ -41,13 +41,14 @@ a{text-decoration:none;color:inherit}
 /* ── HERO ──────────────────────────────── */
 .cc-hero{
   position:relative;z-index:1;
-  text-align:center;padding:clamp(2.5rem,7vw,4rem) clamp(1rem,4vw,2rem) clamp(2rem,5vw,3rem);
+  text-align:center;padding:clamp(3rem,8vw,5rem) clamp(1rem,4vw,2rem) clamp(2rem,5vw,3rem);
+  margin-top:1.5rem;
+  background:url('/static/img/asset3.jpg') center/cover no-repeat;
+  border-radius:var(--r-lg);overflow:hidden;
 }
 .cc-hero::before{
-  content:"";position:absolute;top:-2rem;left:-2rem;right:-2rem;bottom:0;z-index:-1;
-  background:
-    radial-gradient(ellipse 80% 60% at 50% -10%,rgba(45,106,79,.22) 0%,transparent 70%),
-    radial-gradient(ellipse 70% 50% at 50% 110%,rgba(201,168,76,.07) 0%,transparent 60%);
+  content:"";position:absolute;inset:0;z-index:-1;
+  background:rgba(12,31,14,.65);
 }
 .cc-eyebrow{
   display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.2em;text-transform:uppercase;
@@ -71,7 +72,7 @@ a{text-decoration:none;color:inherit}
 /* ── STATS BOARD ────────────────────── */
 .stats-grid{
   display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
-  gap:1rem;max-width:1200px;margin:0 auto 3rem;padding:0 clamp(1rem,4vw,2rem);
+  gap:1rem;max-width:1200px;margin:2rem auto 3rem;padding:0 clamp(1rem,4vw,2rem);
 }
 .stat-card{
   background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);
@@ -126,7 +127,7 @@ a{text-decoration:none;color:inherit}
 .dr-hits{display:flex;gap:.5rem;margin-top:.4rem;}
 .hit-badge{
   font-size:.65rem;font-weight:700;padding:.15rem .5rem;border-radius:999px;
-  background:rgba(45,106,79,.1);color:var(--emerald);border:1px solid rgba(45,106,79,.3);
+  background:rgba(76,175,80,.08);color:var(--emerald);border:1px solid rgba(76,175,80,.25);
 }
 
 </style>

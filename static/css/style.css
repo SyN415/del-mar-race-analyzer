@@ -1,32 +1,32 @@
 /* TrackStarAI – Del Mar Turf & Surf Design System */
 
 :root {
-    --bg-primary: #0a1a12;
-    --bg-secondary: #0f231a;
-    --bg-tertiary: #162e22;
-    --bg-card: rgba(14, 30, 22, 0.82);
-    --bg-hover: #1e3d2a;
+    --bg-primary: #0c1f0e;
+    --bg-secondary: #122a14;
+    --bg-tertiary: #1a381c;
+    --bg-card: rgba(18, 42, 20, 0.82);
+    --bg-hover: #24502a;
 
     --accent-primary: #2E86AB;
-    --accent-primary-hover: #2D6A4F;
+    --accent-primary-hover: #3da35d;
     --accent-secondary: #C9A84C;
-    --accent-success: #2D6A4F;
+    --accent-success: #4CAF50;
     --accent-warning: #C9A84C;
     --accent-danger: #C1666B;
     --accent-info: #2E86AB;
 
     --text-primary: #f5f0e8;
-    --text-secondary: #c4bfaa;
-    --text-muted: #8a9a80;
+    --text-secondary: #c8c4b0;
+    --text-muted: #8fa888;
 
-    --border-primary: rgba(45, 106, 79, 0.25);
+    --border-primary: rgba(76, 175, 80, 0.22);
     --border-accent: rgba(201, 168, 76, 0.22);
 
-    --gradient-primary: linear-gradient(135deg, #2D6A4F 0%, #2E86AB 55%, #C9A84C 100%);
-    --gradient-success: linear-gradient(135deg, #2D6A4F 0%, #2E86AB 100%);
-    --gradient-hero: radial-gradient(circle at top left, rgba(45, 106, 79, 0.22) 0%, transparent 38%),
-        radial-gradient(circle at top right, rgba(46, 134, 171, 0.16) 0%, transparent 34%),
-        radial-gradient(circle at bottom center, rgba(201, 168, 76, 0.10) 0%, transparent 32%);
+    --gradient-primary: linear-gradient(135deg, #4CAF50 0%, #2E86AB 55%, #C9A84C 100%);
+    --gradient-success: linear-gradient(135deg, #4CAF50 0%, #2E86AB 100%);
+    --gradient-hero: radial-gradient(circle at top left, rgba(76, 175, 80, 0.18) 0%, transparent 38%),
+        radial-gradient(circle at top right, rgba(46, 134, 171, 0.14) 0%, transparent 34%),
+        radial-gradient(circle at bottom center, rgba(201, 168, 76, 0.08) 0%, transparent 32%);
 
     --glass: rgba(255, 255, 255, 0.04);
     --glass-border: rgba(255, 255, 255, 0.07);
@@ -65,7 +65,7 @@ body::after {
 body::before {
     top: -8rem;
     left: -8rem;
-    background: #2D6A4F;
+    background: #3da35d;
 }
 
 body::after {
@@ -97,8 +97,8 @@ main.container {
     inset: 0;
     border-radius: inherit;
     background:
-        linear-gradient(180deg, rgba(10, 26, 18, 0.70) 0%, rgba(10, 26, 18, 0.55) 100%);
-    border: 1px solid rgba(45, 106, 79, 0.12);
+        linear-gradient(180deg, rgba(12, 31, 14, 0.70) 0%, rgba(12, 31, 14, 0.55) 100%);
+    border: 1px solid rgba(76, 175, 80, 0.12);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
     z-index: -2;
 }
@@ -108,7 +108,7 @@ main.container {
     position: absolute;
     inset: 0;
     border-radius: inherit;
-    background: linear-gradient(135deg, rgba(45, 106, 79, 0.06) 0%, transparent 42%, rgba(46, 134, 171, 0.08) 100%);
+    background: linear-gradient(135deg, rgba(76, 175, 80, 0.06) 0%, transparent 42%, rgba(46, 134, 171, 0.08) 100%);
     z-index: -1;
 }
 
@@ -126,15 +126,15 @@ main.container {
     display: inline-flex;
     align-items: center;
     gap: 0.45rem;
-    background: rgba(45, 106, 79, 0.15);
+    background: rgba(76, 175, 80, 0.12);
     color: #a8d5ba;
-    border: 1px solid rgba(45, 106, 79, 0.30);
+    border: 1px solid rgba(76, 175, 80, 0.28);
     padding: 0.35rem 1rem;
     border-radius: 999px;
     font-size: 0.8rem;
     font-weight: 600;
     letter-spacing: 0.02em;
-    box-shadow: 0 12px 30px rgba(10, 26, 18, 0.22);
+    box-shadow: 0 12px 30px rgba(12, 31, 14, 0.22);
 }
 
 .feature-chip {
@@ -142,7 +142,7 @@ main.container {
     align-items: center;
     padding: 0.55rem 0.9rem;
     border-radius: 999px;
-    background: rgba(22, 46, 34, 0.86);
+    background: rgba(26, 56, 28, 0.86);
     border: 1px solid var(--border-primary);
     color: var(--text-secondary);
     font-size: 0.8rem;
@@ -152,7 +152,7 @@ main.container {
 .hero-panel {
     padding: 1.5rem;
     border-radius: var(--radius-lg);
-    background: linear-gradient(180deg, rgba(14, 30, 22, 0.90) 0%, rgba(10, 26, 18, 0.94) 100%);
+    background: linear-gradient(180deg, rgba(18, 42, 20, 0.90) 0%, rgba(12, 31, 14, 0.94) 100%);
     border: 1px solid var(--border-primary);
     box-shadow: 0 18px 48px rgba(5, 15, 10, 0.35);
 }
@@ -161,7 +161,7 @@ main.container {
     width: 56px;
     height: 56px;
     border-radius: 16px;
-    box-shadow: 0 12px 28px rgba(45, 106, 79, 0.22);
+    box-shadow: 0 12px 28px rgba(76, 175, 80, 0.18);
 }
 
 .hero-signal {
@@ -210,7 +210,7 @@ main.container {
 
 /* ── Navigation ── */
 .navbar {
-    background: rgba(10, 26, 18, 0.85) !important;
+    background: rgba(12, 31, 14, 0.88) !important;
     backdrop-filter: blur(20px) saturate(1.4);
     border-bottom: 1px solid var(--border-primary);
 }
@@ -276,8 +276,8 @@ main.container {
 }
 
 .card-hover:hover {
-    border-color: rgba(45, 106, 79, 0.35);
-    box-shadow: 0 18px 36px rgba(45, 106, 79, 0.10);
+    border-color: rgba(76, 175, 80, 0.30);
+    box-shadow: 0 18px 36px rgba(76, 175, 80, 0.08);
 }
 
 .card-header {
@@ -306,11 +306,11 @@ main.container {
     width: 64px;
     height: 64px;
     border-radius: 18px;
-    box-shadow: 0 16px 38px rgba(45, 106, 79, 0.22);
+    box-shadow: 0 16px 38px rgba(76, 175, 80, 0.18);
 }
 
 .model-card {
-    background: rgba(22, 46, 34, 0.72) !important;
+    background: rgba(26, 56, 28, 0.72) !important;
 }
 
 .admin-toolbar {
@@ -336,7 +336,7 @@ main.container {
 .btn-primary:hover {
     background: var(--accent-primary-hover);
     color: white;
-    box-shadow: 0 2px 12px rgba(45, 106, 79, 0.35);
+    box-shadow: 0 2px 12px rgba(76, 175, 80, 0.30);
 }
 
 .btn-lg { padding: 0.85rem 1.75rem; font-size: 0.95rem; }
@@ -416,7 +416,7 @@ select.form-select:-webkit-autofill:focus {
 /* ── Tables ── */
 .table { border-radius: 8px; overflow: hidden; color: var(--text-primary) !important; }
 .table thead th { background-color: var(--accent-primary); color: white; border: none; font-weight: 600; font-size: 0.85rem; }
-.table tbody tr:hover { background: rgba(45, 106, 79, 0.08); }
+.table tbody tr:hover { background: rgba(76, 175, 80, 0.06); }
 
 /* ── Race Cards ── */
 .race-card { border-left: 3px solid var(--accent-primary); margin-bottom: 2rem; }
@@ -433,7 +433,7 @@ select.form-select:-webkit-autofill:focus {
 }
 .horse-prediction .text-muted,
 .horse-prediction .small.text-muted { color: var(--text-secondary) !important; }
-.horse-prediction.top-pick    { border-left-color: var(--accent-success); background: rgba(45,106,79,0.08); }
+.horse-prediction.top-pick    { border-left-color: var(--accent-success); background: rgba(76,175,80,0.08); }
 .horse-prediction.second-pick { border-left-color: var(--accent-warning); background: rgba(234,179,8,0.08); }
 .horse-prediction.third-pick  { border-left-color: var(--accent-info);    background: rgba(6,182,212,0.08); }
 
@@ -549,7 +549,7 @@ footer p, footer small { color: var(--text-muted) !important; }
 /* ── Alerts ── */
 .alert { border: none; border-radius: 8px; }
 .alert-info    { background: rgba(6,182,212,0.08) !important; border: 1px solid rgba(6,182,212,0.15) !important; color: var(--text-primary) !important; }
-.alert-success { background: rgba(45,106,79,0.08) !important; border: 1px solid rgba(45,106,79,0.15) !important; color: var(--text-primary) !important; }
+.alert-success { background: rgba(76,175,80,0.08) !important; border: 1px solid rgba(76,175,80,0.15) !important; color: var(--text-primary) !important; }
 .alert-warning { background: rgba(234,179,8,0.08) !important; border: 1px solid rgba(234,179,8,0.15) !important; color: var(--text-primary) !important; }
 .alert-danger  { background: rgba(239,68,68,0.08) !important; border: 1px solid rgba(239,68,68,0.15) !important; color: var(--text-primary) !important; }
 
