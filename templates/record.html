@@ -8,12 +8,13 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+<link href="/static/css/style.css?v=6.0.0" rel="stylesheet">
 <style>
 :root{
-  --bg:#0c1f0e;--bg2:#122a14;--bg3:#1a381c;
-  --gold:#C9A84C;--emerald:#4CAF50;--violet:#C1666B;--sky:#2E86AB;
-  --text:#f5f0e8;--muted:#8fa888;--subtle:#c8c4b0;
-  --border:rgba(76,175,80,.22);
+  --bg:var(--color-bg-primary);--bg2:var(--color-bg-surface);--bg3:var(--color-bg-elevated);
+  --gold:var(--color-accent-gold);--emerald:var(--color-accent-turf);--violet:var(--color-rose);--sky:var(--color-accent-blue);
+  --text:var(--color-text-primary);--muted:var(--color-text-secondary);--subtle:#d6e3db;
+  --border:var(--color-turf-border);
   --r:18px;--r-lg:26px;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -25,8 +26,9 @@ a{text-decoration:none;color:inherit}
 .cc-nav{
   display:flex;align-items:center;justify-content:space-between;
   padding:1rem clamp(1rem,5vw,3rem);border-bottom:1px solid var(--border);
-  background:rgba(12,31,14,.88);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  background:var(--color-bg-glass);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
   position:sticky;top:0;z-index:50;
+  margin-inline:calc(var(--page-gutter) * -1);
 }
 .cc-brand{
   font-family:'Playfair Display',serif;font-weight:900;font-size:1.3rem;
@@ -41,14 +43,14 @@ a{text-decoration:none;color:inherit}
 /* ── HERO ──────────────────────────────── */
 .cc-hero{
   position:relative;z-index:1;
-  text-align:center;padding:clamp(3rem,8vw,5rem) clamp(1rem,4vw,2rem) clamp(2rem,5vw,3rem);
-  margin-top:1.5rem;
+  text-align:center;padding:clamp(4rem,11vw,6rem) clamp(1rem,4vw,2rem) clamp(2rem,5vw,3rem);
+  margin-top:1rem;
   background:url('/static/img/asset3.jpg') center/cover no-repeat;
   border-radius:var(--r-lg);overflow:hidden;
 }
 .cc-hero::before{
   content:"";position:absolute;inset:0;z-index:-1;
-  background:rgba(12,31,14,.65);
+  background:rgba(5,12,9,.62);
 }
 .cc-eyebrow{
   display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.2em;text-transform:uppercase;
@@ -71,8 +73,8 @@ a{text-decoration:none;color:inherit}
 
 /* ── STATS BOARD ────────────────────── */
 .stats-grid{
-  display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
-  gap:1rem;max-width:1200px;margin:2rem auto 3rem;padding:0 clamp(1rem,4vw,2rem);
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:.85rem;max-width:1200px;margin:2rem auto 3rem;padding:0 clamp(1rem,4vw,2rem);
 }
 .stat-card{
   background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);
@@ -85,7 +87,7 @@ a{text-decoration:none;color:inherit}
 .stat-val.tpi-cold{color:var(--sky)}
 .stat-val.tpi-sharp{color:var(--emerald)}
 .stat-val.tpi-elite{color:var(--gold)}
-.stat-lbl{font-size:.75rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.stat-lbl{font-size:.95rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--muted)}
 
 /* ── RECORD TABLE ───────────────────── */
 .record-container{
@@ -93,7 +95,7 @@ a{text-decoration:none;color:inherit}
 }
 .rec-table-wrap{
   background:var(--bg2);border:1px solid var(--border);
-  border-radius:var(--r);overflow-x:auto;
+  border-radius:var(--r);overflow:hidden;
 }
 .rec-table{
   width:100%;border-collapse:collapse;text-align:left;min-width:800px;
@@ -127,12 +129,33 @@ a{text-decoration:none;color:inherit}
 .dr-hits{display:flex;gap:.5rem;margin-top:.4rem;}
 .hit-badge{
   font-size:.65rem;font-weight:700;padding:.15rem .5rem;border-radius:999px;
-  background:rgba(76,175,80,.08);color:var(--emerald);border:1px solid rgba(76,175,80,.25);
+  background:var(--color-turf-success-bg);color:var(--emerald);border:1px solid var(--border);
+}
+
+.rec-mobile-summary{list-style:none;cursor:pointer;}
+.rec-mobile-summary::-webkit-details-marker{display:none;}
+.rec-mobile-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem;}
+.rec-mobile-track{color:var(--subtle);font-size:.92rem;margin-top:.25rem;}
+.rec-mobile-score{font-size:1.45rem;font-weight:800;line-height:1;white-space:nowrap;}
+.rec-mobile-best{margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);}
+.rec-mobile-hint{display:block;margin-top:.85rem;color:var(--muted);font-size:.82rem;}
+.rec-mobile-breakdown{margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);}
+
+@media (min-width:641px){
+  .stats-grid{grid-template-columns:repeat(auto-fit,minmax(148px,1fr));}
+}
+
+@media (max-width:640px){
+  .record-container{padding:0 0 .5rem;}
+}
+
+@media (max-width:420px){
+  .stats-grid{grid-template-columns:1fr;}
 }
 
 </style>
 </head>
-<body>
+<body class="theme-dark standalone-page record-page">
 
 <nav class="cc-nav">
   <a href="/" class="cc-brand">
@@ -181,7 +204,7 @@ a{text-decoration:none;color:inherit}
 
 <div class="record-container">
   <div class="rec-table-wrap">
-    <table class="rec-table">
+    <table class="rec-table table-desktop">
       <thead>
         <tr>
           <th>Date</th>
@@ -239,6 +262,74 @@ a{text-decoration:none;color:inherit}
         {% endfor %}
       </tbody>
     </table>
+
+    <div class="mobile-cards">
+      {% for r in records %}
+      <details class="mobile-record-card">
+        <summary class="rec-mobile-summary">
+          <div class="rec-mobile-head">
+            <div>
+              <span class="mobile-card-label">Race Day</span>
+              <div class="mobile-card-value">{{ r.race_date }}</div>
+              <div class="rec-mobile-track">{{ r.track_id }}</div>
+            </div>
+            <div class="rec-mobile-score rec-score {% if r.daily_score >= 70 %}score-high{% elif r.daily_score >= 40 %}score-mid{% else %}score-low{% endif %}">
+              {{ r.daily_score }}
+            </div>
+          </div>
+          <div class="mobile-card-grid">
+            <div class="mobile-card-stat">
+              <span class="mobile-card-label">Top Picks Won</span>
+              <div class="mobile-card-value">{{ r.top_pick_wins }} / {{ r.top_pick_total }}</div>
+            </div>
+            <div class="mobile-card-stat">
+              <span class="mobile-card-label">Exactas</span>
+              <div class="mobile-card-value">{{ r.exacta_hits }}</div>
+            </div>
+            <div class="mobile-card-stat">
+              <span class="mobile-card-label">Trifectas</span>
+              <div class="mobile-card-value">{{ r.trifecta_hits }}</div>
+            </div>
+            <div class="mobile-card-stat">
+              <span class="mobile-card-label">Best Winner</span>
+              <div class="mobile-card-value">{{ r.best_winner_odds or '—' }}</div>
+            </div>
+          </div>
+          <span class="rec-mobile-hint">Tap for full breakdown</span>
+        </summary>
+
+        <div class="rec-mobile-breakdown">
+          <div class="rec-mobile-best">
+            <span class="mobile-card-label">Best Winner</span>
+            <div class="mobile-card-value">{{ r.best_winner_horse or 'N/A' }} {% if r.best_winner_odds %}({{ r.best_winner_odds }}){% endif %}</div>
+          </div>
+
+          {% for race in (r.races_recap_json or []) %}
+          <div class="detail-race">
+            <div class="dr-head">Race {{ race.race_number }} — Winner: {{ race.winner or 'N/A' }}</div>
+            <div class="dr-note">{{ race.recap_note or '' }}</div>
+            {% if race.hits %}
+            <div class="dr-hits">
+              {% if race.hits.top_pick_won %}<span class="hit-badge">Top Pick</span>{% endif %}
+              {% if race.hits.value_play_won %}<span class="hit-badge">Value Play</span>{% endif %}
+              {% if race.hits.longshot_won %}<span class="hit-badge">Longshot</span>{% endif %}
+              {% if race.hits.exacta_hit %}<span class="hit-badge">Exacta (${{ race.exacta_payout }})</span>{% endif %}
+              {% if race.hits.trifecta_hit %}<span class="hit-badge">Trifecta (${{ race.trifecta_payout }})</span>{% endif %}
+              {% if race.hits.hedge_exacta_hit %}<span class="hit-badge">Hedge Exacta</span>{% endif %}
+            </div>
+            {% endif %}
+          </div>
+          {% else %}
+          <div class="dr-note text-muted">No race details available.</div>
+          {% endfor %}
+        </div>
+      </details>
+      {% else %}
+      <div class="mobile-record-card">
+        <div class="dr-note text-muted">No recap records found.</div>
+      </div>
+      {% endfor %}
+    </div>
   </div>
 </div>
 
