@@ -202,6 +202,7 @@
                         <div id="manageSessionsList">
                             <p class="text-muted small">Click the <strong>Manage</strong> tab to load…</p>
                         </div>
+                        <div id="manageSessionsPager" class="mt-2"></div>
                     </div>
                 </div>
 
@@ -213,6 +214,26 @@
                         <div id="manageCuratedList">
                             <p class="text-muted small">Loading…</p>
                         </div>
+                        <div id="manageCuratedPager" class="mt-2"></div>
+                    </div>
+                </div>
+
+                <!-- Deep Dives Cache Management -->
+                <div class="card shadow-lg border-0 mb-4">
+                    <div class="card-body p-4">
+                        <h5 class="fw-bold mb-1">Deep Dives Cache</h5>
+                        <p class="text-muted small mb-3">Cached race deep-dive data by session. Select a session to view and manage its cached entries.</p>
+                        <div class="mb-3">
+                            <label for="deepDiveSessionSelect" class="form-label small fw-semibold">Select Session</label>
+                            <select class="form-select form-select-sm" id="deepDiveSessionSelect" style="max-width:380px"
+                                    onchange="onDeepDiveSessionChange(this.value)">
+                                <option value="">— choose a session —</option>
+                            </select>
+                        </div>
+                        <div id="manageDeepDivesList">
+                            <p class="text-muted small">Select a session above to view cached deep dives.</p>
+                        </div>
+                        <div id="manageDeepDivesPager" class="mt-2"></div>
                     </div>
                 </div>
             </div>
@@ -780,36 +801,64 @@ async function deleteSelectedSession() {
 }
 
 // ── MANAGE TAB ───────────────────────────────────────────────────────────────
-function initManageTab() {
-    loadManageSessions(); loadManageCurated();
+const MANAGE_PAGE_SIZE = 10;
+const _md = { sessions: [], curated: [], deepDives: [] };
+const _mp = { sessions: 1, curated: 1, deepDives: 1 };
+
+function _mgPager(elId, total, page, fn) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+    const n = Math.ceil(total / MANAGE_PAGE_SIZE);
+    if (n <= 1) { el.innerHTML = ''; return; }
+    let h = '<nav><ul class="pagination pagination-sm mb-0 mt-2">';
+    h += `<li class="page-item${page===1?' disabled':''}"><a class="page-link" href="#" onclick="event.preventDefault();${fn}(${page-1})">‹</a></li>`;
+    for (let p = 1; p <= n; p++)
+        h += `<li class="page-item${p===page?' active':''}"><a class="page-link" href="#" onclick="event.preventDefault();${fn}(${p})">${p}</a></li>`;
+    h += `<li class="page-item${page===n?' disabled':''}"><a class="page-link" href="#" onclick="event.preventDefault();${fn}(${page+1})">›</a></li>`;
+    h += '</ul></nav>';
+    el.innerHTML = h;
 }
 
+async function initManageTab() {
+    await loadManageSessions();
+    loadManageCurated();
+}
+
+// ── Sessions ──────────────────────────────────────────────────────────────────
 async function loadManageSessions() {
     const container = document.getElementById('manageSessionsList');
     container.innerHTML = '<p class="text-muted small">Loading sessions…</p>';
     try {
         const resp = await fetch('/api/admin/sessions');
         if (!resp.ok) throw new Error('Could not load sessions');
-        const sessions = await resp.json();
-        if (!sessions.length) { container.innerHTML = '<p class="text-muted small">No sessions found.</p>'; return; }
-        let html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">';
-        html += '<thead><tr><th>Date</th><th>Track</th><th>Status</th><th>Session ID</th><th></th></tr></thead><tbody>';
-        sessions.forEach(s => {
-            html += `<tr id="session-row-${s.session_id}">
-                <td class="small">${s.race_date || '—'}</td>
-                <td class="small">${s.track_id || '—'}</td>
-                <td><span class="badge ${s.status === 'completed' ? 'bg-success' : s.status === 'failed' ? 'bg-danger' : 'bg-secondary'}">${s.status}</span></td>
-                <td class="small text-muted">${s.session_id.slice(0,12)}…</td>
-                <td class="text-end">
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteManageSession('${s.session_id}', this)">🗑️</button>
-                </td>
-            </tr>`;
-        });
-        html += '</tbody></table></div>';
-        container.innerHTML = html;
+        _md.sessions = await resp.json();
+        _populateDeepDiveSessionSelect(_md.sessions);
+        renderManageSessions(1);
     } catch (err) {
         container.innerHTML = `<p class="text-danger small">Error: ${err.message}</p>`;
     }
+}
+
+function renderManageSessions(page) {
+    _mp.sessions = page;
+    const container = document.getElementById('manageSessionsList');
+    const data = _md.sessions;
+    if (!data.length) { container.innerHTML = '<p class="text-muted small">No sessions found.</p>'; document.getElementById('manageSessionsPager').innerHTML = ''; return; }
+    const slice = data.slice((page-1)*MANAGE_PAGE_SIZE, page*MANAGE_PAGE_SIZE);
+    let html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">';
+    html += '<thead><tr><th>Date</th><th>Track</th><th>Status</th><th>Session ID</th><th></th></tr></thead><tbody>';
+    slice.forEach(s => {
+        html += `<tr id="session-row-${s.session_id}">
+            <td class="small">${s.race_date||'—'}</td>
+            <td class="small">${s.track_id||'—'}</td>
+            <td><span class="badge ${s.status==='completed'?'bg-success':s.status==='failed'?'bg-danger':'bg-secondary'}">${s.status}</span></td>
+            <td class="small text-muted">${s.session_id.slice(0,12)}…</td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-danger" onclick="deleteManageSession('${s.session_id}',this)">🗑️</button></td>
+        </tr>`;
+    });
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+    _mgPager('manageSessionsPager', data.length, page, 'renderManageSessions');
 }
 
 async function deleteManageSession(sessionId, btn) {
@@ -817,68 +866,58 @@ async function deleteManageSession(sessionId, btn) {
     btn.disabled = true;
     try {
         const resp = await fetch(`/api/admin/session/${sessionId}`, { method: 'DELETE' });
-        if (!resp.ok) { const r = await resp.json(); throw new Error(r.detail || 'Delete failed'); }
-        document.getElementById(`session-row-${sessionId}`)?.remove();
-    } catch (err) {
-        alert(`Error: ${err.message}`);
-        btn.disabled = false;
-    }
+        if (!resp.ok) { const r = await resp.json(); throw new Error(r.detail||'Delete failed'); }
+        _md.sessions = _md.sessions.filter(s => s.session_id !== sessionId);
+        _populateDeepDiveSessionSelect(_md.sessions);
+        renderManageSessions(_mp.sessions);
+    } catch (err) { alert(`Error: ${err.message}`); btn.disabled = false; }
 }
 
+// ── Curated Cards ─────────────────────────────────────────────────────────────
 async function loadManageCurated() {
     const container = document.getElementById('manageCuratedList');
     container.innerHTML = '<p class="text-muted small">Loading curated cards…</p>';
     try {
         const resp = await fetch('/api/admin/curated-cards');
         if (!resp.ok) throw new Error('Could not load curated cards');
-        const cards = await resp.json();
-        if (!cards.length) { container.innerHTML = '<p class="text-muted small">No curated cards found.</p>'; return; }
-        let html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">';
-        html += '<thead><tr><th>Race Date</th><th>Track</th><th>Published</th><th>Top Pick</th><th></th></tr></thead><tbody>';
-        cards.forEach(c => {
-            const topPick = c.top_pick_json ? (c.top_pick_json.name || '—') : '—';
-            const pubBadge = c.is_published
-                ? '<span class="badge bg-success">Yes</span>'
-                : '<span class="badge bg-secondary">Draft</span>';
-
-            let recapArea = '';
-            if (c.is_published) {
-                // show for today and past dates (admin can recap same-day cards once results are in)
-                const cardDate = new Date(c.race_date + 'T00:00:00');
-                const today = new Date();
-                today.setHours(0,0,0,0);
-                if (cardDate <= today) {
-                    if (c.has_recap) {
-                        recapArea = `<div id="recap-area-${c.id}" class="mt-1 small">
-                            <span class="text-success fw-bold">✅ Recap saved — Score: ${c.recap_daily_score} | Top Picks: ${c.recap_top_pick_wins}/${c.recap_top_pick_total}</span>
-                            <button class="btn btn-sm btn-outline-secondary ms-2" onclick="generateRecap('${c.id}', '${c.race_date}', '${c.track_id}', '${c.session_id}')">Re-run Recap</button>
-                        </div>`;
-                    } else {
-                        recapArea = `<div id="recap-area-${c.id}" class="mt-1">
-                            <button class="btn btn-sm btn-outline-success" onclick="generateRecap('${c.id}', '${c.race_date}', '${c.track_id}', '${c.session_id}')">Generate Recap</button>
-                        </div>`;
-                    }
-                }
-            }
-
-            html += `<tr id="card-row-${c.id}">
-                <td class="small">${c.race_date || '—'}</td>
-                <td class="small">${c.track_name || c.track_id || '—'}</td>
-                <td>${pubBadge}</td>
-                <td class="small">${escHtml(topPick)}
-                    ${recapArea}
-                </td>
-                <td class="text-end">
-                    <a href="${c.card_url || '#'}" target="_blank" class="btn btn-sm btn-outline-primary me-1">View</a>
-                    <button class="btn btn-sm btn-outline-danger" onclick="deleteManageCurated('${c.id}', this)">🗑️</button>
-                </td>
-            </tr>`;
-        });
-        html += '</tbody></table></div>';
-        container.innerHTML = html;
+        _md.curated = await resp.json();
+        renderManageCurated(1);
     } catch (err) {
         container.innerHTML = `<p class="text-danger small">Error: ${err.message}</p>`;
     }
+}
+
+function renderManageCurated(page) {
+    _mp.curated = page;
+    const container = document.getElementById('manageCuratedList');
+    const data = _md.curated;
+    if (!data.length) { container.innerHTML = '<p class="text-muted small">No curated cards found.</p>'; document.getElementById('manageCuratedPager').innerHTML = ''; return; }
+    const slice = data.slice((page-1)*MANAGE_PAGE_SIZE, page*MANAGE_PAGE_SIZE);
+    let html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">';
+    html += '<thead><tr><th>Race Date</th><th>Track</th><th>Published</th><th>Top Pick</th><th></th></tr></thead><tbody>';
+    slice.forEach(c => {
+        const topPick = c.top_pick_json ? (c.top_pick_json.name||'—') : '—';
+        const pubBadge = c.is_published ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">Draft</span>';
+        let recapArea = '';
+        if (c.is_published) {
+            const cardDate = new Date(c.race_date+'T00:00:00'); const today = new Date(); today.setHours(0,0,0,0);
+            if (cardDate <= today) {
+                recapArea = c.has_recap
+                    ? `<div id="recap-area-${c.id}" class="mt-1 small"><span class="text-success fw-bold">✅ Recap saved — Score: ${c.recap_daily_score} | Top Picks: ${c.recap_top_pick_wins}/${c.recap_top_pick_total}</span><button class="btn btn-sm btn-outline-secondary ms-2" onclick="generateRecap('${c.id}','${c.race_date}','${c.track_id}','${c.session_id}')">Re-run Recap</button></div>`
+                    : `<div id="recap-area-${c.id}" class="mt-1"><button class="btn btn-sm btn-outline-success" onclick="generateRecap('${c.id}','${c.race_date}','${c.track_id}','${c.session_id}')">Generate Recap</button></div>`;
+            }
+        }
+        html += `<tr id="card-row-${c.id}">
+            <td class="small">${c.race_date||'—'}</td>
+            <td class="small">${c.track_name||c.track_id||'—'}</td>
+            <td>${pubBadge}</td>
+            <td class="small">${escHtml(topPick)}${recapArea}</td>
+            <td class="text-end"><a href="${c.card_url||'#'}" target="_blank" class="btn btn-sm btn-outline-primary me-1">View</a><button class="btn btn-sm btn-outline-danger" onclick="deleteManageCurated('${c.id}',this)">🗑️</button></td>
+        </tr>`;
+    });
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+    _mgPager('manageCuratedPager', data.length, page, 'renderManageCurated');
 }
 
 async function deleteManageCurated(cardId, btn) {
@@ -886,12 +925,86 @@ async function deleteManageCurated(cardId, btn) {
     btn.disabled = true;
     try {
         const resp = await fetch(`/api/admin/curated-card/${cardId}`, { method: 'DELETE' });
-        if (!resp.ok) { const r = await resp.json(); throw new Error(r.detail || 'Delete failed'); }
-        document.getElementById(`card-row-${cardId}`)?.remove();
+        if (!resp.ok) { const r = await resp.json(); throw new Error(r.detail||'Delete failed'); }
+        _md.curated = _md.curated.filter(c => c.id !== cardId);
+        renderManageCurated(_mp.curated);
+    } catch (err) { alert(`Error: ${err.message}`); btn.disabled = false; }
+}
+
+// ── Deep Dives Cache ──────────────────────────────────────────────────────────
+function _populateDeepDiveSessionSelect(sessions) {
+    const sel = document.getElementById('deepDiveSessionSelect');
+    if (!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">— choose a session —</option>';
+    // Deduplicate by race_date+track_id (multiple sessions can share same date/track)
+    const seen = new Set();
+    sessions.forEach(s => {
+        const key = `${s.race_date}|${s.track_id}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const opt = document.createElement('option');
+        opt.value = key;
+        opt.textContent = `${s.race_date||'?'} · ${s.track_id||'?'}`;
+        sel.appendChild(opt);
+    });
+    if (prev) sel.value = prev;
+}
+
+function onDeepDiveSessionChange(value) {
+    const container = document.getElementById('manageDeepDivesList');
+    document.getElementById('manageDeepDivesPager').innerHTML = '';
+    if (!value) { container.innerHTML = '<p class="text-muted small">Select a session above to view cached deep dives.</p>'; return; }
+    const [raceDate, trackId] = value.split('|');
+    loadManageDeepDives(raceDate, trackId);
+}
+
+async function loadManageDeepDives(raceDate, trackId) {
+    const container = document.getElementById('manageDeepDivesList');
+    container.innerHTML = '<p class="text-muted small">Loading…</p>';
+    try {
+        const resp = await fetch(`/api/admin/deep-dives?race_date=${encodeURIComponent(raceDate)}&track_id=${encodeURIComponent(trackId)}`);
+        if (!resp.ok) throw new Error('Could not load deep dives');
+        _md.deepDives = await resp.json();
+        renderManageDeepDives(1);
     } catch (err) {
-        alert(`Error: ${err.message}`);
-        btn.disabled = false;
+        container.innerHTML = `<p class="text-danger small">Error: ${err.message}</p>`;
     }
+}
+
+function renderManageDeepDives(page) {
+    _mp.deepDives = page;
+    const container = document.getElementById('manageDeepDivesList');
+    const data = _md.deepDives;
+    if (!data.length) { container.innerHTML = '<p class="text-muted small">No deep-dive cache entries found for this session.</p>'; document.getElementById('manageDeepDivesPager').innerHTML = ''; return; }
+    const slice = data.slice((page-1)*MANAGE_PAGE_SIZE, page*MANAGE_PAGE_SIZE);
+    let html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle mb-0">';
+    html += '<thead><tr><th>Race #</th><th>Track</th><th>Date</th><th>Cached At</th><th></th></tr></thead><tbody>';
+    slice.forEach(d => {
+        const cached = d.created_at ? new Date(d.created_at).toLocaleString() : '—';
+        const rowId = `dd-row-${d.race_date}-${d.track_id}-${d.race_number}`;
+        html += `<tr id="${rowId}">
+            <td class="small fw-semibold">Race ${d.race_number}</td>
+            <td class="small">${d.track_id||'—'}</td>
+            <td class="small">${d.race_date||'—'}</td>
+            <td class="small text-muted">${cached}</td>
+            <td class="text-end"><button class="btn btn-sm btn-outline-danger" onclick="deleteManageDeepDive('${d.race_date}','${d.track_id}',${d.race_number},this)">🗑️</button></td>
+        </tr>`;
+    });
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+    _mgPager('manageDeepDivesPager', data.length, page, 'renderManageDeepDives');
+}
+
+async function deleteManageDeepDive(raceDate, trackId, raceNumber, btn) {
+    if (!confirm(`Delete cached deep dive for Race ${raceNumber} (${raceDate} · ${trackId})?`)) return;
+    btn.disabled = true;
+    try {
+        const resp = await fetch(`/api/admin/deep-dive/${encodeURIComponent(raceDate)}/${encodeURIComponent(trackId)}/${raceNumber}`, { method: 'DELETE' });
+        if (!resp.ok) { const r = await resp.json(); throw new Error(r.detail||'Delete failed'); }
+        _md.deepDives = _md.deepDives.filter(d => !(d.race_date===raceDate && d.track_id===trackId && d.race_number===raceNumber));
+        renderManageDeepDives(_mp.deepDives);
+    } catch (err) { alert(`Error: ${err.message}`); btn.disabled = false; }
 }
 
 async function generateRecap(cardId, raceDate, trackId, sessionId) {

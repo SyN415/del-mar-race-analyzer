@@ -2326,6 +2326,42 @@ async def delete_curated_card_endpoint(card_id: str, request: Request):
     return JSONResponse({"status": "deleted", "id": card_id})
 
 
+@app.get("/api/admin/deep-dives")
+async def list_deep_dives_endpoint(request: Request, race_date: str = None, track_id: str = None):
+    """List deep-dive cache entries, optionally filtered by race_date and track_id (admin only)."""
+    if not _auth_enabled():
+        raise HTTPException(status_code=503, detail="Admin access is not configured on the server")
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+
+    session_manager = await app_state.ensure_session_manager()
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager is not available")
+
+    entries = await session_manager.list_deep_dives(race_date=race_date, track_id=track_id)
+    return JSONResponse(entries)
+
+
+@app.delete("/api/admin/deep-dive/{race_date}/{track_id}/{race_number}")
+async def delete_deep_dive_endpoint(race_date: str, track_id: str, race_number: int, request: Request):
+    """Delete a single deep-dive cache entry (admin only)."""
+    if not _auth_enabled():
+        raise HTTPException(status_code=503, detail="Admin access is not configured on the server")
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Admin authentication required")
+
+    session_manager = await app_state.ensure_session_manager()
+    if not session_manager:
+        raise HTTPException(status_code=503, detail="Session manager is not available")
+
+    success = await session_manager.delete_deep_dive(race_date, track_id, race_number)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete deep dive entry")
+
+    logger.info("🗑️ Admin deleted deep dive %s/%s/race-%s", race_date, track_id, race_number)
+    return JSONResponse({"status": "deleted", "race_date": race_date, "track_id": track_id, "race_number": race_number})
+
+
 @app.post("/api/admin/generate-recap")
 async def generate_recap(request: GenerateRecapRequest, http_request: Request = None):
     """Generate a recap for a past curated card by comparing picks to official Equibase results via Grok web search."""

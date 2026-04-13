@@ -645,6 +645,72 @@ class SessionManager:
             logger.error(f"Failed to get cached race deep-dive: {e}")
         return None
 
+    async def list_deep_dives(
+        self,
+        race_date: Optional[str] = None,
+        track_id: Optional[str] = None,
+    ) -> List[Dict]:
+        """Return race_data_cache rows (without the heavy JSON blob) ordered by race_number."""
+        try:
+            if self.storage_backend == 'supabase':
+                params: Dict = {
+                    'select': 'race_date,track_id,race_number,created_at',
+                    'order': 'race_number.asc',
+                }
+                if race_date:
+                    params['race_date'] = f'eq.{race_date}'
+                if track_id:
+                    params['track_id'] = f'eq.{track_id}'
+                rows = await self._supabase_request('GET', 'race_data_cache', params=params)
+                return rows or []
+
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                clauses, vals = [], []
+                if race_date:
+                    clauses.append('race_date = ?')
+                    vals.append(race_date)
+                if track_id:
+                    clauses.append('track_id = ?')
+                    vals.append(track_id)
+                where = ('WHERE ' + ' AND '.join(clauses)) if clauses else ''
+                async with db.execute(
+                    f'SELECT race_date, track_id, race_number, created_at FROM race_data_cache {where} ORDER BY race_number ASC',
+                    vals,
+                ) as cursor:
+                    return [dict(r) for r in await cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to list deep dives: {e}")
+            return []
+
+    async def delete_deep_dive(self, race_date: str, track_id: str, race_number: int) -> bool:
+        """Delete a single race deep-dive entry from race_data_cache."""
+        try:
+            if self.storage_backend == 'supabase':
+                await self._supabase_request(
+                    'DELETE',
+                    'race_data_cache',
+                    params={
+                        'race_date': f'eq.{race_date}',
+                        'track_id': f'eq.{track_id}',
+                        'race_number': f'eq.{race_number}',
+                    },
+                )
+                logger.info("🗑️ Deleted deep dive | date=%s | track=%s | race=%s", race_date, track_id, race_number)
+                return True
+
+            async with aiosqlite.connect(self.db_path) as db:
+                await db.execute(
+                    'DELETE FROM race_data_cache WHERE race_date = ? AND track_id = ? AND race_number = ?',
+                    (race_date, track_id, race_number),
+                )
+                await db.commit()
+            logger.info("🗑️ Deleted deep dive | date=%s | track=%s | race=%s", race_date, track_id, race_number)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to delete deep dive: {e}")
+            return False
+
     async def save_curated_card(
         self,
         race_date: str,
