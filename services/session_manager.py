@@ -908,19 +908,63 @@ class SessionManager:
             return []
 
     async def delete_curated_card(self, card_id: str) -> bool:
-        """Delete a curated card by its id. Returns True on success."""
+        """Delete a curated card by its id, cascading to any linked recap record. Returns True on success."""
         try:
             if self.storage_backend == 'supabase':
+                # Fetch the card's race_date + track_id first so we can cascade-delete the recap
+                rows = await self._supabase_request(
+                    'GET',
+                    'curated_cards',
+                    params={'id': f'eq.{card_id}', 'select': 'race_date,track_id', 'limit': 1},
+                )
+                card_meta = rows[0] if rows else None
+
                 await self._supabase_request(
                     'DELETE',
                     'curated_cards',
                     params={'id': f'eq.{card_id}'},
                 )
                 logger.info("🗑️ Deleted curated card %s from Supabase", card_id)
+
+                # Cascade: remove the matching recap record so /record stays in sync
+                if card_meta:
+                    try:
+                        await self._supabase_request(
+                            'DELETE',
+                            'race_recap_records',
+                            params={
+                                'race_date': f'eq.{card_meta["race_date"]}',
+                                'track_id': f'eq.{card_meta["track_id"]}',
+                            },
+                        )
+                        logger.info(
+                            "🗑️ Cascade-deleted recap for %s/%s",
+                            card_meta['race_date'], card_meta['track_id'],
+                        )
+                    except Exception as recap_err:
+                        logger.warning("Could not cascade-delete recap for card %s: %s", card_id, recap_err)
                 return True
 
             async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                # Fetch before deleting so we can cascade
+                async with db.execute(
+                    "SELECT race_date, track_id FROM curated_cards WHERE id = ?", (card_id,)
+                ) as cursor:
+                    row = await cursor.fetchone()
+
                 await db.execute("DELETE FROM curated_cards WHERE id = ?", (card_id,))
+
+                # Cascade: remove matching recap record
+                if row:
+                    await db.execute(
+                        "DELETE FROM race_recap_records WHERE race_date = ? AND track_id = ?",
+                        (row['race_date'], row['track_id']),
+                    )
+                    logger.info(
+                        "🗑️ Cascade-deleted recap for %s/%s", row['race_date'], row['track_id']
+                    )
+
                 await db.commit()
             logger.info("🗑️ Deleted curated card %s from SQLite", card_id)
             return True
@@ -929,7 +973,7 @@ class SessionManager:
             return False
 
     async def purge_expired_curated_cards(self, retention_days: int = 28) -> int:
-        """Delete curated cards whose race_date is older than retention_days. Returns count deleted."""
+        """Delete curated cards whose race_date is older than retention_days, cascading to recaps. Returns count deleted."""
         from datetime import datetime, timedelta
         cutoff = (datetime.utcnow() - timedelta(days=retention_days)).strftime("%Y-%m-%d")
         try:
@@ -938,10 +982,7 @@ class SessionManager:
                 rows = await self._supabase_request(
                     'GET',
                     'curated_cards',
-                    params={
-                        'race_date': f'lt.{cutoff}',
-                        'select': 'id',
-                    },
+                    params={'race_date': f'lt.{cutoff}', 'select': 'id'},
                 )
                 count = len(rows) if rows else 0
                 if count:
@@ -950,6 +991,15 @@ class SessionManager:
                         'curated_cards',
                         params={'race_date': f'lt.{cutoff}'},
                     )
+                    # Cascade: purge matching recap records too
+                    try:
+                        await self._supabase_request(
+                            'DELETE',
+                            'race_recap_records',
+                            params={'race_date': f'lt.{cutoff}'},
+                        )
+                    except Exception as recap_err:
+                        logger.warning("Could not cascade-purge expired recaps: %s", recap_err)
                 logger.info("🗑️ Purged %d expired curated cards (before %s) from Supabase", count, cutoff)
                 return count
 
@@ -960,6 +1010,10 @@ class SessionManager:
                 count = (await cursor.fetchone())[0]
                 if count:
                     await db.execute("DELETE FROM curated_cards WHERE race_date < ?", (cutoff,))
+                    # Cascade: purge matching recap records too
+                    await db.execute(
+                        "DELETE FROM race_recap_records WHERE race_date < ?", (cutoff,)
+                    )
                     await db.commit()
             logger.info("🗑️ Purged %d expired curated cards (before %s) from SQLite", count, cutoff)
             return count
