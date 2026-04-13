@@ -10,10 +10,10 @@
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 <style>
 :root{
-  --bg:#07111f;--bg2:#0b1728;--bg3:#132238;
-  --gold:#f5d56b;--emerald:#22c55e;--violet:#c084fc;--sky:#60a5fa;
-  --text:#f8fafc;--muted:#7f93b2;--subtle:#b6c4da;
-  --border:rgba(150,170,205,.18);
+  --bg:#0a1a12;--bg2:#0f231a;--bg3:#162e22;
+  --gold:#C9A84C;--emerald:#2D6A4F;--violet:#C1666B;--sky:#2E86AB;
+  --text:#f5f0e8;--muted:#8a9a80;--subtle:#c4bfaa;
+  --border:rgba(45,106,79,.25);
   --r:18px;--r-lg:26px;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -25,7 +25,7 @@ a{text-decoration:none;color:inherit}
 .cc-nav{
   display:flex;align-items:center;justify-content:space-between;
   padding:1rem clamp(1rem,5vw,3rem);border-bottom:1px solid var(--border);
-  background:rgba(11,23,40,.8);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  background:rgba(10,26,18,.88);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
   position:sticky;top:0;z-index:50;
 }
 .cc-brand{
@@ -46,15 +46,15 @@ a{text-decoration:none;color:inherit}
 .cc-hero::before{
   content:"";position:absolute;top:-2rem;left:-2rem;right:-2rem;bottom:0;z-index:-1;
   background:
-    radial-gradient(ellipse 80% 60% at 50% -10%,rgba(192,132,252,.22) 0%,transparent 70%),
-    radial-gradient(ellipse 70% 50% at 50% 110%,rgba(245,213,107,.07) 0%,transparent 60%);
+    radial-gradient(ellipse 80% 60% at 50% -10%,rgba(45,106,79,.22) 0%,transparent 70%),
+    radial-gradient(ellipse 70% 50% at 50% 110%,rgba(201,168,76,.07) 0%,transparent 60%);
 }
 .cc-eyebrow{
   display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.2em;text-transform:uppercase;
   color:var(--gold);margin-bottom:1rem;
   padding:.35rem 1rem;border-radius:999px;
-  border:1px solid rgba(245,213,107,.3);
-  background:rgba(245,213,107,.08);
+  border:1px solid rgba(201,168,76,.3);
+  background:rgba(201,168,76,.08);
 }
 .cc-hero-title{
   font-family:'Playfair Display',Georgia,serif;
@@ -126,7 +126,7 @@ a{text-decoration:none;color:inherit}
 .dr-hits{display:flex;gap:.5rem;margin-top:.4rem;}
 .hit-badge{
   font-size:.65rem;font-weight:700;padding:.15rem .5rem;border-radius:999px;
-  background:rgba(34,197,94,.1);color:var(--emerald);border:1px solid rgba(34,197,94,.3);
+  background:rgba(45,106,79,.1);color:var(--emerald);border:1px solid rgba(45,106,79,.3);
 }
 
 </style>
@@ -135,16 +135,16 @@ a{text-decoration:none;color:inherit}
 
 <nav class="cc-nav">
   <a href="/" class="cc-brand">
-    <i class="fa-solid fa-horse-head" style="color:var(--gold)"></i>
+    <img src="/static/img/asset1.jpg" alt="TrackStarAI" style="width:32px;height:32px;border-radius:8px;">
     <span>TrackStar AI</span>
   </a>
   <a class="cc-nav-back" href="/">← Home</a>
 </nav>
 
 <section class="cc-hero">
-  <div class="cc-eyebrow">✦ Verified Performance ✦</div>
+  <div class="cc-eyebrow">🏇 Verified Performance</div>
   <h1 class="cc-hero-title">30-Day Track Record</h1>
-  <p class="cc-hero-sub">Transparent, auditable results comparing our AI curated betting cards against official Equibase race outcomes.</p>
+  <p class="cc-hero-sub">Real results, no fluff. Every pick checked against official Equibase race outcomes.</p>
 </section>
 
 <div class="stats-grid">

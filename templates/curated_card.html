@@ -10,10 +10,10 @@
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 <style>
 :root{
-  --bg:#07111f;--bg2:#0b1728;--bg3:#132238;
-  --gold:#f5d56b;--emerald:#22c55e;--violet:#c084fc;--sky:#60a5fa;
-  --text:#f8fafc;--muted:#7f93b2;--subtle:#b6c4da;
-  --border:rgba(150,170,205,.18);
+  --bg:#0a1a12;--bg2:#0f231a;--bg3:#162e22;
+  --gold:#C9A84C;--emerald:#2D6A4F;--violet:#C1666B;--sky:#2E86AB;
+  --text:#f5f0e8;--muted:#8a9a80;--subtle:#c4bfaa;
+  --border:rgba(45,106,79,.25);
   --r:18px;--r-lg:26px;
 }
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -28,8 +28,8 @@ body::before,body::after{
   content:"";position:fixed;width:28rem;height:28rem;border-radius:999px;
   pointer-events:none;filter:blur(110px);opacity:.18;z-index:0;
 }
-body::before{top:-10rem;left:-10rem;background:#38bdf8}
-body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
+body::before{top:-10rem;left:-10rem;background:#2D6A4F}
+body::after{right:-10rem;bottom:4rem;background:#2E86AB}
 
 /* ── NAV ───────────────────────────────── */
 .cc-nav{
@@ -37,7 +37,7 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
   display:flex;align-items:center;justify-content:space-between;
   padding:.9rem clamp(1rem,4vw,2.5rem);
   border-bottom:1px solid var(--border);
-  background:rgba(7,17,31,.85);backdrop-filter:blur(14px);
+  background:rgba(10,26,18,.88);backdrop-filter:blur(14px);
 }
 .cc-nav-brand{display:flex;align-items:center;gap:.6rem;text-decoration:none}
 .cc-nav-brand img{height:28px;width:auto}
@@ -56,16 +56,16 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 .cc-hero::before{
   content:"";position:absolute;top:-2rem;left:-2rem;right:-2rem;bottom:0;z-index:-1;
   background:
-    radial-gradient(ellipse 80% 60% at 50% -10%,rgba(192,132,252,.22) 0%,transparent 70%),
-    radial-gradient(ellipse 70% 50% at 50% 110%,rgba(245,213,107,.07) 0%,transparent 60%);
+    radial-gradient(ellipse 80% 60% at 50% -10%,rgba(45,106,79,.22) 0%,transparent 70%),
+    radial-gradient(ellipse 70% 50% at 50% 110%,rgba(201,168,76,.07) 0%,transparent 60%);
 }
 .cc-eyebrow{
   display:inline-flex;align-items:center;gap:.5rem;
   font-size:.72rem;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
   color:var(--gold);margin-bottom:1rem;
   padding:.35rem 1rem;border-radius:999px;
-  border:1px solid rgba(245,213,107,.3);
-  background:rgba(245,213,107,.08);
+  border:1px solid rgba(201,168,76,.3);
+  background:rgba(201,168,76,.08);
 }
 .cc-hero-title{
   font-family:'Playfair Display',Georgia,serif;
@@ -88,7 +88,7 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
   50% { transform: scale(1.05); opacity: 0.8; }
   100% { transform: scale(1); opacity: 1; }
 }
-.cc-chip.is-live{border-color:rgba(34,197,94,.4);background:rgba(34,197,94,.08);color:var(--emerald);animation:pulse 2s ease-in-out infinite;}
+.cc-chip.is-live{border-color:rgba(45,106,79,.4);background:rgba(45,106,79,.08);color:var(--emerald);animation:pulse 2s ease-in-out infinite;}
 
 /* ── PICKS GRID ────────────────────────── */
 .cc-picks{
@@ -99,7 +99,7 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 }
 .pick-card{
   border-radius:var(--r-lg);padding:1.75rem;
-  background:rgba(12,24,41,.8);border:1px solid var(--border);
+  background:rgba(14,30,22,.82);border:1px solid var(--border);
   position:relative;overflow:hidden;
   transition:transform .25s,box-shadow .25s;
 }
@@ -107,22 +107,22 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 .pick-card::before{
   content:"";position:absolute;top:0;left:0;right:0;height:3px;border-radius:var(--r-lg) var(--r-lg) 0 0;
 }
-.pick-card.gold::before{background:linear-gradient(90deg,var(--gold),#fbbf24)}
-.pick-card.gold{box-shadow:0 0 40px rgba(245,213,107,.08)}
-.pick-card.gold:hover{box-shadow:0 8px 50px rgba(245,213,107,.18)}
-.pick-card.emerald::before{background:linear-gradient(90deg,var(--emerald),#34d399)}
-.pick-card.emerald{box-shadow:0 0 40px rgba(34,197,94,.06)}
-.pick-card.emerald:hover{box-shadow:0 8px 50px rgba(34,197,94,.16)}
-.pick-card.violet::before{background:linear-gradient(90deg,var(--violet),#a78bfa)}
-.pick-card.violet{box-shadow:0 0 40px rgba(192,132,252,.06)}
-.pick-card.violet:hover{box-shadow:0 8px 50px rgba(192,132,252,.16)}
+.pick-card.gold::before{background:linear-gradient(90deg,var(--gold),#d4a017)}
+.pick-card.gold{box-shadow:0 0 40px rgba(201,168,76,.08)}
+.pick-card.gold:hover{box-shadow:0 8px 50px rgba(201,168,76,.18)}
+.pick-card.emerald::before{background:linear-gradient(90deg,var(--emerald),#40916c)}
+.pick-card.emerald{box-shadow:0 0 40px rgba(45,106,79,.06)}
+.pick-card.emerald:hover{box-shadow:0 8px 50px rgba(45,106,79,.16)}
+.pick-card.violet::before{background:linear-gradient(90deg,var(--violet),#e07a5f)}
+.pick-card.violet{box-shadow:0 0 40px rgba(193,102,107,.06)}
+.pick-card.violet:hover{box-shadow:0 8px 50px rgba(193,102,107,.16)}
 .pick-badge{
   display:inline-block;font-size:.65rem;font-weight:800;letter-spacing:.14em;
   text-transform:uppercase;padding:.28rem .75rem;border-radius:999px;margin-bottom:1rem;
 }
-.gold .pick-badge{background:rgba(245,213,107,.15);color:var(--gold);border:1px solid rgba(245,213,107,.35)}
-.emerald .pick-badge{background:rgba(34,197,94,.12);color:var(--emerald);border:1px solid rgba(34,197,94,.35)}
-.violet .pick-badge{background:rgba(192,132,252,.12);color:var(--violet);border:1px solid rgba(192,132,252,.35)}
+.gold .pick-badge{background:rgba(201,168,76,.15);color:var(--gold);border:1px solid rgba(201,168,76,.35)}
+.emerald .pick-badge{background:rgba(45,106,79,.12);color:var(--emerald);border:1px solid rgba(45,106,79,.35)}
+.violet .pick-badge{background:rgba(193,102,107,.12);color:var(--violet);border:1px solid rgba(193,102,107,.35)}
 .pick-number{font-size:.85rem;color:var(--muted);margin-bottom:.25rem;font-weight:500}
 .pick-name{
   font-family:'Playfair Display',Georgia,serif;
@@ -150,13 +150,13 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 }
 .take-inner{
   border-radius:var(--r-lg);padding:2.25rem 2.5rem;
-  background:rgba(12,24,41,.85);border:1px solid rgba(192,132,252,.25);
-  box-shadow:0 0 60px rgba(192,132,252,.06);
+  background:rgba(14,30,22,.85);border:1px solid rgba(193,102,107,.25);
+  box-shadow:0 0 60px rgba(193,102,107,.06);
   position:relative;
 }
 .take-inner::before{
   content:"\201C";font-family:'Playfair Display',Georgia,serif;
-  font-size:8rem;line-height:1;color:rgba(192,132,252,.12);
+  font-size:8rem;line-height:1;color:rgba(193,102,107,.12);
   position:absolute;top:-1rem;left:1.5rem;pointer-events:none;
 }
 .take-eyebrow{font-size:.72rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
@@ -172,7 +172,7 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 }
 .strategy-inner{
   border-radius:var(--r);padding:1.5rem 2rem;
-  background:rgba(245,213,107,.06);border:1px solid rgba(245,213,107,.22);
+  background:rgba(201,168,76,.06);border:1px solid rgba(201,168,76,.22);
 }
 .strategy-label{font-size:.72rem;font-weight:700;letter-spacing:.14em;text-transform:uppercase;
   color:var(--gold);margin-bottom:.6rem;display:flex;align-items:center;gap:.4rem}
@@ -186,9 +186,9 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 }
 .overview-inner{
   border-radius:var(--r-lg);padding:2rem 2.5rem;
-  background:linear-gradient(135deg,rgba(192,132,252,.08),rgba(245,213,107,.04));
-  border:1px solid rgba(192,132,252,.15);
-  box-shadow:0 0 60px rgba(192,132,252,.06);
+  background:linear-gradient(135deg,rgba(45,106,79,.08),rgba(201,168,76,.04));
+  border:1px solid rgba(45,106,79,.15);
+  box-shadow:0 0 60px rgba(45,106,79,.06);
 }
 .overview-eyebrow{
   font-size:.7rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;
@@ -222,7 +222,7 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 }
 .race-rail-item:hover{background:rgba(150,170,205,.1)}
 .race-rail-item.is-active{
-  border-color:var(--gold);background:rgba(245,213,107,.08);color:var(--gold);
+  border-color:var(--gold);background:rgba(201,168,76,.08);color:var(--gold);
 }
 .race-rail-item.is-active::before{
   content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--gold);
@@ -302,11 +302,11 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
   font-size:.65rem;font-weight:800;letter-spacing:.1em;text-transform:uppercase;
   padding:.3rem .7rem;border-radius:999px;display:inline-block;white-space:nowrap;
 }
-.rt-role.top-pick{background:rgba(245,213,107,.15);color:var(--gold);border:1px solid rgba(245,213,107,.35);}
-.rt-role.value-play{background:rgba(34,197,94,.12);color:var(--emerald);border:1px solid rgba(34,197,94,.35);}
-.rt-role.longshot{background:rgba(192,132,252,.12);color:var(--violet);border:1px solid rgba(192,132,252,.35);}
+.rt-role.top-pick{background:rgba(201,168,76,.15);color:var(--gold);border:1px solid rgba(201,168,76,.35);}
+.rt-role.value-play{background:rgba(45,106,79,.12);color:var(--emerald);border:1px solid rgba(45,106,79,.35);}
+.rt-role.longshot{background:rgba(193,102,107,.12);color:var(--violet);border:1px solid rgba(193,102,107,.35);}
 
-.rp-table tr.is-top-pick{background:rgba(245,213,107,.07);}
+.rp-table tr.is-top-pick{background:rgba(201,168,76,.07);}
 .rp-table tr.is-top-pick td:first-child{border-left:3px solid var(--gold);padding-left:calc(1.5rem - 3px);}
 .rp-table tr.is-longshot td:first-child{border-left:2px solid var(--violet);padding-left:calc(1.5rem - 2px);}
 
@@ -332,7 +332,7 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 
 /* Strategy Footer */
 .rp-footer{
-  padding:1.5rem;background:rgba(245,213,107,.04);border-top:1px solid rgba(245,213,107,.12);
+  padding:1.5rem;background:rgba(201,168,76,.04);border-top:1px solid rgba(201,168,76,.12);
   display:flex;flex-direction:column;gap:1.25rem;
 }
 .rp-strategy-text{flex:1;font-size:.95rem;line-height:1.6;color:var(--text);font-weight:500;}
@@ -347,11 +347,11 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
   min-width:110px;text-align:center;white-space:nowrap;
 }
 .rp-btn.btn-win{color:var(--gold);border:1px solid var(--gold);}
-.rp-btn.btn-win:hover{background:rgba(245,213,107,.15);}
+.rp-btn.btn-win:hover{background:rgba(201,168,76,.15);}
 .rp-btn.btn-exa{color:var(--emerald);border:1px solid var(--emerald);}
-.rp-btn.btn-exa:hover{background:rgba(34,197,94,.15);}
+.rp-btn.btn-exa:hover{background:rgba(45,106,79,.15);}
 .rp-btn.btn-tri{color:var(--violet);border:1px solid var(--violet);}
-.rp-btn.btn-tri:hover{background:rgba(192,132,252,.15);}
+.rp-btn.btn-tri:hover{background:rgba(193,102,107,.15);}
 @media(min-width:768px){
   .rp-footer{flex-direction:row;align-items:center;justify-content:space-between;}
   .rp-actions{flex-shrink:0;flex-direction:column;}
@@ -375,7 +375,7 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 <!-- NAV -->
 <nav class="cc-nav">
   <a class="cc-nav-brand" href="/">
-    <img src="/static/img/trackstar-mark.svg" alt="{{ brand_name }}">
+    <img src="/static/img/asset1.jpg" alt="{{ brand_name }}">
     <span>{{ brand_name }}</span>
   </a>
   <a class="cc-nav-back" href="/">← All Cards</a>
@@ -383,16 +383,16 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 
 <!-- HERO -->
 <section class="cc-hero">
-  <div class="cc-eyebrow">✦ Curated Betting Card</div>
+  <div class="cc-eyebrow">🌴 Curated Betting Card</div>
   <h1 class="cc-hero-title">{{ track_name }}</h1>
-  <p class="cc-hero-sub">Expert picks and AI-backed strategy for every race on the card.</p>
+  <p class="cc-hero-sub">Laid-back picks and sharp strategy for every race on the card.</p>
   <div class="cc-meta-chips">
     <span class="cc-chip">📅 {{ race_date }}</span>
     <span class="cc-chip">🏟 {{ track_name }}</span>
     {% if card_status == 'live' %}
     <span class="cc-chip is-live">● Live</span>
     {% elif card_status == 'upcoming' %}
-    <span class="cc-chip" style="background:rgba(110,168,254,.15);color:#6ea8fe;border:1px solid rgba(110,168,254,.35)">📅 Upcoming</span>
+    <span class="cc-chip" style="background:rgba(46,134,171,.15);color:#2E86AB;border:1px solid rgba(46,134,171,.35)">📅 Upcoming</span>
     {% elif card_status == 'completed' %}
     <span class="cc-chip" style="background:rgba(108,117,125,.15);color:#adb5bd;border:1px solid rgba(108,117,125,.35)">🏁 Completed</span>
     {% endif %}
@@ -614,7 +614,7 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
 {% if card.admin_notes %}
 <div class="cc-take">
   <div class="take-inner">
-    <div class="take-eyebrow">Expert's Take</div>
+    <div class="take-eyebrow">Paddock Notes</div>
     <div class="take-body">{{ card.admin_notes }}</div>
   </div>
 </div>
@@ -652,8 +652,8 @@ body::after{right:-10rem;bottom:4rem;background:#8b5cf6}
       </div>
     </div>
   </div>
-  <p>Built by <a href="/">{{ brand_name }}</a> &mdash; AI-curated picks for serious horseplayers.</p>
-  <p style="margin-top:.4rem;font-size:.72rem">For entertainment and research purposes. Always wager responsibly.</p>
+  <p>Built by <a href="/">{{ brand_name }}</a> &mdash; Chill picks for smart horseplayers.</p>
+  <p style="margin-top:.4rem;font-size:.72rem">For entertainment and research purposes. Always wager responsibly. 🌴</p>
 </footer>
 
 <script>

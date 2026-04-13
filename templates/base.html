@@ -15,7 +15,8 @@
     <!-- Font Awesome -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <!-- Custom CSS -->
-    <link href="/static/css/style.css?v=4.2.0" rel="stylesheet">
+    <link href="/static/css/style.css?v=5.0.0" rel="stylesheet">
+    <link rel="icon" type="image/jpeg" href="/static/img/asset5.jpg">
 
     {% block extra_head %}{% endblock %}
 </head>
@@ -24,10 +25,10 @@
     <nav class="navbar navbar-expand-lg navbar-dark">
         <div class="container">
             <a class="navbar-brand d-flex align-items-center gap-2" href="/">
-                <img src="/static/img/trackstar-mark.svg" alt="{{ brand_name }}" class="brand-logo">
+                <img src="/static/img/asset1.jpg" alt="{{ brand_name }}" class="brand-logo">
                 <span class="brand-wordmark">
                     <span>{{ brand_name }}</span>
-                    <span class="brand-submark">AI-Powered Horse Racing Picks</span>
+                    <span class="brand-submark">Where the Turf Meets the Surf</span>
                 </span>
             </a>
             {% if user_role == 'admin' %}
@@ -78,7 +79,7 @@
             </div>
             <div class="text-center">
                 <p class="mb-1 small fw-medium">{{ brand_name }}</p>
-                <small>AI-curated picks for serious horseplayers. For entertainment and research purposes. Always wager responsibly.</small>
+                <small>Laid-back picks for smart horseplayers · Del Mar · Santa Anita · Always wager responsibly.</small>
             </div>
         </div>
     </footer>
