@@ -66,15 +66,15 @@
   <div class="stat-card"><div class="stat-val sky">{{ summary.exacta_hit_rate_pct or 0 }}%</div><div class="stat-lbl">Exacta Hit Rate</div></div>
   <div class="stat-card"><div class="stat-val sky">{{ summary.trifecta_hit_rate_pct or 0 }}%</div><div class="stat-lbl">Trifecta Hit Rate</div></div>
   <div class="stat-card"><div class="stat-val">{{ summary.best_winner_odds_overall or '—' }}</div><div class="stat-lbl">Best Winner Odds</div></div>
-  <div class="stat-card"><div class="stat-val em">${{ summary.best_exacta_payout_overall|round(2) if summary.best_exacta_payout_overall else '—' }}</div><div class="stat-lbl">Best Exacta Payout</div></div>
-  <div class="stat-card"><div class="stat-val em">${{ summary.best_trifecta_payout_overall|round(2) if summary.best_trifecta_payout_overall else '—' }}</div><div class="stat-lbl">Best Trifecta Payout</div></div>
+  <div class="stat-card"><div class="stat-val em">{% if summary.best_exacta_payout_overall %}${{ '%.2f'|format(summary.best_exacta_payout_overall) }}{% else %}—{% endif %}</div><div class="stat-lbl">Best $1 Exacta Payout</div></div>
+  <div class="stat-card"><div class="stat-val em">{% if summary.best_trifecta_payout_overall %}${{ '%.2f'|format(summary.best_trifecta_payout_overall) }}{% else %}—{% endif %}</div><div class="stat-lbl">Best $1 Trifecta Payout</div></div>
 </div>
 
 <div class="record-container">
   <div class="rec-table-wrap">
     <table class="rec-table table-desktop">
       <thead>
-        <tr><th>Date</th><th>Track</th><th>Daily Score</th><th>Top Picks Won</th><th>Exactas</th><th>Trifectas</th><th>Best Winner</th></tr>
+        <tr><th>Date</th><th>Track</th><th>Daily Profitability</th><th>Top Picks Won</th><th>Exactas</th><th>Trifectas</th><th>Best Winner</th></tr>
       </thead>
       <tbody>
         {% for r in records %}
@@ -82,7 +82,7 @@
         <tr class="rec-summary-row {% if selected_record and selected_record.track_id == r.track_id and selected_record.race_date == r.race_date %}is-active{% endif %}" data-route-link data-route-path="{{ r.public_url }}" data-selected-key="{{ record_key }}" tabindex="0" role="link" {% if selected_record and selected_record.track_id == r.track_id and selected_record.race_date == r.race_date %}aria-current="page"{% endif %}>
           <td><a href="{{ r.public_url }}" class="rec-row-link" data-route-link data-route-path="{{ r.public_url }}">{{ r.race_date }}</a></td>
           <td class="rec-track-cell">{{ r.track_name }}</td>
-          <td><span class="rec-score {% if r.daily_score >= 70 %}score-high{% elif r.daily_score >= 40 %}score-mid{% else %}score-low{% endif %}">{{ r.daily_score }}</span></td>
+          <td><span class="rec-score {% if r.profitability_score >= 70 %}score-high{% elif r.profitability_score >= 40 %}score-mid{% else %}score-low{% endif %}">{{ r.profitability_score }}</span></td>
           <td>{{ r.top_pick_wins }} / {{ r.top_pick_total }}</td>
           <td>{{ r.exacta_hits }}</td>
           <td>{{ r.trifecta_hits }}</td>
@@ -98,7 +98,7 @@
       {% for r in records %}
       {% set record_key = r.track_id ~ '::' ~ r.race_date %}
       <a href="{{ r.public_url }}" class="mobile-record-link {% if selected_record and selected_record.track_id == r.track_id and selected_record.race_date == r.race_date %}is-active{% endif %}" data-route-link data-route-path="{{ r.public_url }}" data-selected-key="{{ record_key }}" {% if selected_record and selected_record.track_id == r.track_id and selected_record.race_date == r.race_date %}aria-current="page"{% endif %}>
-        <div class="rec-mobile-head"><div><span class="mobile-card-label">Race Day</span><div class="mobile-card-value">{{ r.race_date }}</div><div class="rec-mobile-track">{{ r.track_name }}</div></div><div class="rec-mobile-score rec-score {% if r.daily_score >= 70 %}score-high{% elif r.daily_score >= 40 %}score-mid{% else %}score-low{% endif %}">{{ r.daily_score }}</div></div>
+        <div class="rec-mobile-head"><div><span class="mobile-card-label">Race Day</span><div class="mobile-card-value">{{ r.race_date }}</div><div class="rec-mobile-track">{{ r.track_name }}</div></div><div class="rec-mobile-score rec-score {% if r.profitability_score >= 70 %}score-high{% elif r.profitability_score >= 40 %}score-mid{% else %}score-low{% endif %}">{{ r.profitability_score }}</div></div>
         <div class="mobile-card-grid">
           <div><span class="mobile-card-label">Top Picks Won</span><div class="mobile-card-value">{{ r.top_pick_wins }} / {{ r.top_pick_total }}</div></div>
           <div><span class="mobile-card-label">Exactas</span><div class="mobile-card-value">{{ r.exacta_hits }}</div></div>
@@ -126,7 +126,7 @@
         <div>
           <p class="recap-panel-kicker">Verified Recap</p>
           <h2 class="recap-panel-title">{{ r.track_name }} · {{ r.race_date }}</h2>
-          <p class="recap-panel-sub">Daily score {{ r.daily_score }}/100 with {{ r.top_pick_wins }} top-pick wins, {{ r.exacta_hits }} exacta hits, and {{ r.trifecta_hits }} trifecta hits.</p>
+          <p class="recap-panel-sub">Daily profitability score {{ r.profitability_score }}/100 with {{ r.top_pick_wins }} top-pick wins, {{ r.exacta_hits }} exacta hits, and {{ r.trifecta_hits }} trifecta hits.</p>
         </div>
         <div class="recap-panel-actions">
           <a href="/record" class="recap-panel-action" data-route-link data-route-path="/record">← Summary</a>
@@ -135,7 +135,7 @@
       </div>
 
       <div class="recap-stat-grid">
-        <div class="recap-stat-card"><div class="recap-stat-value">{{ r.daily_score }}</div><div class="recap-stat-label">Daily Score</div></div>
+        <div class="recap-stat-card"><div class="recap-stat-value">{{ r.profitability_score }}</div><div class="recap-stat-label">Daily Profitability Score</div></div>
         <div class="recap-stat-card"><div class="recap-stat-value">{{ r.top_pick_wins }} / {{ r.top_pick_total }}</div><div class="recap-stat-label">Top Picks Won</div></div>
         <div class="recap-stat-card"><div class="recap-stat-value">{{ r.exacta_hits }}</div><div class="recap-stat-label">Exacta Hits</div></div>
         <div class="recap-stat-card"><div class="recap-stat-value">{{ r.trifecta_hits }}</div><div class="recap-stat-label">Trifecta Hits</div></div>
@@ -152,16 +152,16 @@
             <div class="dr-stat"><strong>Value Play</strong>{{ race.our_value_play or '—' }}</div>
             <div class="dr-stat"><strong>Longshot</strong>{{ race.our_longshot or '—' }}</div>
             <div class="dr-stat"><strong>Winner Odds</strong>{{ race.winner_odds or '—' }}</div>
-            <div class="dr-stat"><strong>Exacta Payout</strong>${{ race.exacta_payout or 0 }}</div>
-            <div class="dr-stat"><strong>Trifecta Payout</strong>${{ race.trifecta_payout or 0 }}</div>
+            <div class="dr-stat"><strong>$1 Exacta Payout</strong>{% if race.exacta_payout %}${{ '%.2f'|format(race.exacta_payout) }}{% else %}—{% endif %}</div>
+            <div class="dr-stat"><strong>$1 Trifecta Payout</strong>{% if race.trifecta_payout %}${{ '%.2f'|format(race.trifecta_payout) }}{% else %}—{% endif %}</div>
           </div>
           {% if race.hits %}
           <div class="dr-hits">
             {% if race.hits.top_pick_won %}<span class="hit-badge">Top Pick</span>{% endif %}
             {% if race.hits.value_play_won %}<span class="hit-badge">Value Play</span>{% endif %}
             {% if race.hits.longshot_won %}<span class="hit-badge">Longshot</span>{% endif %}
-            {% if race.hits.exacta_hit %}<span class="hit-badge">Exacta (${{ race.exacta_payout }})</span>{% endif %}
-            {% if race.hits.trifecta_hit %}<span class="hit-badge">Trifecta (${{ race.trifecta_payout }})</span>{% endif %}
+            {% if race.hits.exacta_hit %}<span class="hit-badge">Exacta (${{ '%.2f'|format(race.exacta_payout or 0) }})</span>{% endif %}
+            {% if race.hits.trifecta_hit %}<span class="hit-badge">Trifecta (${{ '%.2f'|format(race.trifecta_payout or 0) }})</span>{% endif %}
             {% if race.hits.hedge_exacta_hit %}<span class="hit-badge">Hedge Exacta</span>{% endif %}
           </div>
           {% endif %}

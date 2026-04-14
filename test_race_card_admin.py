@@ -1195,7 +1195,77 @@ class PublicRecordRoutingTests(unittest.TestCase):
         self.assertEqual(response["context"]["canonical_url"], "https://trackstar.test/record")
         self.assertIsNone(response["context"]["selected_record"])
         self.assertEqual(response["context"]["records"][0]["public_url"], "/record/santa-anita/2026-03-13")
+        self.assertEqual(response["context"]["records"][0]["profitability_score"], 78.5)
+        self.assertEqual(
+            response["context"]["record_page_data"]["recaps"]["/record/santa-anita/2026-03-13"]["dailyScore"],
+            78.5,
+        )
         self.assertIn("/record/santa-anita/2026-03-13", response["context"]["record_page_data"]["recaps"])
+
+    def test_record_page_prefers_profitability_score_over_legacy_daily_score_display(self):
+        session_manager = self._session_manager_stub()
+        profitability_record = self._recap_record()
+        profitability_record["daily_score"] = 19.2
+        profitability_record["top_pick_wins"] = 3
+        profitability_record["top_pick_total"] = 10
+        profitability_record["exacta_hits"] = 1
+        profitability_record["exacta_total"] = 10
+        profitability_record["trifecta_hits"] = 1
+        profitability_record["trifecta_total"] = 10
+        profitability_record["best_exacta_payout"] = 61.36
+        profitability_record["best_trifecta_payout"] = 291.6
+        profitability_record["races_recap_json"][0]["exacta_payout"] = 61.36
+        profitability_record["races_recap_json"][0]["trifecta_payout"] = 291.6
+        profitability_record["races_recap_json"][0]["exotic_payout_unit"] = "1_dollar"
+        profitability_record["races_recap_json"][0]["hits"]["exacta_hit"] = True
+        profitability_record["races_recap_json"][0]["hits"]["trifecta_hit"] = True
+
+        summary = self._recap_summary()
+        summary["records"] = [profitability_record]
+        session_manager.get_recap_summary_30d = AsyncMock(return_value=summary)
+
+        original = app_module.app_state.ensure_session_manager
+        try:
+            app_module.app_state.ensure_session_manager = AsyncMock(return_value=session_manager)
+            response = app_module.asyncio.run(app_module.record_page(self._fake_request()))
+        finally:
+            app_module.app_state.ensure_session_manager = original
+
+        record = response["context"]["records"][0]
+        self.assertEqual(record["daily_score"], 19.2)
+        self.assertEqual(record["profitability_score"], 61.6)
+        self.assertNotEqual(record["profitability_score"], record["daily_score"])
+        self.assertEqual(
+            response["context"]["record_page_data"]["recaps"]["/record/santa-anita/2026-03-13"]["dailyScore"],
+            61.6,
+        )
+
+    def test_record_page_normalizes_legacy_two_dollar_exotic_payouts_for_display(self):
+        session_manager = self._session_manager_stub()
+        legacy_record = self._recap_record()
+        legacy_record["best_exacta_payout"] = 79.4
+        legacy_record["best_trifecta_payout"] = 482.4
+        legacy_record["races_recap_json"][0]["exacta_payout"] = 79.4
+        legacy_record["races_recap_json"][0]["trifecta_payout"] = 482.4
+
+        summary = self._recap_summary()
+        summary["records"] = [legacy_record]
+        summary["summary"]["best_exacta_payout_overall"] = 79.4
+        summary["summary"]["best_trifecta_payout_overall"] = 482.4
+        session_manager.get_recap_summary_30d = AsyncMock(return_value=summary)
+
+        original = app_module.app_state.ensure_session_manager
+        try:
+            app_module.app_state.ensure_session_manager = AsyncMock(return_value=session_manager)
+            response = app_module.asyncio.run(app_module.record_page(self._fake_request()))
+        finally:
+            app_module.app_state.ensure_session_manager = original
+
+        race = response["context"]["records"][0]["races_recap_json"][0]
+        self.assertEqual(race["exacta_payout"], 39.7)
+        self.assertEqual(race["trifecta_payout"], 241.2)
+        self.assertEqual(response["context"]["summary"]["best_exacta_payout_overall"], 39.7)
+        self.assertEqual(response["context"]["summary"]["best_trifecta_payout_overall"], 241.2)
 
     def test_recap_detail_page_builds_canonical_detail_context(self):
         session_manager = self._session_manager_stub()
@@ -1211,6 +1281,7 @@ class PublicRecordRoutingTests(unittest.TestCase):
         self.assertEqual(response["template"], "record.html")
         self.assertEqual(response["context"]["view_mode"], "recap")
         self.assertEqual(response["context"]["selected_record"]["track_id"], "SA")
+        self.assertEqual(response["context"]["selected_record"]["profitability_score"], 78.5)
         self.assertEqual(response["context"]["canonical_url"], "https://trackstar.test/record/santa-anita/2026-03-13")
         self.assertEqual(response["context"]["record_page_data"]["selectedKey"], "SA::2026-03-13")
 
@@ -1242,6 +1313,74 @@ class PublicRecordRoutingTests(unittest.TestCase):
 
         self.assertIn("https://trackstar.test/record", sitemap.content)
         self.assertIn("https://trackstar.test/record/santa-anita/2026-03-13", sitemap.content)
+
+
+class GenerateRecapNormalizationTests(unittest.TestCase):
+    def setUp(self):
+        self.original_session_manager = app_module.app_state.session_manager
+        self.original_openrouter_client = app_module.app_state.openrouter_client
+        self.original_admin_password = app_module.app_state.config.web.admin_password
+        self.original_auth_secret = app_module.app_state.config.web.auth_secret
+        self.original_cached_auth_secret = app_module._AUTH_SECRET
+
+        self.session_manager = type("RecapSessionManagerStub", (), {})()
+        self.session_manager.get_curated_card = AsyncMock(return_value={
+            "race_date": "2026-04-13",
+            "track_id": "PRX",
+            "races_json": [
+                {
+                    "race_number": 1,
+                    "top_pick": "Matzoball Muhammet",
+                    "value_play": "Gentleman Don",
+                    "longshot": "Craigh Na Dun",
+                    "betting_strategy": "Exacta 6-3 and trifecta 6-3-2",
+                }
+            ],
+        })
+        self.session_manager.save_recap_record = AsyncMock(return_value="recap-123")
+
+        self.openrouter_client = type("OpenRouterClientStub", (), {})()
+        self.openrouter_client.api_key = "test-key"
+        self.openrouter_client.call_model = AsyncMock(return_value={
+            "content": '{"races":[{"race_number":1,"winner":"Foil","winner_odds":"13-1","top_pick_won":false,"value_play_won":false,"longshot_won":false,"exacta_hit":false,"trifecta_hit":true,"exacta_payout_source":79.40,"exacta_payout_base_amount":2.0,"exacta_payout":39.70,"trifecta_payout_source":120.60,"trifecta_payout_base_amount":0.5,"trifecta_payout":241.20,"recap_note":"Official Equibase payouts captured.","data_available":true}]}'
+        })
+
+        app_module.app_state.session_manager = self.session_manager
+        app_module.app_state.openrouter_client = self.openrouter_client
+        app_module.app_state.config.web.admin_password = "super-secret"
+        app_module.app_state.config.web.auth_secret = "signing-secret"
+        app_module._AUTH_SECRET = None
+        self.admin_request = types.SimpleNamespace(
+            cookies={app_module.AUTH_COOKIE_NAME: app_module._sign_value("admin")}
+        )
+
+    def tearDown(self):
+        app_module.app_state.session_manager = self.original_session_manager
+        app_module.app_state.openrouter_client = self.original_openrouter_client
+        app_module.app_state.config.web.admin_password = self.original_admin_password
+        app_module.app_state.config.web.auth_secret = self.original_auth_secret
+        app_module._AUTH_SECRET = self.original_cached_auth_secret
+
+    def test_generate_recap_normalizes_exotic_payouts_to_one_dollar_before_save(self):
+        request = app_module.GenerateRecapRequest(
+            session_id="session-123",
+            race_date="2026-04-13",
+            track_id="PRX",
+        )
+
+        response = app_module.asyncio.run(app_module.generate_recap(request, self.admin_request))
+        saved_payload = self.session_manager.save_recap_record.await_args.kwargs["races_recap_json"]
+        saved_race = app_module.json.loads(saved_payload)[0]
+        prompt = self.openrouter_client.call_model.await_args.kwargs["prompt"]
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("normalized payout for a $1 exacta bet and a $1 trifecta bet", prompt)
+        self.assertEqual(saved_race["exacta_payout"], 39.7)
+        self.assertEqual(saved_race["trifecta_payout"], 241.2)
+        self.assertEqual(saved_race["exacta_payout_source"], 79.4)
+        self.assertEqual(saved_race["trifecta_payout_source"], 120.6)
+        self.assertEqual(saved_race["exotic_payout_unit"], "1_dollar")
+        self.assertEqual(self.session_manager.save_recap_record.await_args.kwargs["best_trifecta_payout"], 241.2)
 
 if __name__ == "__main__":
     unittest.main()

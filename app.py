@@ -12,6 +12,7 @@ import hashlib
 import json
 import hmac
 import logging
+import math
 import os
 import re
 import secrets
@@ -592,14 +593,14 @@ def _build_recap_meta_title(track_name: str, race_date: str) -> str:
 def _build_recap_meta_description(record: Dict[str, Any], track_name: str, race_date: str) -> str:
     top_pick_wins = record.get("top_pick_wins", 0)
     top_pick_total = record.get("top_pick_total", 0)
-    daily_score = record.get("daily_score", 0)
+    profitability_score = record.get("profitability_score", record.get("daily_score", 0))
     exacta_hits = record.get("exacta_hits", 0)
     trifecta_hits = record.get("trifecta_hits", 0)
     best_winner = record.get("best_winner_horse") or ""
     best_winner_odds = record.get("best_winner_odds") or ""
     parts = [
         f"TrackStarAI recap for {track_name} on {race_date}.",
-        f"Daily score: {daily_score}/100.",
+        f"Profitability score: {profitability_score}/100.",
         f"Top picks won: {top_pick_wins} of {top_pick_total}.",
         f"Exacta hits: {exacta_hits}.",
         f"Trifecta hits: {trifecta_hits}.",
@@ -609,17 +610,145 @@ def _build_recap_meta_description(record: Dict[str, Any], track_name: str, race_
     return _normalize_public_text(" ".join(parts), max_length=170)
 
 
+def _normalize_currency_amount(value: Any) -> float:
+    try:
+        return round(float(value), 2)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _normalize_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_payout_to_one_dollar(
+    payout_value: Any,
+    *,
+    source_base_amount: Any = None,
+    assume_legacy_two_dollar: bool = False,
+) -> float:
+    payout = _normalize_currency_amount(payout_value)
+    if payout <= 0:
+        return 0.0
+
+    base_amount = _normalize_currency_amount(source_base_amount)
+    if base_amount > 0:
+        return round(payout / base_amount, 2)
+
+    if assume_legacy_two_dollar:
+        return round(payout / 2.0, 2)
+
+    return payout
+
+
+def _normalize_recap_race_exotic_payouts(
+    race: Dict[str, Any],
+    *,
+    assume_legacy_two_dollar: bool = False,
+) -> Dict[str, Any]:
+    normalized = copy.deepcopy(race)
+    payout_unit = str(normalized.get("exotic_payout_unit") or "").strip().lower()
+
+    if payout_unit == "1_dollar":
+        normalized["exacta_payout"] = _normalize_currency_amount(normalized.get("exacta_payout"))
+        normalized["trifecta_payout"] = _normalize_currency_amount(normalized.get("trifecta_payout"))
+    else:
+        normalized["exacta_payout"] = _normalize_payout_to_one_dollar(
+            normalized.get("exacta_payout_source", normalized.get("exacta_payout")),
+            source_base_amount=normalized.get("exacta_payout_base_amount"),
+            assume_legacy_two_dollar=assume_legacy_two_dollar,
+        )
+        normalized["trifecta_payout"] = _normalize_payout_to_one_dollar(
+            normalized.get("trifecta_payout_source", normalized.get("trifecta_payout")),
+            source_base_amount=normalized.get("trifecta_payout_base_amount"),
+            assume_legacy_two_dollar=assume_legacy_two_dollar,
+        )
+
+    normalized["exotic_payout_unit"] = "1_dollar"
+    return normalized
+
+
+def _recompute_best_hit_payouts(records: List[Dict[str, Any]]) -> Dict[str, float]:
+    best_exacta_payout = 0.0
+    best_trifecta_payout = 0.0
+
+    for record in records:
+        for race in record.get("races_recap_json") or []:
+            race_hits = race.get("hits") or {}
+            if race.get("exacta_hit") or race_hits.get("exacta_hit"):
+                best_exacta_payout = max(best_exacta_payout, _normalize_currency_amount(race.get("exacta_payout")))
+            if race.get("trifecta_hit") or race_hits.get("trifecta_hit"):
+                best_trifecta_payout = max(best_trifecta_payout, _normalize_currency_amount(race.get("trifecta_payout")))
+
+    return {
+        "best_exacta_payout_overall": round(best_exacta_payout, 2),
+        "best_trifecta_payout_overall": round(best_trifecta_payout, 2),
+    }
+
+
+def _compute_profitability_score(
+    *,
+    top_pick_wins: Any,
+    top_pick_total: Any,
+    exacta_hits: Any,
+    trifecta_hits: Any,
+    best_exacta_payout: Any,
+    best_trifecta_payout: Any,
+) -> float:
+    total_races = _normalize_float(top_pick_total)
+    if total_races <= 0:
+        return 0.0
+
+    base = (
+        _normalize_float(top_pick_wins) * 1.5
+        + _normalize_float(exacta_hits) * 3.0
+        + _normalize_float(trifecta_hits) * 5.0
+    )
+    raw_efficiency = base / total_races
+    max_payout = max(
+        _normalize_currency_amount(best_exacta_payout),
+        _normalize_currency_amount(best_trifecta_payout),
+    )
+    payout_impact = math.log10(max(max_payout, 10.0))
+    return round(min(100.0, raw_efficiency * payout_impact * 20.0), 1)
+
+
+def _compute_record_profitability_score(record: Dict[str, Any]) -> float:
+    return _compute_profitability_score(
+        top_pick_wins=record.get("top_pick_wins", 0),
+        top_pick_total=record.get("top_pick_total", 0),
+        exacta_hits=record.get("exacta_hits", 0),
+        trifecta_hits=record.get("trifecta_hits", 0),
+        best_exacta_payout=record.get("best_exacta_payout", 0),
+        best_trifecta_payout=record.get("best_trifecta_payout", 0),
+    )
+
+
 def _prepare_public_recap_record(request: Request, record: Dict[str, Any]) -> Dict[str, Any]:
     recap = copy.deepcopy(record)
     track_id = recap.get("track_id") or ""
     race_date = recap.get("race_date") or ""
     track_name = SUPPORTED_TRACKS.get(track_id, track_id)
+    races_recap_json = recap.get("races_recap_json") or []
+    if isinstance(races_recap_json, list):
+        recap["races_recap_json"] = [
+            _normalize_recap_race_exotic_payouts(race, assume_legacy_two_dollar=True)
+            for race in races_recap_json
+            if isinstance(race, dict)
+        ]
+    payout_summary = _recompute_best_hit_payouts([recap])
     recap["track_name"] = track_name
     recap["track_slug"] = get_track_slug(track_id)
     recap["public_url"] = _build_public_recap_path(track_id, race_date)
     recap["absolute_url"] = _to_public_absolute_url(request, recap["public_url"])
     recap["card_url"] = _build_public_card_path(track_id, race_date)
     recap["card_absolute_url"] = _to_public_absolute_url(request, recap["card_url"])
+    recap["best_exacta_payout"] = payout_summary["best_exacta_payout_overall"]
+    recap["best_trifecta_payout"] = payout_summary["best_trifecta_payout_overall"]
+    recap["profitability_score"] = _compute_record_profitability_score(recap)
     recap["meta_title"] = _build_recap_meta_title(track_name, race_date)
     recap["meta_description"] = _build_recap_meta_description(recap, track_name, race_date)
     return recap
@@ -636,6 +765,12 @@ def _build_record_index_meta(request: Request, summary: Dict[str, Any]) -> Dict[
         "view_mode": "summary",
         "selected_key": None,
     }
+
+
+def _build_public_record_summary(summary: Dict[str, Any], records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    normalized_summary = dict(summary or {})
+    normalized_summary.update(_recompute_best_hit_payouts(records))
+    return normalized_summary
 
 
 def _build_record_structured_data(
@@ -719,6 +854,7 @@ async def _build_record_page_context(
         data = await asyncio.wait_for(session_manager.get_recap_summary_30d(), timeout=5.0)
         summary = data.get("summary", {})
         records = [_prepare_public_recap_record(request, record) for record in data.get("records", [])]
+        summary = _build_public_record_summary(summary, records)
     except Exception as e:
         logger.warning(f"Failed to load recap summary for record page: {e}")
 
@@ -761,7 +897,8 @@ async def _build_record_page_context(
             "selected_key": f"{record.get('track_id')}::{record.get('race_date')}",
             "trackName": record.get("track_name"),
             "raceDate": record.get("race_date"),
-            "dailyScore": record.get("daily_score"),
+            "dailyScore": record.get("profitability_score"),
+            "profitabilityScore": record.get("profitability_score"),
         }
         for record in records
     }
@@ -3051,7 +3188,10 @@ For each race, determine:
 4. exacta_hit: Set to true ONLY if the betting_strategy explicitly specifies an exacta wager AND the exact combination mentioned finished in the correct 1st-2nd order (or boxed). Do NOT set true simply because the top pick placed — exacta_hit requires both a stated exacta bet in the strategy AND that specific combo hitting. If the betting_strategy does not mention an exacta, set exacta_hit=false.
 5. trifecta_hit: Set to true ONLY if the betting_strategy explicitly specifies a trifecta wager AND that exact 1st-2nd-3rd combination hit. If the betting_strategy does not mention a trifecta, set trifecta_hit=false.
 6. The actual winner's name and odds
-7. The official exacta and trifecta payouts for the race (per $2 base) — report the actual race result payouts regardless of whether our bet hit. Set to 0.0 if not available.
+7. For exacta and trifecta, capture the OFFICIAL listed payout and the OFFICIAL listed base amount exactly as shown on the results page. Then also compute the normalized payout for a $1 exacta bet and a $1 trifecta bet.
+   - Example: if the page shows "$2 Exacta ... 79.40", return exacta_payout_source=79.40, exacta_payout_base_amount=2.0, and exacta_payout=39.70.
+   - Example: if the page shows "$0.50 Trifecta ... 120.60", return trifecta_payout_source=120.60, trifecta_payout_base_amount=0.5, and trifecta_payout=241.20.
+   - Do NOT normalize to $2. The displayed payout must represent the value of a $1 wager.
 
 Return ONLY valid JSON:
 {{
@@ -3067,7 +3207,11 @@ Return ONLY valid JSON:
       "longshot_won": false,
       "exacta_hit": false,
       "trifecta_hit": false,
+      "exacta_payout_source": 0.0,
+      "exacta_payout_base_amount": 0.0,
       "exacta_payout": 0.0,
+      "trifecta_payout_source": 0.0,
+      "trifecta_payout_base_amount": 0.0,
       "trifecta_payout": 0.0,
       "recap_note": "Brief note on the outcome...",
       "data_available": true
@@ -3109,7 +3253,11 @@ If results for a race are not available, set data_available=false and leave othe
             else:
                 raise HTTPException(status_code=502, detail="Could not parse Grok recap response as JSON")
 
-        recap_races = parsed.get("races", [])
+        recap_races = [
+            _normalize_recap_race_exotic_payouts(race)
+            for race in parsed.get("races", [])
+            if isinstance(race, dict)
+        ]
 
         # ── 3. Score the recap ────────────────────────────────────────────────
         # 13 max points per race:
