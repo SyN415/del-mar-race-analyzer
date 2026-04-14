@@ -13,16 +13,21 @@ import json
 import hmac
 import logging
 import os
+import re
 import secrets
 import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
+from xml.sax.saxutils import escape as xml_escape
 
-import uvicorn
+try:
+    import uvicorn
+except ImportError:  # pragma: no cover - optional unless running app.py directly
+    uvicorn = None
 from fastapi import FastAPI, Request, BackgroundTasks, HTTPException
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
@@ -307,6 +312,30 @@ def _template_context(request: Request, title: str, **extra):
     return context
 
 
+def _normalize_public_text(value: Any, max_length: int = 180) -> str:
+    """Collapse whitespace and trim text to a sensible SEO-safe length."""
+    collapsed = " ".join(str(value or "").split())
+    if len(collapsed) <= max_length:
+        return collapsed
+    trimmed = collapsed[: max_length - 1].rsplit(" ", 1)[0].rstrip(" ,.;:-")
+    return f"{trimmed or collapsed[: max_length - 1]}…"
+
+
+def _coerce_int(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_valid_race_date(value: str) -> bool:
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def _render_login_page(
     request: Request,
     *,
@@ -425,6 +454,335 @@ for _tid, _val in _raw_track_config.items():
 SUPPORTED_TRACKS: Dict[str, str] = {tid: cfg["name"] for tid, cfg in TRACK_CONFIG_FULL.items()}
 # Country lookup: {track_id: country_code}
 TRACK_COUNTRIES: Dict[str, str] = {tid: cfg["country"] for tid, cfg in TRACK_CONFIG_FULL.items()}
+TRACK_SLUGS: Dict[str, str] = {}
+TRACK_IDS_BY_SLUG: Dict[str, str] = {}
+
+
+def _slugify_track_name(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower())
+    slug = re.sub(r"-{2,}", "-", slug).strip("-")
+    return slug or "track"
+
+
+for _track_id, _track_name in SUPPORTED_TRACKS.items():
+    _slug = _slugify_track_name(_track_name)
+    if _slug in TRACK_IDS_BY_SLUG and TRACK_IDS_BY_SLUG[_slug] != _track_id:
+        _slug = f"{_slug}-{_track_id.lower()}"
+    TRACK_SLUGS[_track_id] = _slug
+    TRACK_IDS_BY_SLUG[_slug] = _track_id
+
+
+def get_track_slug(track_id: str) -> str:
+    return TRACK_SLUGS.get(track_id, _slugify_track_name(SUPPORTED_TRACKS.get(track_id, track_id)))
+
+
+def get_track_id_from_slug(track_slug: str) -> Optional[str]:
+    return TRACK_IDS_BY_SLUG.get((track_slug or "").strip().lower())
+
+
+def _build_public_card_path(track_id: str, race_date: str) -> str:
+    return f"/{get_track_slug(track_id)}/{race_date}"
+
+
+def _build_public_race_path(track_id: str, race_date: str, race_number: int) -> str:
+    return f"{_build_public_card_path(track_id, race_date)}/race-{race_number}"
+
+
+def _get_public_base_url(request: Request) -> str:
+    configured = os.environ.get("PUBLIC_BASE_URL", "").strip()
+    if configured:
+        return configured.rstrip("/")
+    base_url = getattr(request, "base_url", "http://testserver/")
+    return str(base_url).rstrip("/")
+
+
+def _to_public_absolute_url(request: Request, path: str) -> str:
+    return f"{_get_public_base_url(request)}{path}"
+
+
+def _build_card_status(race_date: str) -> str:
+    tz_offset = int(os.environ.get("RACE_TZ_OFFSET_HOURS", "-7"))
+    now_local = datetime.now(timezone(timedelta(hours=tz_offset)))
+    today_str = now_local.strftime("%Y-%m-%d")
+    end_of_racing_hour = int(os.environ.get("RACE_DAY_END_HOUR", "21"))
+    if race_date > today_str:
+        return "upcoming"
+    if race_date == today_str and now_local.hour < end_of_racing_hour:
+        return "live"
+    return "completed"
+
+
+def _build_card_meta_title(track_name: str, race_date: str) -> str:
+    return f"{track_name} Betting Picks & Full Card Analysis - {race_date} | {BRAND_NAME}"
+
+
+def _build_race_meta_title(track_name: str, race_date: str, race_number: int) -> str:
+    return f"{track_name} Race {race_number} Strategy & Betting Picks - {race_date} | {BRAND_NAME}"
+
+
+def _build_card_meta_description(card: Dict[str, Any], track_name: str, race_date: str) -> str:
+    overview = _normalize_public_text(card.get("card_overview", ""), max_length=170)
+    if overview:
+        return overview
+
+    races = card.get("races_json") or []
+    if races:
+        return _normalize_public_text(
+            f"TrackStarAI full-card analysis for {track_name} on {race_date}. Explore every race with top picks, value plays, longshots, and betting strategy.",
+            max_length=170,
+        )
+
+    return _normalize_public_text(
+        f"TrackStarAI curated betting card for {track_name} on {race_date}.",
+        max_length=170,
+    )
+
+
+def _build_race_meta_description(race: Dict[str, Any], track_name: str, race_date: str, race_number: int) -> str:
+    picks: List[str] = []
+    if race.get("top_pick"):
+        picks.append(f"Top pick: {race['top_pick']}")
+    if race.get("value_play"):
+        picks.append(f"Value play: {race['value_play']}")
+    if race.get("longshot"):
+        picks.append(f"Longshot: {race['longshot']}")
+    if picks:
+        return _normalize_public_text(
+            f"TrackStarAI picks for {track_name} Race {race_number} on {race_date}. {' '.join(picks)}.",
+            max_length=170,
+        )
+
+    race_notes = _normalize_public_text(race.get("race_notes", ""), max_length=170)
+    if race_notes:
+        return race_notes
+
+    return _normalize_public_text(
+        f"TrackStarAI strategy and betting picks for {track_name} Race {race_number} on {race_date}.",
+        max_length=170,
+    )
+
+
+def _build_structured_data(
+    request: Request,
+    *,
+    track_name: str,
+    race_date: str,
+    full_card_url: str,
+    canonical_url: str,
+    title: str,
+    description: str,
+    view_mode: str,
+    races: List[Dict[str, Any]],
+    selected_race_number: Optional[int],
+) -> str:
+    base_url = _get_public_base_url(request)
+    payload: List[Dict[str, Any]] = [
+        {
+            "@context": "https://schema.org",
+            "@type": "CollectionPage" if view_mode == "full-card" else "WebPage",
+            "name": title,
+            "description": description,
+            "url": canonical_url,
+            "isPartOf": {
+                "@type": "WebSite",
+                "name": BRAND_NAME,
+                "url": f"{base_url}/",
+            },
+        },
+        {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{base_url}/"},
+                {"@type": "ListItem", "position": 2, "name": f"{track_name} {race_date}", "item": full_card_url},
+            ]
+            + ([
+                {
+                    "@type": "ListItem",
+                    "position": 3,
+                    "name": f"Race {selected_race_number}",
+                    "item": canonical_url,
+                }
+            ] if view_mode == "race" and selected_race_number else []),
+        },
+    ]
+
+    race_items = []
+    for index, race in enumerate(races, start=1):
+        race_number = _coerce_int(race.get("race_number"))
+        race_url = race.get("public_url")
+        if not race_number or not race_url:
+            continue
+        race_items.append(
+            {
+                "@type": "ListItem",
+                "position": index,
+                "url": race_url,
+                "name": f"{track_name} Race {race_number}",
+            }
+        )
+
+    if race_items:
+        payload.append(
+            {
+                "@context": "https://schema.org",
+                "@type": "ItemList",
+                "name": f"{track_name} Races for {race_date}",
+                "itemListElement": race_items,
+            }
+        )
+
+    return json.dumps(payload)
+
+
+async def _hydrate_public_card(card: Dict[str, Any], race_date: str, track_id: str, session_manager) -> Dict[str, Any]:
+    """Inject prediction and deep-dive data into a stored public card payload."""
+    card_copy = copy.deepcopy(card)
+    races_json = card_copy.get("races_json") or []
+    session_id = card_copy.get("session_id")
+
+    if session_id and session_manager:
+        session_results = await session_manager.get_session_results(session_id)
+        if session_results and "error" not in session_results:
+            race_analyses = session_results.get("race_analyses", [])
+            predictions_by_race = {r.get("race_number"): r.get("predictions", []) for r in race_analyses}
+
+            for race_obj in races_json:
+                race_num = race_obj.get("race_number")
+                if race_num in predictions_by_race:
+                    race_obj["predictions"] = predictions_by_race[race_num]
+
+    _jt_sentinels = _EMPTY_FIELD_VALUES
+    if session_manager and races_json:
+        for race_obj in races_json:
+            race_num = race_obj.get("race_number")
+            if not race_num:
+                continue
+            cached_dive = await session_manager.get_race_deep_dive(race_date, track_id, race_num)
+            if not cached_dive:
+                continue
+            dd_horses = cached_dive.get("deep_dive", {}).get("horses", [])
+            dd_by_name = {(h.get("name") or "").strip().lower(): h for h in dd_horses}
+            for pred in race_obj.get("predictions", []):
+                pname = (pred.get("horse_name") or pred.get("name") or "").strip().lower()
+                dd_horse = dd_by_name.get(pname)
+                if not dd_horse:
+                    continue
+                dd_jockey = (dd_horse.get("jockey") or "").strip()
+                dd_trainer = (dd_horse.get("trainer") or "").strip()
+                cur_jockey = (pred.get("jockey") or "").strip()
+                cur_trainer = (pred.get("trainer") or "").strip()
+                if dd_jockey and cur_jockey.lower() in _jt_sentinels:
+                    pred["jockey"] = dd_jockey
+                if dd_trainer and cur_trainer.lower() in _jt_sentinels:
+                    pred["trainer"] = dd_trainer
+
+    return card_copy
+
+
+async def _build_public_card_context(
+    request: Request,
+    *,
+    track_id: str,
+    race_date: str,
+    view_mode: str,
+    selected_race_number: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    session_manager = await app_state.ensure_session_manager()
+    if not session_manager:
+        return None
+
+    card = await session_manager.get_published_curated_card(race_date, track_id)
+    if not card:
+        return None
+
+    card = await _hydrate_public_card(card, race_date, track_id, session_manager)
+    track_name = SUPPORTED_TRACKS.get(track_id, track_id)
+    races_json = card.get("races_json") or []
+    race_lookup: Dict[int, Dict[str, Any]] = {}
+
+    for race_obj in races_json:
+        race_number = _coerce_int(race_obj.get("race_number"))
+        if not race_number:
+            continue
+        race_obj["race_number"] = race_number
+        race_obj["public_url"] = _build_public_race_path(track_id, race_date, race_number)
+        race_lookup[race_number] = race_obj
+
+    if view_mode == "race" and selected_race_number not in race_lookup:
+        return {"error": "race_not_found", "track_name": track_name}
+
+    full_card_path = _build_public_card_path(track_id, race_date)
+    full_card_url = _to_public_absolute_url(request, full_card_path)
+    card["public_url"] = full_card_path
+
+    card_meta = {
+        "path": full_card_path,
+        "absolute_url": full_card_url,
+        "title": _build_card_meta_title(track_name, race_date),
+        "description": _build_card_meta_description(card, track_name, race_date),
+        "view_mode": "full-card",
+        "race_number": None,
+    }
+
+    race_meta: Dict[str, Dict[str, Any]] = {}
+    for race_number, race_obj in race_lookup.items():
+        race_path = _build_public_race_path(track_id, race_date, race_number)
+        race_meta[str(race_number)] = {
+            "path": race_path,
+            "absolute_url": _to_public_absolute_url(request, race_path),
+            "title": _build_race_meta_title(track_name, race_date, race_number),
+            "description": _build_race_meta_description(race_obj, track_name, race_date, race_number),
+            "view_mode": "race",
+            "race_number": race_number,
+        }
+
+    selected_meta = card_meta if view_mode == "full-card" else race_meta[str(selected_race_number)]
+    public_page_data = {
+        "trackId": track_id,
+        "trackName": track_name,
+        "trackSlug": get_track_slug(track_id),
+        "raceDate": race_date,
+        "fullCard": card_meta,
+        "races": race_meta,
+        "initialViewMode": view_mode,
+        "initialRaceNumber": selected_race_number,
+    }
+
+    return _template_context(
+        request,
+        selected_meta["title"],
+        card=card,
+        race_date=race_date,
+        track_id=track_id,
+        track_name=track_name,
+        card_status=_build_card_status(race_date),
+        view_mode=view_mode,
+        selected_race_number=selected_race_number,
+        active_race=race_lookup.get(selected_race_number) if selected_race_number else None,
+        full_card_url=full_card_path,
+        meta_description=selected_meta["description"],
+        canonical_url=selected_meta["absolute_url"],
+        og_title=selected_meta["title"],
+        og_description=selected_meta["description"],
+        og_url=selected_meta["absolute_url"],
+        og_type="article" if view_mode == "race" else "website",
+        twitter_title=selected_meta["title"],
+        twitter_description=selected_meta["description"],
+        structured_data_json=_build_structured_data(
+            request,
+            track_name=track_name,
+            race_date=race_date,
+            full_card_url=full_card_url,
+            canonical_url=selected_meta["absolute_url"],
+            title=selected_meta["title"],
+            description=selected_meta["description"],
+            view_mode=view_mode,
+            races=races_json,
+            selected_race_number=selected_race_number,
+        ),
+        public_page_data=public_page_data,
+    )
 
 def get_track_country(track_id: str) -> str:
     """Return the country code for a track (defaults to 'USA')."""
@@ -436,6 +794,7 @@ def is_international_track(track_id: str) -> bool:
 
 logger.info(f"Configured tracks: {SUPPORTED_TRACKS}")
 logger.info(f"Track countries: {TRACK_COUNTRIES}")
+logger.info(f"Track slugs: {TRACK_SLUGS}")
 
 MODEL_OPTIONS = [MODEL_CATALOG[model_id] for model_id in MODEL_CATALOG]
 MODEL_LOOKUP = MODEL_CATALOG
@@ -551,7 +910,7 @@ async def landing_page(request: Request):
             )
             for pc in all_published:
                 pc["track_name"] = SUPPORTED_TRACKS.get(pc.get("track_id"), pc.get("track_id"))
-                pc["card_url"] = f"/card/{pc.get('race_date')}/{pc.get('track_id')}"
+                pc["card_url"] = _build_public_card_path(pc.get("track_id", ""), pc.get("race_date", ""))
                 race_date = pc.get("race_date", "")
 
                 if race_date > today_str:
@@ -2269,7 +2628,7 @@ async def save_curated_card(request: CuratedCardRequest, http_request: Request =
             "status": status,
             "race_date": request.race_date,
             "track_id": request.track_id,
-            "card_url": f"/card/{request.race_date}/{request.track_id}",
+            "card_url": _build_public_card_path(request.track_id, request.race_date),
         })
     except Exception as exc:
         logger.error(f"Failed to save curated card: {exc}")
@@ -2293,7 +2652,7 @@ async def list_curated_cards(request: Request):
     # Cross-reference recap records so the UI can show has_recap flag
     for card in cards:
         card["track_name"] = SUPPORTED_TRACKS.get(card.get("track_id"), card.get("track_id"))
-        card["card_url"] = f"/card/{card.get('race_date')}/{card.get('track_id')}"
+        card["card_url"] = _build_public_card_path(card.get("track_id", ""), card.get("race_date", ""))
         recap = await session_manager.get_recap_record(card.get("race_date", ""), card.get("track_id", ""))
         if recap:
             card["has_recap"] = True
@@ -2627,95 +2986,155 @@ If results for a race are not available, set data_available=false and leave othe
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
+@app.get("/robots.txt")
+async def robots_txt(request: Request):
+    sitemap_url = f"{_get_public_base_url(request)}/sitemap.xml"
+    content = "\n".join([
+        "User-agent: *",
+        "Allow: /",
+        "",
+        f"Sitemap: {sitemap_url}",
+    ])
+    return Response(content=content, media_type="text/plain")
+
+
+@app.get("/sitemap.xml")
+async def sitemap_xml(request: Request):
+    session_manager = await app_state.ensure_session_manager()
+    seen_paths = set()
+    entries: List[tuple[str, Optional[str]]] = [
+        ("/", None),
+        ("/record", None),
+    ]
+
+    if session_manager:
+        try:
+            published_cards = await asyncio.wait_for(
+                session_manager.get_published_curated_cards(limit=500), timeout=5.0
+            )
+            for card in published_cards:
+                track_id = card.get("track_id") or ""
+                race_date = card.get("race_date") or ""
+                if not track_id or not race_date:
+                    continue
+                lastmod = card.get("updated_at") or card.get("created_at")
+                entries.append((_build_public_card_path(track_id, race_date), lastmod))
+                for race in card.get("races_json") or []:
+                    race_number = _coerce_int(race.get("race_number"))
+                    if race_number:
+                        entries.append((_build_public_race_path(track_id, race_date, race_number), lastmod))
+        except Exception as exc:
+            logger.warning("Failed to build sitemap from published cards: %s", exc)
+
+    lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
+    for path, lastmod in entries:
+        if not path or path in seen_paths:
+            continue
+        seen_paths.add(path)
+        absolute_url = xml_escape(_to_public_absolute_url(request, path))
+        lines.append("  <url>")
+        lines.append(f"    <loc>{absolute_url}</loc>")
+        if lastmod:
+            lines.append(f"    <lastmod>{xml_escape(str(lastmod))}</lastmod>")
+        lines.append("  </url>")
+    lines.append("</urlset>")
+    return Response(content="\n".join(lines), media_type="application/xml")
+
+
 @app.get("/card/{race_date}/{track_id}", response_class=HTMLResponse)
 async def curated_card_page(request: Request, race_date: str, track_id: str):
-    """Public-facing curated betting card page."""
-    session_manager = await app_state.ensure_session_manager()
-    card = None
-    if session_manager:
-        card = await session_manager.get_curated_card(race_date, track_id)
-
-    if not card:
+    """Legacy public card URL — redirect to the canonical full-card route."""
+    normalized_track_id = (track_id or "").upper()
+    if normalized_track_id not in SUPPORTED_TRACKS or not _is_valid_race_date(race_date):
         return templates.TemplateResponse(
             request,
             "error.html",
             _template_context(
                 request,
                 "Card Not Found",
-                error=f"No curated card found for {SUPPORTED_TRACKS.get(track_id, track_id)} on {race_date}.",
+                error=f"No curated card found for {SUPPORTED_TRACKS.get(normalized_track_id, normalized_track_id or track_id)} on {race_date}.",
+            ),
+            status_code=404,
+        )
+    return RedirectResponse(_build_public_card_path(normalized_track_id, race_date), status_code=301)
+
+
+@app.get("/{track_slug}/{race_date}", response_class=HTMLResponse)
+async def public_curated_card_page(request: Request, track_slug: str, race_date: str):
+    """Canonical public full-card route."""
+    track_id = get_track_id_from_slug(track_slug)
+    if not track_id or not _is_valid_race_date(race_date):
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            _template_context(request, "Card Not Found", error="The requested card could not be found."),
+            status_code=404,
+        )
+
+    context = await _build_public_card_context(
+        request,
+        track_id=track_id,
+        race_date=race_date,
+        view_mode="full-card",
+    )
+    if not context:
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            _template_context(
+                request,
+                "Card Not Found",
+                error=f"No published curated card found for {SUPPORTED_TRACKS.get(track_id, track_id)} on {race_date}.",
             ),
             status_code=404,
         )
 
-    track_name = SUPPORTED_TRACKS.get(track_id, track_id)
+    return templates.TemplateResponse(request, "curated_card.html", context)
 
-    # Hydrate the curated card with horse predictions from the original session analysis
-    session_id = card.get("session_id")
-    races_json = card.get("races_json") or []
-    if session_id and session_manager:
-        session_results = await session_manager.get_session_results(session_id)
-        if session_results and "error" not in session_results:
-            race_analyses = session_results.get("race_analyses", [])
-            predictions_by_race = {r.get("race_number"): r.get("predictions", []) for r in race_analyses}
 
-            for race_obj in races_json:
-                race_num = race_obj.get("race_number")
-                if race_num in predictions_by_race:
-                    # Inject predictions so the template can render the "ENTRIES & ODDS" table
-                    race_obj["predictions"] = predictions_by_race[race_num]
-
-    # Enrich jockey/trainer from deep dive cache — fills gaps left by incomplete LLM build output
-    _JT_SENTINELS = _EMPTY_FIELD_VALUES  # re-use the shared sentinel set from race_card_admin
-    if session_manager and races_json:
-        for race_obj in races_json:
-            race_num = race_obj.get("race_number")
-            if not race_num:
-                continue
-            cached_dive = await session_manager.get_race_deep_dive(race_date, track_id, race_num)
-            if not cached_dive:
-                continue
-            dd_horses = cached_dive.get("deep_dive", {}).get("horses", [])
-            dd_by_name = {(h.get("name") or "").strip().lower(): h for h in dd_horses}
-            for pred in race_obj.get("predictions", []):
-                pname = (pred.get("horse_name") or pred.get("name") or "").strip().lower()
-                dd_horse = dd_by_name.get(pname)
-                if not dd_horse:
-                    continue
-                dd_jockey = (dd_horse.get("jockey") or "").strip()
-                dd_trainer = (dd_horse.get("trainer") or "").strip()
-                cur_jockey = (pred.get("jockey") or "").strip()
-                cur_trainer = (pred.get("trainer") or "").strip()
-                # Only override if current value is a known sentinel/placeholder
-                if dd_jockey and cur_jockey.lower() in _JT_SENTINELS:
-                    pred["jockey"] = dd_jockey
-                if dd_trainer and cur_trainer.lower() in _JT_SENTINELS:
-                    pred["trainer"] = dd_trainer
-
-    # Determine card time status for badge display
-    tz_offset = int(os.environ.get("RACE_TZ_OFFSET_HOURS", "-7"))
-    now_local = datetime.now(timezone(timedelta(hours=tz_offset)))
-    today_str = now_local.strftime("%Y-%m-%d")
-    end_of_racing_hour = int(os.environ.get("RACE_DAY_END_HOUR", "21"))
-    if race_date > today_str:
-        card_status = "upcoming"
-    elif race_date == today_str and now_local.hour < end_of_racing_hour:
-        card_status = "live"
-    else:
-        card_status = "completed"
-
-    return templates.TemplateResponse(
-        request,
-        "curated_card.html",
-        _template_context(
+@app.get("/{track_slug}/{race_date}/race-{race_number}", response_class=HTMLResponse)
+async def public_curated_race_page(request: Request, track_slug: str, race_date: str, race_number: int):
+    """Canonical public single-race route."""
+    track_id = get_track_id_from_slug(track_slug)
+    if not track_id or not _is_valid_race_date(race_date) or race_number <= 0:
+        return templates.TemplateResponse(
             request,
-            f"{track_name} · {race_date} — TrackStarAI Curated Card",
-            card=card,
-            race_date=race_date,
-            track_id=track_id,
-            track_name=track_name,
-            card_status=card_status,
-        ),
+            "error.html",
+            _template_context(request, "Race Not Found", error="The requested race page could not be found."),
+            status_code=404,
+        )
+
+    context = await _build_public_card_context(
+        request,
+        track_id=track_id,
+        race_date=race_date,
+        view_mode="race",
+        selected_race_number=race_number,
     )
+    if not context:
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            _template_context(
+                request,
+                "Race Not Found",
+                error=f"No published curated card found for {SUPPORTED_TRACKS.get(track_id, track_id)} on {race_date}.",
+            ),
+            status_code=404,
+        )
+    if context.get("error") == "race_not_found":
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            _template_context(
+                request,
+                "Race Not Found",
+                error=f"Race {race_number} is not available for {SUPPORTED_TRACKS.get(track_id, track_id)} on {race_date}.",
+            ),
+            status_code=404,
+        )
+
+    return templates.TemplateResponse(request, "curated_card.html", context)
 
 
 def _validate_track_id(track_id: str):
@@ -3475,6 +3894,11 @@ if __name__ == "__main__":
     # Get port from environment (Render.com uses $PORT)
     port = int(os.environ.get("PORT", 8000))
     environment = os.environ.get("ENVIRONMENT", "development")
+
+    if uvicorn is None:
+        raise RuntimeError(
+            "uvicorn is required to run app.py directly. Install uvicorn or start the app with your ASGI server."
+        )
 
     # Run development/production server
     if environment == "production":

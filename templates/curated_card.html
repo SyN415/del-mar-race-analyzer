@@ -4,11 +4,24 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{ title }}</title>
+<meta name="description" id="meta-description" content="{{ meta_description }}">
+<meta name="robots" content="index,follow">
+<link rel="canonical" id="canonical-link" href="{{ canonical_url }}">
+<meta property="og:type" id="og-type" content="{{ og_type or 'website' }}">
+<meta property="og:title" id="og-title" content="{{ og_title or title }}">
+<meta property="og:description" id="og-description" content="{{ og_description or meta_description }}">
+<meta property="og:url" id="og-url" content="{{ og_url or canonical_url }}">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" id="twitter-title" content="{{ twitter_title or title }}">
+<meta name="twitter:description" id="twitter-description" content="{{ twitter_description or meta_description }}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 <link href="/static/css/style.css?v=6.0.0" rel="stylesheet">
+{% if structured_data_json %}
+<script type="application/ld+json">{{ structured_data_json|safe }}</script>
+{% endif %}
 <style>
 :root{
   --bg:var(--color-bg-primary);--bg2:var(--color-bg-surface);--bg3:var(--color-bg-elevated);
@@ -98,6 +111,7 @@ body.curated-card-page .cc-footer{margin-inline:0;}
   100% { transform: scale(1); opacity: 1; }
 }
 .cc-chip.is-live{border-color:var(--border);background:var(--color-turf-success-bg);color:var(--emerald);animation:pulse 2s ease-in-out infinite;}
+.cc-view-chip{background:rgba(201,168,76,.08);color:var(--gold);border-color:rgba(201,168,76,.25)}
 
 /* ── PICKS GRID ────────────────────────── */
 .cc-picks{
@@ -228,6 +242,7 @@ body.curated-card-page .cc-footer{margin-inline:0;}
   border-radius:12px;border:1px solid var(--border);background:var(--bg3);
   color:var(--muted);font-size:1.1rem;font-weight:700;cursor:pointer;
   transition:all .2s;position:relative;overflow:hidden;
+  text-decoration:none;
 }
 .race-rail-item:hover{background:var(--color-surface-highlight)}
 .race-rail-item.is-active{
@@ -236,10 +251,16 @@ body.curated-card-page .cc-footer{margin-inline:0;}
 .race-rail-item.is-active::before{
   content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--gold);
 }
+.race-rail-item:focus-visible{outline:2px solid var(--sky);outline-offset:2px}
+.race-rail-item.is-full-card{
+  min-height:72px;height:auto;padding:.85rem .45rem;
+  font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;line-height:1.3;
+}
 @media(max-width:767px){
   .race-rail{flex-direction:row;overflow-x:auto;gap:.75rem;padding-bottom:.75rem;scrollbar-width:none}
   .race-rail::-webkit-scrollbar{display:none}
   .race-rail-item{min-width:72px;width:auto;min-height:54px;padding:0 1rem;font-size:1.1rem}
+  .race-rail-item.is-full-card{min-width:94px;padding:.85rem 1rem;font-size:.7rem}
 }
 
 .race-panel{
@@ -247,6 +268,8 @@ body.curated-card-page .cc-footer{margin-inline:0;}
   border-radius:var(--r-lg);overflow:hidden;box-shadow:0 4px 40px rgba(0,0,0,.2);
 }
 .race-panel.is-active{display:block;}
+body[data-view-mode="full-card"] .race-panel{display:block;margin-bottom:1.25rem;}
+body[data-view-mode="full-card"] .race-panel:last-child{margin-bottom:0;}
 .rp-header{
   padding:1.25rem 1.5rem;border-bottom:1px solid var(--border);
   background:rgba(255,255,255,.025);display:flex;align-items:center;justify-content:space-between;
@@ -406,7 +429,7 @@ body.curated-card-page .cc-footer{margin-inline:0;}
 .cc-footer a:hover{text-decoration:underline}
 </style>
 </head>
-<body class="theme-dark standalone-page curated-card-page">
+<body class="theme-dark standalone-page curated-card-page" data-view-mode="{{ view_mode }}" data-selected-race="{{ selected_race_number or '' }}">
 <!-- NAV -->
 <nav class="cc-nav">
   <a class="cc-nav-brand" href="/">
@@ -420,10 +443,11 @@ body.curated-card-page .cc-footer{margin-inline:0;}
 <section class="cc-hero">
   <div class="cc-eyebrow">🌴 Curated Betting Card</div>
   <h1 class="cc-hero-title">{{ track_name }}</h1>
-  <p class="cc-hero-sub">Laid-back picks and sharp strategy for every race on the card.</p>
+  <p class="cc-hero-sub" id="cc-hero-subtitle">{% if view_mode == 'race' and selected_race_number %}Focused strategy and instant race-level routing for Race {{ selected_race_number }}.{% else %}Laid-back picks and sharp strategy for every race on the card.{% endif %}</p>
   <div class="cc-meta-chips">
     <span class="cc-chip">📅 {{ race_date }}</span>
     <span class="cc-chip">🏟 {{ track_name }}</span>
+    <span class="cc-chip cc-view-chip" id="cc-view-chip">{% if view_mode == 'race' and selected_race_number %}🏇 Race {{ selected_race_number }} View{% else %}📖 Full Card View{% endif %}</span>
     {% if card_status == 'live' %}
     <span class="cc-chip is-live">● Live</span>
     {% elif card_status == 'upcoming' %}
@@ -451,17 +475,33 @@ body.curated-card-page .cc-footer{margin-inline:0;}
 <div class="cc-dashboard">
   <!-- Sidebar -->
   <div class="race-rail">
+    <a
+      href="{{ full_card_url }}"
+      class="race-rail-item is-full-card {% if view_mode == 'full-card' %}is-active{% endif %}"
+      data-route-link
+      data-route-path="{{ full_card_url }}"
+      {% if view_mode == 'full-card' %}aria-current="page"{% endif %}
+    >
+      Full<br>Card
+    </a>
     {% for race in card.races_json %}
-    <div class="race-rail-item {% if loop.first %}is-active{% endif %}" data-race="{{ race.race_number }}">
+    <a
+      href="{{ race.public_url }}"
+      class="race-rail-item {% if view_mode == 'race' and race.race_number == selected_race_number %}is-active{% endif %}"
+      data-route-link
+      data-route-path="{{ race.public_url }}"
+      data-race="{{ race.race_number }}"
+      {% if view_mode == 'race' and race.race_number == selected_race_number %}aria-current="page"{% endif %}
+    >
       {{ race.race_number }}
-    </div>
+    </a>
     {% endfor %}
   </div>
 
   <!-- Main Content -->
   <div class="race-panels-container">
     {% for race in card.races_json %}
-    <div class="race-panel {% if loop.first %}is-active{% endif %}" data-race="{{ race.race_number }}">
+    <div class="race-panel {% if view_mode == 'full-card' or race.race_number == selected_race_number %}is-active{% endif %}" data-race="{{ race.race_number }}" id="race-panel-{{ race.race_number }}">
 
       <div class="rp-header">
         <div class="rp-title-wrap">
@@ -745,65 +785,8 @@ body.curated-card-page .cc-footer{margin-inline:0;}
   <p style="margin-top:.4rem;font-size:.72rem">For entertainment and research purposes. Always wager responsibly. 🌴</p>
 </footer>
 
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-  const railItems = document.querySelectorAll('.race-rail-item');
-  const panels = document.querySelectorAll('.race-panel');
-
-  railItems.forEach(item => {
-    item.addEventListener('click', () => {
-      const raceNum = item.getAttribute('data-race');
-
-      railItems.forEach(ri => ri.classList.remove('is-active'));
-      panels.forEach(p => p.classList.remove('is-active'));
-
-      item.classList.add('is-active');
-      const activePanel = document.querySelector(`.race-panel[data-race="${raceNum}"]`);
-      if(activePanel) activePanel.classList.add('is-active');
-    });
-  });
-});
-
-function toggleOverview(btn) {
-  const body = document.getElementById('overview-body');
-  if (body) {
-    body.classList.toggle('is-expanded');
-    btn.textContent = body.classList.contains('is-expanded') ? 'Show less' : 'Show more';
-  }
-}
-
-function switchTab(clickedTab, contentId) {
-  const tabsContainer = clickedTab.parentElement;
-  const drilldownContainer = tabsContainer.parentElement;
-
-  const allTabs = tabsContainer.querySelectorAll('.dd-tab');
-  const allContents = drilldownContainer.querySelectorAll('.dd-content');
-
-  allTabs.forEach(t => t.classList.remove('tab-active'));
-  allContents.forEach(c => c.classList.remove('tab-active'));
-
-  clickedTab.classList.add('tab-active');
-  const activeContent = document.getElementById(contentId);
-  if(activeContent) activeContent.classList.add('tab-active');
-}
-
-function copyStrategy(raceNum, btn, type) {
-  const strategySpan = document.getElementById('strategy-text-' + raceNum);
-  if (!strategySpan) return;
-
-  const textToCopy = strategySpan.innerText || strategySpan.textContent;
-
-  navigator.clipboard.writeText(textToCopy).then(() => {
-    const originalText = btn.textContent;
-    btn.textContent = '✓ Copied';
-    setTimeout(() => {
-      btn.textContent = originalText;
-    }, 1500);
-  }).catch(err => {
-    console.error('Failed to copy text: ', err);
-  });
-}
-</script>
+<script id="curated-card-page-data" type="application/json">{{ public_page_data|tojson }}</script>
+<script src="/static/js/curated-card.js?v=1.0.0"></script>
 
 </body>
 </html>

@@ -37,6 +37,8 @@ services:
         sync: false
       - key: ENVIRONMENT
         value: "production"
+      - key: PUBLIC_BASE_URL
+        sync: false
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: "/opt/render/project/.cache/ms-playwright"
     disk:

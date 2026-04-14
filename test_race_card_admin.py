@@ -69,9 +69,16 @@ def _install_app_import_stubs():
         def delete_cookie(self, *args, **kwargs):
             pass
 
+    class Response:
+        def __init__(self, content=None, status_code=200, media_type=None):
+            self.content = content
+            self.status_code = status_code
+            self.media_type = media_type
+
     responses.JSONResponse = JSONResponse
     responses.HTMLResponse = object
     responses.RedirectResponse = RedirectResponse
+    responses.Response = Response
     sys.modules["fastapi.responses"] = responses
 
     _remember("fastapi.staticfiles")
@@ -87,7 +94,18 @@ def _install_app_import_stubs():
             pass
 
         def TemplateResponse(self, *args, **kwargs):
-            return {"template": args[0] if args else None, "context": args[1] if len(args) > 1 else kwargs}
+            template = None
+            context = kwargs.get("context")
+            if len(args) >= 3:
+                _, template, context = args[:3]
+            elif len(args) >= 2:
+                template, context = args[:2]
+            elif len(args) == 1:
+                template = args[0]
+            response = {"template": template, "context": context}
+            if "status_code" in kwargs:
+                response["status_code"] = kwargs["status_code"]
+            return response
 
     templating.Jinja2Templates = Jinja2Templates
     sys.modules["fastapi.templating"] = templating
@@ -507,20 +525,24 @@ class RaceCardAdminTests(unittest.TestCase):
             app_module.OpenRouterClient = original_openrouter_client
 
     def test_landing_page_fails_open_when_dashboard_loading_errors(self):
-        original_loader = app_module._load_dashboard_cards
+        original_ensure_session_manager = app_module.app_state.ensure_session_manager
 
         try:
-            app_module._load_dashboard_cards = AsyncMock(side_effect=RuntimeError("dashboard unavailable"))
+            session_manager = type("LandingSessionManagerStub", (), {})()
+            session_manager.get_published_curated_cards = AsyncMock(side_effect=RuntimeError("dashboard unavailable"))
+            session_manager.get_recap_summary_30d = AsyncMock(side_effect=RuntimeError("recap unavailable"))
+            app_module.app_state.ensure_session_manager = AsyncMock(return_value=session_manager)
 
-            fake_request = types.SimpleNamespace(cookies={})
+            fake_request = types.SimpleNamespace(cookies={}, base_url="https://trackstar.test/")
             response = app_module.asyncio.run(app_module.landing_page(fake_request))
 
             self.assertEqual(response["template"], "landing.html")
-            self.assertEqual(response["context"]["dashboard_cards"], [])
-            self.assertEqual(response["context"]["card_count"], 0)
-            self.assertEqual(response["context"]["completed_count"], 0)
+            self.assertEqual(response["context"]["live_cards"], [])
+            self.assertEqual(response["context"]["upcoming_cards"], [])
+            self.assertEqual(response["context"]["past_cards"], [])
+            self.assertIsNone(response["context"]["track_record_summary"])
         finally:
-            app_module._load_dashboard_cards = original_loader
+            app_module.app_state.ensure_session_manager = original_ensure_session_manager
 
     def test_admin_race_card_request_uses_configured_default_model(self):
         original_default_model = app_module.app_state.config.ai.default_model
@@ -597,6 +619,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
     def setUp(self):
         self.original_session_manager = app_module.app_state.session_manager
         self.original_openrouter_client = app_module.app_state.openrouter_client
+        self.original_fetch_equibase_all_data = app_module.fetch_equibase_all_data
         self.original_fetch_expected_horses_by_race = app_module.fetch_equibase_expected_horses_by_race
         self.original_fetch_expected_race_numbers = app_module.fetch_equibase_expected_race_numbers
         self.original_admin_password = app_module.app_state.config.web.admin_password
@@ -625,12 +648,17 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         self.admin_request = types.SimpleNamespace(
             cookies={app_module.AUTH_COOKIE_NAME: app_module._sign_value("admin")}
         )
+        app_module.fetch_equibase_all_data = lambda track_id, race_date, country="USA": (
+            app_module.fetch_equibase_expected_horses_by_race(track_id, race_date, country=country),
+            {},
+        )
         app_module.fetch_equibase_expected_horses_by_race = lambda *args, **kwargs: {}
         app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: []
 
     def tearDown(self):
         app_module.app_state.session_manager = self.original_session_manager
         app_module.app_state.openrouter_client = self.original_openrouter_client
+        app_module.fetch_equibase_all_data = self.original_fetch_equibase_all_data
         app_module.app_state.config.web.admin_password = self.original_admin_password
         app_module.app_state.config.web.auth_secret = self.original_auth_secret
         app_module._AUTH_SECRET = self.original_cached_auth_secret
@@ -911,6 +939,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         self.session_manager.save_session_results.assert_not_awaited()
 
     def test_create_admin_race_card_retries_malformed_minimax_json_with_compact_prompt(self):
+        original_available_models = app_module.app_state.config.ai.available_models
         self.openrouter_client.call_model = AsyncMock(side_effect=[
             {
                 "content": '{"race_analyses": [{"race_number": 1 "predictions": [{"horse_name": "Alpha"}]}]}',
@@ -933,9 +962,13 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             source_mode="web_search",
         )
 
-        response = app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
-        saved_results = self.session_manager.save_session_results.await_args.args[1]
-        second_call_kwargs = self.openrouter_client.call_model.await_args_list[1].kwargs
+        try:
+            app_module.app_state.config.ai.available_models = list(original_available_models) + ["minimax/minimax-m2.7"]
+            response = app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
+            saved_results = self.session_manager.save_session_results.await_args.args[1]
+            second_call_kwargs = self.openrouter_client.call_model.await_args_list[1].kwargs
+        finally:
+            app_module.app_state.config.ai.available_models = original_available_models
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(self.openrouter_client.call_model.await_count, 2)
@@ -948,21 +981,118 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             for args in self.session_manager.update_session_status.await_args_list
         ))
 
-    def test_create_admin_race_card_requires_text_in_manual_mode(self):
-        request = app_module.AdminRaceCardRequest(
-            race_date="2026-03-13",
-            track_id="SA",
-            llm_model="x-ai/grok-4.20-beta",
-            source_mode="manual",
-            source_text="",
+
+class PublicCuratedCardRoutingTests(unittest.TestCase):
+    def _fake_request(self):
+        return types.SimpleNamespace(cookies={}, base_url="https://trackstar.test/", headers={})
+
+    def _published_card(self):
+        return {
+            "session_id": "session-123",
+            "race_date": "2026-03-13",
+            "track_id": "SA",
+            "card_overview": "Santa Anita card-level analysis for a fast-paced Friday slate.",
+            "races_json": [
+                {
+                    "race_number": 1,
+                    "top_pick": "Alpha",
+                    "value_play": "Bravo",
+                    "longshot": "Charlie",
+                    "race_notes": "Pace edge for Alpha with a favorable outside stalking trip.",
+                },
+                {
+                    "race_number": 2,
+                    "top_pick": "Delta",
+                    "value_play": "Echo",
+                    "longshot": "Foxtrot",
+                },
+            ],
+            "updated_at": "2026-03-13T18:30:00+00:00",
+        }
+
+    def _session_manager_stub(self):
+        session_manager = type("SessionManagerStub", (), {})()
+        session_manager.get_published_curated_card = AsyncMock(return_value=self._published_card())
+        session_manager.get_published_curated_cards = AsyncMock(return_value=[self._published_card()])
+        session_manager.get_session_results = AsyncMock(return_value={
+            "race_analyses": [
+                {
+                    "race_number": 1,
+                    "predictions": [
+                        {
+                            "horse_name": "Alpha",
+                            "jockey": "",
+                            "trainer": "",
+                            "morning_line_odds": "5/2",
+                            "win_probability": 35,
+                            "composite_rating": 91,
+                        }
+                    ],
+                }
+            ]
+        })
+        session_manager.get_race_deep_dive = AsyncMock(return_value={
+            "deep_dive": {
+                "horses": [
+                    {"name": "Alpha", "jockey": "A. Rider", "trainer": "T. One"}
+                ]
+            }
+        })
+        return session_manager
+
+    def test_public_curated_card_page_builds_canonical_context_for_published_cards(self):
+        session_manager = self._session_manager_stub()
+        original = app_module.app_state.ensure_session_manager
+        try:
+            app_module.app_state.ensure_session_manager = AsyncMock(return_value=session_manager)
+            response = app_module.asyncio.run(
+                app_module.public_curated_card_page(self._fake_request(), "santa-anita", "2026-03-13")
+            )
+        finally:
+            app_module.app_state.ensure_session_manager = original
+
+        self.assertEqual(response["template"], "curated_card.html")
+        self.assertEqual(response["context"]["view_mode"], "full-card")
+        self.assertEqual(response["context"]["canonical_url"], "https://trackstar.test/santa-anita/2026-03-13")
+        self.assertEqual(response["context"]["public_page_data"]["races"]["1"]["path"], "/santa-anita/2026-03-13/race-1")
+        self.assertEqual(response["context"]["card"]["races_json"][0]["predictions"][0]["jockey"], "A. Rider")
+
+    def test_public_curated_race_page_returns_404_when_race_is_missing(self):
+        session_manager = self._session_manager_stub()
+        original = app_module.app_state.ensure_session_manager
+        try:
+            app_module.app_state.ensure_session_manager = AsyncMock(return_value=session_manager)
+            response = app_module.asyncio.run(
+                app_module.public_curated_race_page(self._fake_request(), "santa-anita", "2026-03-13", 7)
+            )
+        finally:
+            app_module.app_state.ensure_session_manager = original
+
+        self.assertEqual(response["template"], "error.html")
+        self.assertEqual(response["status_code"], 404)
+        self.assertIn("Race 7", response["context"]["error"])
+
+    def test_legacy_curated_card_route_redirects_to_canonical_path(self):
+        response = app_module.asyncio.run(
+            app_module.curated_card_page(self._fake_request(), "2026-03-13", "SA")
         )
 
-        with self.assertRaises(app_module.HTTPException) as exc:
-            app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response.url, "/santa-anita/2026-03-13")
 
-        self.assertEqual(exc.exception.status_code, 400)
-        self.assertIn("manual mode", exc.exception.detail)
+    def test_sitemap_and_robots_publish_public_card_urls(self):
+        session_manager = self._session_manager_stub()
+        original = app_module.app_state.ensure_session_manager
+        try:
+            app_module.app_state.ensure_session_manager = AsyncMock(return_value=session_manager)
+            sitemap = app_module.asyncio.run(app_module.sitemap_xml(self._fake_request()))
+            robots = app_module.asyncio.run(app_module.robots_txt(self._fake_request()))
+        finally:
+            app_module.app_state.ensure_session_manager = original
 
+        self.assertIn("https://trackstar.test/santa-anita/2026-03-13", sitemap.content)
+        self.assertIn("https://trackstar.test/santa-anita/2026-03-13/race-2", sitemap.content)
+        self.assertIn("Sitemap: https://trackstar.test/sitemap.xml", robots.content)
 
 if __name__ == "__main__":
     unittest.main()

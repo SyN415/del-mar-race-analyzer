@@ -90,6 +90,21 @@ class SessionManager:
     def _utcnow_iso(self) -> str:
         return datetime.now(timezone.utc).isoformat()
 
+    def _deserialize_curated_card_record(self, record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Normalize a curated card record from either SQLite or Supabase."""
+        if not record:
+            return None
+
+        normalized = dict(record)
+        for field in ('top_pick_json', 'value_play_json', 'longshot_json', 'races_json', 'betting_strategy_json'):
+            if normalized.get(field):
+                try:
+                    normalized[field] = json.loads(normalized[field])
+                except (TypeError, json.JSONDecodeError):
+                    pass
+        normalized['is_published'] = bool(normalized.get('is_published'))
+        return normalized
+
     def _supabase_headers(self, prefer: Optional[str] = None) -> Dict[str, str]:
         headers = {
             'apikey': self.supabase_service_role_key,
@@ -808,7 +823,7 @@ class SessionManager:
                         'limit': 1,
                     },
                 )
-                return rows[0] if rows else None
+                return self._deserialize_curated_card_record(rows[0] if rows else None)
 
             async with aiosqlite.connect(self.db_path) as db:
                 db.row_factory = aiosqlite.Row
@@ -818,19 +833,38 @@ class SessionManager:
                     LIMIT 1
                 """, (race_date, track_id)) as cursor:
                     row = await cursor.fetchone()
-            if not row:
-                return None
-            d = dict(row)
-            for field in ('top_pick_json', 'value_play_json', 'longshot_json', 'races_json', 'betting_strategy_json'):
-                if d.get(field):
-                    try:
-                        d[field] = json.loads(d[field])
-                    except (TypeError, json.JSONDecodeError):
-                        pass
-            d['is_published'] = bool(d.get('is_published'))
-            return d
+            return self._deserialize_curated_card_record(dict(row) if row else None)
         except Exception as e:
             logger.error(f"Failed to get curated card: {e}")
+            return None
+
+    async def get_published_curated_card(self, race_date: str, track_id: str) -> Optional[Dict]:
+        """Return a published curated card for a race date + track, or None."""
+        try:
+            if self.storage_backend == 'supabase':
+                rows = await self._supabase_request(
+                    'GET',
+                    'curated_cards',
+                    params={
+                        'race_date': f'eq.{race_date}',
+                        'track_id': f'eq.{track_id}',
+                        'is_published': 'eq.true',
+                        'limit': 1,
+                    },
+                )
+                return self._deserialize_curated_card_record(rows[0] if rows else None)
+
+            async with aiosqlite.connect(self.db_path) as db:
+                db.row_factory = aiosqlite.Row
+                async with db.execute("""
+                    SELECT * FROM curated_cards
+                    WHERE race_date = ? AND track_id = ? AND is_published = 1
+                    LIMIT 1
+                """, (race_date, track_id)) as cursor:
+                    row = await cursor.fetchone()
+            return self._deserialize_curated_card_record(dict(row) if row else None)
+        except Exception as e:
+            logger.error(f"Failed to get published curated card: {e}")
             return None
 
     async def get_published_curated_cards(self, limit: int = 20) -> List[Dict]:
@@ -846,7 +880,7 @@ class SessionManager:
                         'limit': limit,
                     },
                 )
-                return rows or []
+                return [self._deserialize_curated_card_record(row) for row in (rows or []) if row]
 
             async with aiosqlite.connect(self.db_path) as db:
                 db.row_factory = aiosqlite.Row
@@ -857,18 +891,7 @@ class SessionManager:
                     LIMIT ?
                 """, (limit,)) as cursor:
                     rows = await cursor.fetchall()
-            result = []
-            for row in rows:
-                d = dict(row)
-                for field in ('top_pick_json', 'value_play_json', 'longshot_json', 'races_json', 'betting_strategy_json'):
-                    if d.get(field):
-                        try:
-                            d[field] = json.loads(d[field])
-                        except (TypeError, json.JSONDecodeError):
-                            pass
-                d['is_published'] = bool(d.get('is_published'))
-                result.append(d)
-            return result
+            return [self._deserialize_curated_card_record(dict(row)) for row in rows]
         except Exception as e:
             logger.error(f"Failed to get published curated cards: {e}")
             return []
@@ -882,7 +905,7 @@ class SessionManager:
                     'curated_cards',
                     params={'order': 'race_date.desc', 'limit': limit},
                 )
-                return rows or []
+                return [self._deserialize_curated_card_record(row) for row in (rows or []) if row]
 
             async with aiosqlite.connect(self.db_path) as db:
                 db.row_factory = aiosqlite.Row
@@ -892,18 +915,7 @@ class SessionManager:
                     LIMIT ?
                 """, (limit,)) as cursor:
                     rows = await cursor.fetchall()
-            result = []
-            for row in rows:
-                d = dict(row)
-                for field in ('top_pick_json', 'value_play_json', 'longshot_json', 'races_json', 'betting_strategy_json'):
-                    if d.get(field):
-                        try:
-                            d[field] = json.loads(d[field])
-                        except (TypeError, json.JSONDecodeError):
-                            pass
-                d['is_published'] = bool(d.get('is_published'))
-                result.append(d)
-            return result
+            return [self._deserialize_curated_card_record(dict(row)) for row in rows]
         except Exception as e:
             logger.error(f"Failed to get all curated cards: {e}")
             return []
