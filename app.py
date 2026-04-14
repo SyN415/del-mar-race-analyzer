@@ -488,6 +488,14 @@ def _build_public_race_path(track_id: str, race_date: str, race_number: int) -> 
     return f"{_build_public_card_path(track_id, race_date)}/race-{race_number}"
 
 
+def _build_public_record_path() -> str:
+    return "/record"
+
+
+def _build_public_recap_path(track_id: str, race_date: str) -> str:
+    return f"{_build_public_record_path()}/{get_track_slug(track_id)}/{race_date}"
+
+
 def _get_public_base_url(request: Request) -> str:
     configured = os.environ.get("PUBLIC_BASE_URL", "").strip()
     if configured:
@@ -559,6 +567,238 @@ def _build_race_meta_description(race: Dict[str, Any], track_name: str, race_dat
     return _normalize_public_text(
         f"TrackStarAI strategy and betting picks for {track_name} Race {race_number} on {race_date}.",
         max_length=170,
+    )
+
+
+def _build_record_index_meta_title() -> str:
+    return f"30-Day Track Record & Betting Results | {BRAND_NAME}"
+
+
+def _build_record_index_meta_description(summary: Dict[str, Any]) -> str:
+    total_days = summary.get("total_days_recapped") or 0
+    top_pick_rate = summary.get("top_pick_win_rate_pct") or 0
+    exacta_rate = summary.get("exacta_hit_rate_pct") or 0
+    trifecta_rate = summary.get("trifecta_hit_rate_pct") or 0
+    return _normalize_public_text(
+        f"TrackStarAI's 30-day verified track record across {total_days} recap days. Top pick win rate {top_pick_rate}%, exacta hit rate {exacta_rate}%, and trifecta hit rate {trifecta_rate}%.",
+        max_length=170,
+    )
+
+
+def _build_recap_meta_title(track_name: str, race_date: str) -> str:
+    return f"{track_name} Betting Recap & Results - {race_date} | {BRAND_NAME}"
+
+
+def _build_recap_meta_description(record: Dict[str, Any], track_name: str, race_date: str) -> str:
+    top_pick_wins = record.get("top_pick_wins", 0)
+    top_pick_total = record.get("top_pick_total", 0)
+    daily_score = record.get("daily_score", 0)
+    exacta_hits = record.get("exacta_hits", 0)
+    trifecta_hits = record.get("trifecta_hits", 0)
+    best_winner = record.get("best_winner_horse") or ""
+    best_winner_odds = record.get("best_winner_odds") or ""
+    parts = [
+        f"TrackStarAI recap for {track_name} on {race_date}.",
+        f"Daily score: {daily_score}/100.",
+        f"Top picks won: {top_pick_wins} of {top_pick_total}.",
+        f"Exacta hits: {exacta_hits}.",
+        f"Trifecta hits: {trifecta_hits}.",
+    ]
+    if best_winner:
+        parts.append(f"Best winner: {best_winner}{f' ({best_winner_odds})' if best_winner_odds else ''}.")
+    return _normalize_public_text(" ".join(parts), max_length=170)
+
+
+def _prepare_public_recap_record(request: Request, record: Dict[str, Any]) -> Dict[str, Any]:
+    recap = copy.deepcopy(record)
+    track_id = recap.get("track_id") or ""
+    race_date = recap.get("race_date") or ""
+    track_name = SUPPORTED_TRACKS.get(track_id, track_id)
+    recap["track_name"] = track_name
+    recap["track_slug"] = get_track_slug(track_id)
+    recap["public_url"] = _build_public_recap_path(track_id, race_date)
+    recap["absolute_url"] = _to_public_absolute_url(request, recap["public_url"])
+    recap["card_url"] = _build_public_card_path(track_id, race_date)
+    recap["card_absolute_url"] = _to_public_absolute_url(request, recap["card_url"])
+    recap["meta_title"] = _build_recap_meta_title(track_name, race_date)
+    recap["meta_description"] = _build_recap_meta_description(recap, track_name, race_date)
+    return recap
+
+
+def _build_record_index_meta(request: Request, summary: Dict[str, Any]) -> Dict[str, Any]:
+    record_index_path = _build_public_record_path()
+    record_index_url = _to_public_absolute_url(request, record_index_path)
+    return {
+        "path": record_index_path,
+        "absolute_url": record_index_url,
+        "title": _build_record_index_meta_title(),
+        "description": _build_record_index_meta_description(summary),
+        "view_mode": "summary",
+        "selected_key": None,
+    }
+
+
+def _build_record_structured_data(
+    request: Request,
+    *,
+    title: str,
+    description: str,
+    canonical_url: str,
+    records: List[Dict[str, Any]],
+    selected_record: Optional[Dict[str, Any]],
+) -> str:
+    base_url = _get_public_base_url(request)
+    payload: List[Dict[str, Any]] = [
+        {
+            "@context": "https://schema.org",
+            "@type": "CollectionPage" if selected_record is None else "WebPage",
+            "name": title,
+            "description": description,
+            "url": canonical_url,
+            "isPartOf": {
+                "@type": "WebSite",
+                "name": BRAND_NAME,
+                "url": f"{base_url}/",
+            },
+        },
+        {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {"@type": "ListItem", "position": 1, "name": "Home", "item": f"{base_url}/"},
+                {"@type": "ListItem", "position": 2, "name": "Track Record", "item": f"{base_url}{_build_public_record_path()}"},
+            ] + ([{
+                "@type": "ListItem",
+                "position": 3,
+                "name": f"{selected_record.get('track_name', '')} {selected_record.get('race_date', '')}",
+                "item": canonical_url,
+            }] if selected_record else []),
+        },
+    ]
+
+    item_list = []
+    for index, record in enumerate(records, start=1):
+        public_url = record.get("absolute_url")
+        if not public_url:
+            continue
+        item_list.append(
+            {
+                "@type": "ListItem",
+                "position": index,
+                "url": public_url,
+                "name": f"{record.get('track_name', record.get('track_id', ''))} recap for {record.get('race_date', '')}",
+            }
+        )
+
+    if item_list:
+        payload.append(
+            {
+                "@context": "https://schema.org",
+                "@type": "ItemList",
+                "name": "Recent track recap results",
+                "itemListElement": item_list,
+            }
+        )
+
+    return json.dumps(payload)
+
+
+async def _build_record_page_context(
+    request: Request,
+    *,
+    selected_track_id: Optional[str] = None,
+    selected_race_date: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    session_manager = await app_state.ensure_session_manager()
+    if not session_manager:
+        return None
+
+    summary: Dict[str, Any] = {}
+    records: List[Dict[str, Any]] = []
+    try:
+        data = await asyncio.wait_for(session_manager.get_recap_summary_30d(), timeout=5.0)
+        summary = data.get("summary", {})
+        records = [_prepare_public_recap_record(request, record) for record in data.get("records", [])]
+    except Exception as e:
+        logger.warning(f"Failed to load recap summary for record page: {e}")
+
+    selected_record = None
+    if selected_track_id and selected_race_date:
+        selected_record = next(
+            (record for record in records if record.get("track_id") == selected_track_id and record.get("race_date") == selected_race_date),
+            None,
+        )
+        if not selected_record:
+            try:
+                record = await session_manager.get_recap_record(selected_race_date, selected_track_id)
+            except Exception as exc:
+                logger.warning("Failed to load selected recap record for record page: %s", exc)
+                record = None
+            if record:
+                selected_record = _prepare_public_recap_record(request, record)
+                records = [
+                    selected_record,
+                    *[
+                        existing for existing in records
+                        if not (
+                            existing.get("track_id") == selected_track_id and existing.get("race_date") == selected_race_date
+                        )
+                    ],
+                ]
+
+    if selected_track_id and selected_race_date and not selected_record:
+        return {"error": "recap_not_found", "summary": summary, "records": records}
+
+    index_meta = _build_record_index_meta(request, summary)
+
+    recap_routes = {
+        record["public_url"]: {
+            "path": record["public_url"],
+            "absolute_url": record["absolute_url"],
+            "title": record["meta_title"],
+            "description": record["meta_description"],
+            "view_mode": "recap",
+            "selected_key": f"{record.get('track_id')}::{record.get('race_date')}",
+            "trackName": record.get("track_name"),
+            "raceDate": record.get("race_date"),
+            "dailyScore": record.get("daily_score"),
+        }
+        for record in records
+    }
+
+    selected_meta = index_meta if not selected_record else recap_routes[selected_record["public_url"]]
+    record_page_data = {
+        "index": index_meta,
+        "recaps": recap_routes,
+        "initialViewMode": selected_meta["view_mode"],
+        "selectedKey": selected_meta["selected_key"],
+    }
+
+    return _template_context(
+        request,
+        selected_meta["title"],
+        page_title=selected_meta["title"],
+        summary=summary,
+        records=records,
+        view_mode=selected_meta["view_mode"],
+        selected_record=selected_record,
+        record_page_data=record_page_data,
+        meta_description=selected_meta["description"],
+        canonical_url=selected_meta["absolute_url"],
+        og_title=selected_meta["title"],
+        og_description=selected_meta["description"],
+        og_url=selected_meta["absolute_url"],
+        og_type="article" if selected_record else "website",
+        twitter_title=selected_meta["title"],
+        twitter_description=selected_meta["description"],
+        structured_data_json=_build_record_structured_data(
+            request,
+            title=selected_meta["title"],
+            description=selected_meta["description"],
+            canonical_url=selected_meta["absolute_url"],
+            records=records,
+            selected_record=selected_record,
+        ),
     )
 
 
@@ -966,29 +1206,68 @@ async def landing_page(request: Request):
 @app.get("/record", response_class=HTMLResponse)
 async def record_page(request: Request):
     """Public 30-day track record page."""
-    session_manager = await app_state.ensure_session_manager()
-    summary = {}
-    records = []
-    if session_manager:
-        try:
-            data = await asyncio.wait_for(
-                session_manager.get_recap_summary_30d(), timeout=5.0
-            )
-            summary = data.get("summary", {})
-            records = data.get("records", [])
-        except Exception as e:
-            logger.warning(f"Failed to load recap summary for record page: {e}")
-
-    return templates.TemplateResponse(
-        request,
-        "record.html",
-        _template_context(
+    context = await _build_record_page_context(request)
+    if not context:
+        index_meta = _build_record_index_meta(request, {})
+        context = _template_context(
             request,
-            "30-Day Track Record",
-            summary=summary,
-            records=records,
-        ),
+            index_meta["title"],
+            page_title=index_meta["title"],
+            summary={},
+            records=[],
+            view_mode="summary",
+            selected_record=None,
+            record_page_data={"index": index_meta, "recaps": {}, "initialViewMode": "summary", "selectedKey": None},
+            meta_description=index_meta["description"],
+            canonical_url=index_meta["absolute_url"],
+            og_title=index_meta["title"],
+            og_description=index_meta["description"],
+            og_url=index_meta["absolute_url"],
+            og_type="website",
+            twitter_title=index_meta["title"],
+            twitter_description=index_meta["description"],
+            structured_data_json=_build_record_structured_data(
+                request,
+                title=index_meta["title"],
+                description=index_meta["description"],
+                canonical_url=index_meta["absolute_url"],
+                records=[],
+                selected_record=None,
+            ),
+        )
+    return templates.TemplateResponse(request, "record.html", context)
+
+
+@app.get("/record/{track_slug}/{race_date}", response_class=HTMLResponse)
+async def recap_record_page(request: Request, track_slug: str, race_date: str):
+    """Canonical public recap detail route."""
+    track_id = get_track_id_from_slug(track_slug)
+    if not track_id or not _is_valid_race_date(race_date):
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            _template_context(request, "Recap Not Found", error="The requested recap page could not be found."),
+            status_code=404,
+        )
+
+    context = await _build_record_page_context(
+        request,
+        selected_track_id=track_id,
+        selected_race_date=race_date,
     )
+    if not context or context.get("error") == "recap_not_found":
+        return templates.TemplateResponse(
+            request,
+            "error.html",
+            _template_context(
+                request,
+                "Recap Not Found",
+                error=f"No recap record found for {SUPPORTED_TRACKS.get(track_id, track_id)} on {race_date}.",
+            ),
+            status_code=404,
+        )
+
+    return templates.TemplateResponse(request, "record.html", context)
 
 
 @app.get("/login", response_class=HTMLResponse)
@@ -3025,6 +3304,18 @@ async def sitemap_xml(request: Request):
                         entries.append((_build_public_race_path(track_id, race_date, race_number), lastmod))
         except Exception as exc:
             logger.warning("Failed to build sitemap from published cards: %s", exc)
+
+        try:
+            recap_data = await asyncio.wait_for(session_manager.get_recap_summary_30d(), timeout=5.0)
+            for record in recap_data.get("records", []):
+                track_id = record.get("track_id") or ""
+                race_date = record.get("race_date") or ""
+                if not track_id or not race_date:
+                    continue
+                lastmod = record.get("updated_at") or record.get("created_at") or race_date
+                entries.append((_build_public_recap_path(track_id, race_date), lastmod))
+        except Exception as exc:
+            logger.warning("Failed to build sitemap from recap records: %s", exc)
 
     lines = ['<?xml version="1.0" encoding="UTF-8"?>', '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">']
     for path, lastmod in entries:

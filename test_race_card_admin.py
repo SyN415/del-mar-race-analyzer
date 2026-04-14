@@ -1014,6 +1014,7 @@ class PublicCuratedCardRoutingTests(unittest.TestCase):
         session_manager = type("SessionManagerStub", (), {})()
         session_manager.get_published_curated_card = AsyncMock(return_value=self._published_card())
         session_manager.get_published_curated_cards = AsyncMock(return_value=[self._published_card()])
+        session_manager.get_recap_summary_30d = AsyncMock(return_value={"summary": {}, "records": []})
         session_manager.get_session_results = AsyncMock(return_value={
             "race_analyses": [
                 {
@@ -1093,6 +1094,154 @@ class PublicCuratedCardRoutingTests(unittest.TestCase):
         self.assertIn("https://trackstar.test/santa-anita/2026-03-13", sitemap.content)
         self.assertIn("https://trackstar.test/santa-anita/2026-03-13/race-2", sitemap.content)
         self.assertIn("Sitemap: https://trackstar.test/sitemap.xml", robots.content)
+
+
+class PublicRecordRoutingTests(unittest.TestCase):
+    def _fake_request(self):
+        return types.SimpleNamespace(cookies={}, base_url="https://trackstar.test/", headers={})
+
+    def _published_card(self):
+        return {
+            "session_id": "session-123",
+            "race_date": "2026-03-13",
+            "track_id": "SA",
+            "card_overview": "Santa Anita card-level analysis for a fast-paced Friday slate.",
+            "races_json": [{"race_number": 1}, {"race_number": 2}],
+            "updated_at": "2026-03-13T18:30:00+00:00",
+        }
+
+    def _recap_record(self):
+        return {
+            "id": "recap-123",
+            "race_date": "2026-03-13",
+            "track_id": "SA",
+            "daily_score": 78.5,
+            "top_pick_wins": 3,
+            "top_pick_total": 8,
+            "exacta_hits": 2,
+            "exacta_total": 8,
+            "trifecta_hits": 1,
+            "trifecta_total": 8,
+            "best_winner_horse": "Alpha",
+            "best_winner_odds": "6-1",
+            "best_exacta_payout": 48.2,
+            "best_trifecta_payout": 212.4,
+            "races_recap_json": [
+                {
+                    "race_number": 1,
+                    "winner": "Alpha",
+                    "winner_odds": "6-1",
+                    "our_top_pick": "Alpha",
+                    "our_value_play": "Bravo",
+                    "our_longshot": "Charlie",
+                    "exacta_payout": 48.2,
+                    "trifecta_payout": 212.4,
+                    "recap_note": "Alpha delivered from a stalking trip.",
+                    "hits": {
+                        "top_pick_won": True,
+                        "value_play_won": False,
+                        "longshot_won": False,
+                        "exacta_hit": True,
+                        "trifecta_hit": True,
+                    },
+                }
+            ],
+            "updated_at": "2026-03-13T23:00:00+00:00",
+            "created_at": "2026-03-13T23:00:00+00:00",
+        }
+
+    def _recap_summary(self):
+        secondary = dict(self._recap_record())
+        secondary.update({
+            "id": "recap-456",
+            "race_date": "2026-03-12",
+            "track_id": "DMR",
+            "daily_score": 64.0,
+            "best_winner_horse": "Delta",
+            "best_winner_odds": "4-1",
+        })
+        return {
+            "summary": {
+                "total_days_recapped": 2,
+                "top_pick_win_rate_pct": 37.5,
+                "average_daily_score": 71.3,
+                "exacta_hit_rate_pct": 25.0,
+                "trifecta_hit_rate_pct": 12.5,
+                "best_winner_odds_overall": "6-1",
+                "best_exacta_payout_overall": 48.2,
+                "best_trifecta_payout_overall": 212.4,
+            },
+            "records": [self._recap_record(), secondary],
+        }
+
+    def _session_manager_stub(self):
+        session_manager = type("RecordSessionManagerStub", (), {})()
+        session_manager.get_recap_summary_30d = AsyncMock(return_value=self._recap_summary())
+        session_manager.get_recap_record = AsyncMock(side_effect=lambda race_date, track_id: self._recap_record() if (race_date, track_id) == ("2026-03-13", "SA") else None)
+        session_manager.get_published_curated_cards = AsyncMock(return_value=[self._published_card()])
+        return session_manager
+
+    def test_record_page_builds_summary_context_and_route_payload(self):
+        session_manager = self._session_manager_stub()
+        original = app_module.app_state.ensure_session_manager
+        try:
+            app_module.app_state.ensure_session_manager = AsyncMock(return_value=session_manager)
+            response = app_module.asyncio.run(app_module.record_page(self._fake_request()))
+        finally:
+            app_module.app_state.ensure_session_manager = original
+
+        self.assertEqual(response["template"], "record.html")
+        self.assertEqual(response["context"]["view_mode"], "summary")
+        self.assertEqual(response["context"]["canonical_url"], "https://trackstar.test/record")
+        self.assertIsNone(response["context"]["selected_record"])
+        self.assertEqual(response["context"]["records"][0]["public_url"], "/record/santa-anita/2026-03-13")
+        self.assertIn("/record/santa-anita/2026-03-13", response["context"]["record_page_data"]["recaps"])
+
+    def test_recap_detail_page_builds_canonical_detail_context(self):
+        session_manager = self._session_manager_stub()
+        original = app_module.app_state.ensure_session_manager
+        try:
+            app_module.app_state.ensure_session_manager = AsyncMock(return_value=session_manager)
+            response = app_module.asyncio.run(
+                app_module.recap_record_page(self._fake_request(), "santa-anita", "2026-03-13")
+            )
+        finally:
+            app_module.app_state.ensure_session_manager = original
+
+        self.assertEqual(response["template"], "record.html")
+        self.assertEqual(response["context"]["view_mode"], "recap")
+        self.assertEqual(response["context"]["selected_record"]["track_id"], "SA")
+        self.assertEqual(response["context"]["canonical_url"], "https://trackstar.test/record/santa-anita/2026-03-13")
+        self.assertEqual(response["context"]["record_page_data"]["selectedKey"], "SA::2026-03-13")
+
+    def test_recap_detail_page_returns_404_when_record_is_missing(self):
+        session_manager = type("MissingRecordSessionManagerStub", (), {})()
+        session_manager.get_recap_summary_30d = AsyncMock(return_value={"summary": {}, "records": []})
+        session_manager.get_recap_record = AsyncMock(return_value=None)
+        original = app_module.app_state.ensure_session_manager
+        try:
+            app_module.app_state.ensure_session_manager = AsyncMock(return_value=session_manager)
+            response = app_module.asyncio.run(
+                app_module.recap_record_page(self._fake_request(), "santa-anita", "2026-03-13")
+            )
+        finally:
+            app_module.app_state.ensure_session_manager = original
+
+        self.assertEqual(response["template"], "error.html")
+        self.assertEqual(response["status_code"], 404)
+        self.assertIn("Santa Anita", response["context"]["error"])
+
+    def test_sitemap_includes_recap_urls(self):
+        session_manager = self._session_manager_stub()
+        original = app_module.app_state.ensure_session_manager
+        try:
+            app_module.app_state.ensure_session_manager = AsyncMock(return_value=session_manager)
+            sitemap = app_module.asyncio.run(app_module.sitemap_xml(self._fake_request()))
+        finally:
+            app_module.app_state.ensure_session_manager = original
+
+        self.assertIn("https://trackstar.test/record", sitemap.content)
+        self.assertIn("https://trackstar.test/record/santa-anita/2026-03-13", sitemap.content)
 
 if __name__ == "__main__":
     unittest.main()
