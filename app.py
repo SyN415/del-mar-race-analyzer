@@ -1302,6 +1302,7 @@ async def landing_page(request: Request):
     live_cards: List[Dict] = []
     upcoming_cards: List[Dict] = []
     past_cards: List[Dict] = []
+    all_cards: List[Dict] = []
 
     # Use configured race timezone so card status is grounded in local track time
     tz_offset = int(os.environ.get("RACE_TZ_OFFSET_HOURS", "-7"))
@@ -1321,7 +1322,11 @@ async def landing_page(request: Request):
             for pc in all_published:
                 pc["track_name"] = SUPPORTED_TRACKS.get(pc.get("track_id"), pc.get("track_id"))
                 pc["card_url"] = _build_public_card_path(pc.get("track_id", ""), pc.get("race_date", ""))
+                pc["destination_url"] = pc["card_url"]
+                pc["destination_label"] = "Open Card"
+                pc["destination_type"] = "card"
                 race_date = pc.get("race_date", "")
+                all_cards.append(pc)
 
                 if race_date > today_str:
                     # Future card — upcoming
@@ -1344,6 +1349,7 @@ async def landing_page(request: Request):
             # Live: soonest first; Upcoming: soonest first; Past: most recent first
             live_cards.sort(key=lambda c: c.get("race_date", ""))
             upcoming_cards.sort(key=lambda c: c.get("race_date", ""))
+            past_cards.sort(key=lambda c: c.get("race_date", ""), reverse=True)
         except Exception as e:
             logger.warning(f"Failed to load published curated cards for landing page: {e}")
     # Fetch 30-day track record summary for the stats widget
@@ -1355,6 +1361,31 @@ async def landing_page(request: Request):
             )
             if not track_record_summary or not track_record_summary.get("records"):
                 track_record_summary = None
+            else:
+                prepared_records = [
+                    _prepare_public_recap_record(request, record)
+                    for record in track_record_summary.get("records", [])
+                ]
+                track_record_summary = {
+                    "summary": _build_public_record_summary(
+                        track_record_summary.get("summary", {}),
+                        prepared_records,
+                    ),
+                    "records": prepared_records,
+                }
+
+                recap_lookup = {
+                    (record.get("track_id"), record.get("race_date")): record
+                    for record in prepared_records
+                }
+                for card in all_cards:
+                    recap_record = recap_lookup.get((card.get("track_id"), card.get("race_date")))
+                    if recap_record and card.get("card_status") == "completed":
+                        card["recap_url"] = recap_record.get("public_url")
+                        card["recap_score"] = recap_record.get("profitability_score")
+                        card["destination_url"] = recap_record.get("public_url") or card["card_url"]
+                        card["destination_label"] = "View Recap"
+                        card["destination_type"] = "recap"
         except Exception as e:
             logger.warning(f"Failed to load track record summary for landing page: {e}")
             track_record_summary = None

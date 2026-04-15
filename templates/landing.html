@@ -6,7 +6,9 @@
 
 {% macro market_row(pc, status='live') %}
 {% set strategy = pc.betting_strategy or '' %}
-<a href="{{ pc.card_url }}" class="market-row market-row--{{ status }} text-decoration-none">
+{% set destination_url = pc.destination_url or pc.card_url %}
+{% set destination_label = pc.destination_label or 'Open Card' %}
+<a href="{{ destination_url }}" class="market-row market-row--{{ status }} text-decoration-none">
     <div class="market-cell market-cell--status">
         <span class="market-status-badge status-{{ status }}">
             {% if status == 'live' %}<i class="fas fa-signal"></i> Live
@@ -17,7 +19,11 @@
     <div class="market-cell market-cell--event" data-label="Card">
         <span class="market-cell-label">Card</span>
         <strong>{{ pc.track_name or pc.track_id }}</strong>
-        <span>{{ pc.race_date }}</span>
+        <span>
+            {{ pc.race_date }}
+            {% if status == 'completed' and pc.destination_type == 'recap' %}
+            · Recap ready{% endif %}
+        </span>
     </div>
     <div class="market-cell market-cell--pick" data-label="Top Pick">
         <span class="market-cell-label">Top Pick</span>
@@ -36,7 +42,10 @@
         <span>{{ strategy[:110] ~ ('…' if strategy|length > 110 else '') if strategy else 'Condensed race-level strategy available inside the full card.' }}</span>
     </div>
     <div class="market-cell market-cell--action">
-        <span class="market-action">Open Card <i class="fas fa-arrow-right"></i></span>
+        <span class="market-action">{{ destination_label }} <i class="fas fa-arrow-right"></i></span>
+        {% if status == 'completed' and pc.recap_score is defined and pc.recap_score is not none %}
+        <span class="market-action-note">Score {{ pc.recap_score }}</span>
+        {% endif %}
     </div>
 </a>
 {% endmacro %}
