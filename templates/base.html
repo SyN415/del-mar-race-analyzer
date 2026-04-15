@@ -3,7 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}{{ brand_name or 'TrackStarAI' }}{% endblock %}</title>
+    <title>{% block title %}{{ page_title or title or brand_name or 'RaceTrackStar' }}{% endblock %}</title>
+    <meta name="description" content="{{ meta_description or 'RaceTrackStar delivers fast, data-driven horse racing cards, verified results, and disciplined wagering intelligence.' }}">
+    <meta name="robots" content="index,follow">
+    <link rel="canonical" href="{{ canonical_url or request.url }}">
+    <meta property="og:title" content="{{ og_title or page_title or title or brand_name or 'RaceTrackStar' }}">
+    <meta property="og:description" content="{{ og_description or meta_description or 'RaceTrackStar delivers fast, data-driven horse racing cards and verified results.' }}">
+    <meta property="og:type" content="{{ og_type or 'website' }}">
+    <meta property="og:url" content="{{ og_url or canonical_url or request.url }}">
+    <meta property="og:image" content="{{ og_image or (request.base_url|string).rstrip('/') ~ '/static/img/asset1.jpg' }}">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="{{ twitter_title or og_title or page_title or title or brand_name or 'RaceTrackStar' }}">
+    <meta name="twitter:description" content="{{ twitter_description or og_description or meta_description or 'RaceTrackStar delivers fast, data-driven horse racing cards and verified results.' }}">
+    <meta name="twitter:image" content="{{ twitter_image or og_image or (request.base_url|string).rstrip('/') ~ '/static/img/asset1.jpg' }}">
 
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -15,78 +27,87 @@
     <!-- Font Awesome -->
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <!-- Custom CSS -->
-    <link href="/static/css/style.css?v=5.0.0" rel="stylesheet">
+    <link href="/static/css/style.css?v=7.0.0" rel="stylesheet">
     <link rel="icon" type="image/jpeg" href="/static/img/asset5.jpg">
 
     {% block extra_head %}{% endblock %}
 </head>
 <body>
-    <!-- Navigation -->
     <nav class="navbar navbar-expand-lg navbar-dark">
         <div class="container">
             <a class="navbar-brand d-flex align-items-center gap-2" href="/">
                 <img src="/static/img/asset1.jpg" alt="{{ brand_name }}" class="brand-logo">
                 <span class="brand-wordmark">
                     <span>{{ brand_name }}</span>
-                    <span class="brand-submark">Where the Turf Meets the Surf</span>
+                    <span class="brand-submark">Fast, data-driven racing intelligence</span>
                 </span>
             </a>
-            {% if user_role == 'admin' %}
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav ms-auto align-items-center">
-                    <li class="nav-item">
-                        <a class="nav-link" href="/admin">Admin</a>
-                    </li>
-                    <li class="nav-item ms-lg-2">
-                        <a class="btn btn-sm btn-outline-light" href="/logout">Sign Out</a>
-                    </li>
+                <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-2 site-nav-links">
+                    <li class="nav-item"><a class="nav-link" href="/">Dashboard</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/record">Track Record</a></li>
+                    <li class="nav-item"><a class="nav-link" href="/about">About</a></li>
+                    {% if user_role == 'admin' %}
+                    <li class="nav-item"><a class="nav-link" href="/admin">Admin</a></li>
+                    <li class="nav-item ms-lg-2"><a class="btn btn-sm btn-outline-light" href="/logout">Sign Out</a></li>
+                    {% elif auth_enabled %}
+                    <li class="nav-item ms-lg-2"><a class="btn btn-sm btn-outline-light" href="/login">Admin</a></li>
+                    {% endif %}
                 </ul>
             </div>
-            {% endif %}
         </div>
     </nav>
 
-    <!-- Main Content -->
-    <main class="container mt-4">
+    <main class="container site-main mt-3 mt-lg-4">
         {% block content %}{% endblock %}
     </main>
 
-    <!-- Footer -->
     <footer class="mt-5 py-4">
         <div class="container">
-            <!-- Crypto Donations -->
-            <div class="crypto-donations text-center mb-3">
-                <p class="small fw-semibold mb-2" style="color: var(--text-secondary);">Support TrackStarAI — Donate with Crypto</p>
-                <div class="d-flex justify-content-center gap-4 flex-wrap">
-                    <div class="crypto-wallet">
-                        <div class="d-flex align-items-center gap-2 mb-1 justify-content-center">
-                            <i class="fab fa-bitcoin" style="color:#f7931a;font-size:1.1rem;"></i>
-                            <span class="small fw-semibold" style="color: #f7931a;">Bitcoin (BTC)</span>
-                        </div>
-                        <code class="crypto-address" title="Click to copy" onclick="navigator.clipboard.writeText('3JBSDy1o89G6FxtKDmA8ZfnYCm1QRXASmM').then(()=>{this.classList.add('copied');setTimeout(()=>this.classList.remove('copied'),1500)})">3JBSDy1o89G6FxtKDmA8ZfnYCm1QRXASmM</code>
+            <div class="footer-shell">
+                <div class="footer-top">
+                    <div>
+                        <p class="footer-brand mb-1">{{ brand_name }}</p>
+                        <p class="footer-copy mb-0">Professional race-card intelligence, verified performance review, and disciplined wagering context for modern horseplayers.</p>
                     </div>
-                    <div class="crypto-wallet">
-                        <div class="d-flex align-items-center gap-2 mb-1 justify-content-center">
-                            <i class="fab fa-ethereum" style="color:#627eea;font-size:1.1rem;"></i>
-                            <span class="small fw-semibold" style="color: #627eea;">Ethereum (ETH)</span>
-                        </div>
-                        <code class="crypto-address" title="Click to copy" onclick="navigator.clipboard.writeText('0x1b904804Cf095828F8e77DCdAEB3a4b84c798861').then(()=>{this.classList.add('copied');setTimeout(()=>this.classList.remove('copied'),1500)})">0x1b904804Cf095828F8e77DCdAEB3a4b84c798861</code>
+                    <div class="footer-links d-flex flex-wrap gap-3 justify-content-lg-end">
+                        <a href="/">Dashboard</a>
+                        <a href="/record">Track Record</a>
+                        <a href="/about">About</a>
                     </div>
                 </div>
-            </div>
-            <div class="text-center">
-                <p class="mb-1 small fw-medium">{{ brand_name }}</p>
-                <small>Laid-back picks for smart horseplayers · Del Mar · Santa Anita · Always wager responsibly.</small>
+
+                <div class="crypto-donations text-center text-lg-start my-4">
+                    <p class="small fw-semibold mb-2" style="color: var(--text-secondary);">Support {{ brand_name }} — Crypto accepted</p>
+                    <div class="d-flex justify-content-center justify-content-lg-start gap-4 flex-wrap">
+                        <div class="crypto-wallet">
+                            <div class="d-flex align-items-center gap-2 mb-1 justify-content-center justify-content-lg-start">
+                                <i class="fab fa-bitcoin" style="color:#f7931a;font-size:1.1rem;"></i>
+                                <span class="small fw-semibold" style="color: #f7931a;">Bitcoin (BTC)</span>
+                            </div>
+                            <code class="crypto-address" title="Click to copy" onclick="navigator.clipboard.writeText('3JBSDy1o89G6FxtKDmA8ZfnYCm1QRXASmM').then(()=>{this.classList.add('copied');setTimeout(()=>this.classList.remove('copied'),1500)})">3JBSDy1o89G6FxtKDmA8ZfnYCm1QRXASmM</code>
+                        </div>
+                        <div class="crypto-wallet">
+                            <div class="d-flex align-items-center gap-2 mb-1 justify-content-center justify-content-lg-start">
+                                <i class="fab fa-ethereum" style="color:#627eea;font-size:1.1rem;"></i>
+                                <span class="small fw-semibold" style="color: #627eea;">Ethereum (ETH)</span>
+                            </div>
+                            <code class="crypto-address" title="Click to copy" onclick="navigator.clipboard.writeText('0x1b904804Cf095828F8e77DCdAEB3a4b84c798861').then(()=>{this.classList.add('copied');setTimeout(()=>this.classList.remove('copied'),1500)})">0x1b904804Cf095828F8e77DCdAEB3a4b84c798861</code>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="footer-bottom text-center text-lg-start">
+                    <small>RaceTrackStar.ai is the future public domain. Always wager responsibly and never stake more than you can afford to lose.</small>
+                </div>
             </div>
         </div>
     </footer>
 
-    <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-    <!-- Custom JS -->
     <script src="/static/js/app.js?v=3.0.0"></script>
 
     {% block extra_scripts %}{% endblock %}

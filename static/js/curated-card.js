@@ -85,7 +85,7 @@
     if (heroSubtitle) {
       heroSubtitle.textContent = detail.viewMode === 'race' && detail.raceNumber
         ? `Focused strategy and instant race-level routing for Race ${detail.raceNumber}.`
-        : 'Laid-back picks and sharp strategy for every race on the card.';
+        : 'Data-driven full-card analysis with compact access to every race on the board.';
     }
     if (viewChip) {
       viewChip.textContent = detail.viewMode === 'race' && detail.raceNumber

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TrackStarAI horse racing intelligence application.
+RaceTrackStar horse racing intelligence application.
 
 Main FastAPI application entry point for the branded web experience,
 protected admin workflow, and AI-assisted race-card analysis pipeline.
@@ -105,13 +105,13 @@ except ImportError as e:
     logger.warning(f"⚠️  Using fallback SmartPick scraper (may not work with Angular pages): {e}")
 
 # Brand constants
-BRAND_NAME = "TrackStarAI"
+BRAND_NAME = "RaceTrackStar"
 AUTH_COOKIE_NAME = "trackstar_auth"
 
 # Initialize FastAPI app
 app = FastAPI(
     title=BRAND_NAME,
-    description="AI-native horse racing intelligence with resilient scraping, structured data, and curated race-card analysis.",
+    description="Data-driven horse racing intelligence with resilient scraping, structured data, and curated race-card analysis.",
     version="1.0.0"
 )
 
@@ -341,7 +341,7 @@ def _render_login_page(
     request: Request,
     *,
     error: str | None = None,
-    title: str = "TrackStarAI Admin Sign In",
+    title: str = "RaceTrackStar Admin Sign In",
 ):
     return templates.TemplateResponse(
         request,
@@ -537,12 +537,12 @@ def _build_card_meta_description(card: Dict[str, Any], track_name: str, race_dat
     races = card.get("races_json") or []
     if races:
         return _normalize_public_text(
-            f"TrackStarAI full-card analysis for {track_name} on {race_date}. Explore every race with top picks, value plays, longshots, and betting strategy.",
+            f"RaceTrackStar full-card analysis for {track_name} on {race_date}. Explore every race with ranked contenders, value signals, and data-driven wagering strategy.",
             max_length=170,
         )
 
     return _normalize_public_text(
-        f"TrackStarAI curated betting card for {track_name} on {race_date}.",
+        f"RaceTrackStar curated betting card for {track_name} on {race_date}.",
         max_length=170,
     )
 
@@ -557,7 +557,7 @@ def _build_race_meta_description(race: Dict[str, Any], track_name: str, race_dat
         picks.append(f"Longshot: {race['longshot']}")
     if picks:
         return _normalize_public_text(
-            f"TrackStarAI picks for {track_name} Race {race_number} on {race_date}. {' '.join(picks)}.",
+            f"RaceTrackStar picks for {track_name} Race {race_number} on {race_date}. {' '.join(picks)}.",
             max_length=170,
         )
 
@@ -566,7 +566,7 @@ def _build_race_meta_description(race: Dict[str, Any], track_name: str, race_dat
         return race_notes
 
     return _normalize_public_text(
-        f"TrackStarAI strategy and betting picks for {track_name} Race {race_number} on {race_date}.",
+        f"RaceTrackStar strategy and betting picks for {track_name} Race {race_number} on {race_date}.",
         max_length=170,
     )
 
@@ -581,7 +581,7 @@ def _build_record_index_meta_description(summary: Dict[str, Any]) -> str:
     exacta_rate = summary.get("exacta_hit_rate_pct") or 0
     trifecta_rate = summary.get("trifecta_hit_rate_pct") or 0
     return _normalize_public_text(
-        f"TrackStarAI's 30-day verified track record across {total_days} recap days. Top pick win rate {top_pick_rate}%, exacta hit rate {exacta_rate}%, and trifecta hit rate {trifecta_rate}%.",
+        f"RaceTrackStar's 30-day verified track record across {total_days} recap days. Top pick win rate {top_pick_rate}%, exacta hit rate {exacta_rate}%, and trifecta hit rate {trifecta_rate}%.",
         max_length=170,
     )
 
@@ -599,7 +599,7 @@ def _build_recap_meta_description(record: Dict[str, Any], track_name: str, race_
     best_winner = record.get("best_winner_horse") or ""
     best_winner_odds = record.get("best_winner_odds") or ""
     parts = [
-        f"TrackStarAI recap for {track_name} on {race_date}.",
+        f"RaceTrackStar recap for {track_name} on {race_date}.",
         f"Profitability score: {profitability_score}/100.",
         f"Top picks won: {top_pick_wins} of {top_pick_total}.",
         f"Exacta hits: {exacta_hits}.",
@@ -608,6 +608,39 @@ def _build_recap_meta_description(record: Dict[str, Any], track_name: str, race_
     if best_winner:
         parts.append(f"Best winner: {best_winner}{f' ({best_winner_odds})' if best_winner_odds else ''}.")
     return _normalize_public_text(" ".join(parts), max_length=170)
+
+
+def _build_landing_meta_title() -> str:
+    return f"{BRAND_NAME} | Live Race Cards, Verified Results & Betting Intelligence"
+
+
+def _build_landing_meta_description(
+    *,
+    live_cards: List[Dict[str, Any]],
+    upcoming_cards: List[Dict[str, Any]],
+    summary: Optional[Dict[str, Any]],
+) -> str:
+    if summary:
+        return _normalize_public_text(
+            f"{BRAND_NAME} delivers live and upcoming race cards with verified performance tracking. Current top-pick win rate {summary.get('top_pick_win_rate_pct', 0)}% across {summary.get('total_days_recapped', 0)} recap days.",
+            max_length=170,
+        )
+
+    return _normalize_public_text(
+        f"{BRAND_NAME} publishes {len(live_cards)} live and {len(upcoming_cards)} upcoming data-driven race cards with fast navigation and verified historical results.",
+        max_length=170,
+    )
+
+
+def _build_about_meta_title() -> str:
+    return f"About {BRAND_NAME} | Data-Driven Horse Racing Intelligence"
+
+
+def _build_about_meta_description() -> str:
+    return _normalize_public_text(
+        f"Learn how {BRAND_NAME} approaches horse racing analysis with disciplined data review, professional card construction, and responsible wagering principles.",
+        max_length=170,
+    )
 
 
 def _normalize_currency_amount(value: Any) -> float:
@@ -1326,16 +1359,77 @@ async def landing_page(request: Request):
             logger.warning(f"Failed to load track record summary for landing page: {e}")
             track_record_summary = None
 
+    landing_title = _build_landing_meta_title()
+    landing_description = _build_landing_meta_description(
+        live_cards=live_cards,
+        upcoming_cards=upcoming_cards,
+        summary=track_record_summary.get("summary") if track_record_summary else None,
+    )
+    landing_url = str(request.url_for("landing_page"))
+
     return templates.TemplateResponse(
         request,
         "landing.html",
         _template_context(
             request,
-            BRAND_NAME,
+            landing_title,
+            page_title=landing_title,
             live_cards=live_cards,
             upcoming_cards=upcoming_cards,
             past_cards=past_cards,
             track_record_summary=track_record_summary,
+            meta_description=landing_description,
+            canonical_url=landing_url,
+            og_title=landing_title,
+            og_description=landing_description,
+            og_url=landing_url,
+            og_type="website",
+            twitter_title=landing_title,
+            twitter_description=landing_description,
+        ),
+    )
+
+
+@app.get("/about", response_class=HTMLResponse)
+async def about_page(request: Request):
+    """Public about page describing the platform's methodology and philosophy."""
+    summary_data = None
+    session_manager = await app_state.ensure_session_manager()
+    if session_manager:
+        try:
+            summary_data = await asyncio.wait_for(session_manager.get_recap_summary_30d(), timeout=2.0)
+            if not summary_data or not summary_data.get("records"):
+                summary_data = None
+            else:
+                prepared_records = [_prepare_public_recap_record(request, record) for record in summary_data.get("records", [])]
+                summary_data = {
+                    "summary": _build_public_record_summary(summary_data.get("summary", {}), prepared_records),
+                    "records": prepared_records,
+                }
+        except Exception as exc:
+            logger.warning("Failed to load recap summary for about page: %s", exc)
+            summary_data = None
+
+    about_title = _build_about_meta_title()
+    about_description = _build_about_meta_description()
+    about_url = str(request.url_for("about_page"))
+    return templates.TemplateResponse(
+        request,
+        "about.html",
+        _template_context(
+            request,
+            about_title,
+            page_title=about_title,
+            meta_description=about_description,
+            canonical_url=about_url,
+            og_title=about_title,
+            og_description=about_description,
+            og_url=about_url,
+            og_type="website",
+            twitter_title=about_title,
+            twitter_description=about_description,
+            supported_tracks=SUPPORTED_TRACKS,
+            track_record_summary=summary_data,
         ),
     )
 
@@ -3431,6 +3525,7 @@ async def sitemap_xml(request: Request):
     seen_paths = set()
     entries: List[tuple[str, Optional[str]]] = [
         ("/", None),
+        ("/about", None),
         ("/record", None),
     ]
 

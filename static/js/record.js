@@ -88,7 +88,7 @@
     if (heroSubtitle) {
       heroSubtitle.textContent = detail.viewMode === 'recap' && detail.trackName && detail.raceDate
         ? `Focused recap review for ${detail.trackName} on ${detail.raceDate}.`
-        : 'Real results, no fluff. Every pick checked against official Equibase race outcomes.';
+        : 'Verified outcomes, disciplined review, and transparent public performance tracking across official Equibase results.';
     }
     if (viewChip) {
       viewChip.textContent = detail.viewMode === 'recap' && detail.trackName

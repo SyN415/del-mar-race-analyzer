@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-<link href="/static/css/style.css?v=6.0.0" rel="stylesheet">
+<link href="/static/css/style.css?v=7.0.0" rel="stylesheet">
 {% if structured_data_json %}
 <script type="application/ld+json">{{ structured_data_json|safe }}</script>
 {% endif %}
@@ -437,14 +437,14 @@ body[data-view-mode="full-card"] .race-panel:last-child{margin-bottom:0;}
     <img src="/static/img/asset1.jpg" alt="{{ brand_name }}">
     <span>{{ brand_name }}</span>
   </a>
-  <a class="cc-nav-back" href="/">← All Cards</a>
+  <a class="cc-nav-back" href="/">← Dashboard</a>
 </nav>
 
 <!-- HERO -->
 <section class="cc-hero">
   <div class="cc-eyebrow">🌴 Curated Betting Card</div>
   <h1 class="cc-hero-title">{{ track_name }}</h1>
-  <p class="cc-hero-sub" id="cc-hero-subtitle">{% if view_mode == 'race' and selected_race_number %}Focused strategy and instant race-level routing for Race {{ selected_race_number }}.{% else %}Laid-back picks and sharp strategy for every race on the card.{% endif %}</p>
+  <p class="cc-hero-sub" id="cc-hero-subtitle">{% if view_mode == 'race' and selected_race_number %}Focused strategy and instant race-level routing for Race {{ selected_race_number }}.{% else %}Data-driven full-card analysis with compact access to every race on the board.{% endif %}</p>
   <div class="cc-meta-chips">
     <span class="cc-chip">📅 {{ race_date }}</span>
     <span class="cc-chip">🏟 {{ track_name }}</span>
@@ -802,7 +802,7 @@ body[data-view-mode="full-card"] .race-panel:last-child{margin-bottom:0;}
 <!-- FOOTER -->
 <footer class="cc-footer">
   <div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:1px solid var(--border);">
-    <p style="font-size:.78rem;font-weight:600;color:var(--subtle);margin-bottom:.6rem;">Support TrackStarAI — Donate with Crypto</p>
+    <p style="font-size:.78rem;font-weight:600;color:var(--subtle);margin-bottom:.6rem;">Support RaceTrackStar — Donate with Crypto</p>
     <div style="display:flex;justify-content:center;gap:2rem;flex-wrap:wrap;">
       <div style="text-align:center;">
         <div style="display:flex;align-items:center;gap:.4rem;justify-content:center;margin-bottom:.3rem;">
@@ -820,12 +820,12 @@ body[data-view-mode="full-card"] .race-panel:last-child{margin-bottom:0;}
       </div>
     </div>
   </div>
-  <p>Built by <a href="/">{{ brand_name }}</a> &mdash; Chill picks for smart horseplayers.</p>
-  <p style="margin-top:.4rem;font-size:.72rem">For entertainment and research purposes. Always wager responsibly. 🌴</p>
+  <p>Built by <a href="/">{{ brand_name }}</a> &mdash; professional race-card intelligence for disciplined horseplayers.</p>
+  <p style="margin-top:.4rem;font-size:.72rem">For research and entertainment purposes. Always wager responsibly.</p>
 </footer>
 
 <script id="curated-card-page-data" type="application/json">{{ public_page_data|tojson }}</script>
-<script src="/static/js/curated-card.js?v=1.0.0"></script>
+<script src="/static/js/curated-card.js?v=1.1.0"></script>
 
 </body>
 </html>

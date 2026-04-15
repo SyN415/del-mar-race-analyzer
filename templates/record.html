@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-<link href="/static/css/style.css?v=6.0.0" rel="stylesheet">
+<link href="/static/css/style.css?v=7.0.0" rel="stylesheet">
 {% if structured_data_json %}
 <script type="application/ld+json">{{ structured_data_json|safe }}</script>
 {% endif %}
@@ -45,14 +45,14 @@
 </head>
 <body class="theme-dark standalone-page record-page" data-view-mode="{{ view_mode }}" data-selected-key="{% if selected_record %}{{ selected_record.track_id }}::{{ selected_record.race_date }}{% endif %}">
 <nav class="cc-nav">
-  <a href="/" class="cc-brand"><img src="/static/img/asset1.jpg" alt="TrackStarAI" style="width:32px;height:32px;border-radius:8px;"><span>TrackStar AI</span></a>
+  <a href="/" class="cc-brand"><img src="/static/img/asset1.jpg" alt="RaceTrackStar" style="width:32px;height:32px;border-radius:8px;"><span>RaceTrackStar</span></a>
   <a class="cc-nav-back" href="/">← Home</a>
 </nav>
 
 <section class="cc-hero">
   <div class="cc-eyebrow">🏇 Verified Performance</div>
   <h1 class="cc-hero-title">30-Day Track Record</h1>
-  <p class="cc-hero-sub" id="record-hero-subtitle">{% if selected_record %}Focused recap review for {{ selected_record.track_name }} on {{ selected_record.race_date }}.{% else %}Real results, no fluff. Every pick checked against official Equibase race outcomes.{% endif %}</p>
+  <p class="cc-hero-sub" id="record-hero-subtitle">{% if selected_record %}Focused recap review for {{ selected_record.track_name }} on {{ selected_record.race_date }}.{% else %}Verified outcomes, disciplined review, and transparent public performance tracking across official Equibase results.{% endif %}</p>
   <div class="cc-meta-chips">
     <span class="cc-chip">📆 {{ summary.total_days_recapped or 0 }} Days Recapped</span>
     <span class="cc-chip">🎯 {{ summary.top_pick_win_rate_pct or 0 }}% Top Pick Win Rate</span>
@@ -176,6 +176,6 @@
 </div>
 
 <script id="record-page-data" type="application/json">{{ record_page_data|tojson }}</script>
-<script src="/static/js/record.js?v=1.0.0"></script>
+<script src="/static/js/record.js?v=1.1.0"></script>
 </body>
 </html>
