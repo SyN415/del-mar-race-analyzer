@@ -1,0 +1,171 @@
+@media (max-width: 767px) {
+    .race-rail {
+        position: relative;
+        top: auto;
+        z-index: 1;
+        margin-bottom: 0.25rem;
+        padding: 0.1rem 0 0.5rem;
+        background: linear-gradient(180deg, rgba(5, 16, 12, 0.94), rgba(5, 16, 12, 0.82));
+        border-bottom: 1px solid var(--border);
+    }
+
+    .race-panels-container {
+        position: relative;
+        z-index: 0;
+        padding-top: 0;
+        border-top: none;
+        background: transparent;
+    }
+
+    .mobile-cards {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        padding: 0.85rem;
+    }
+
+    .mobile-cards .mobile-horse-card {
+        margin-bottom: 0;
+        padding: 1rem;
+        border-radius: 16px;
+    }
+
+    .mobile-horse-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 0.85rem;
+        align-items: start;
+    }
+
+    .mobile-horse-main {
+        min-width: 0;
+    }
+
+    .mobile-horse-topline {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 0.65rem;
+        margin-bottom: 0.35rem;
+    }
+
+    .mobile-horse-topline .mobile-card-label {
+        margin-bottom: 0;
+    }
+
+    .mobile-horse-title-row {
+        display: flex;
+        align-items: baseline;
+        gap: 0.1rem;
+        min-width: 0;
+    }
+
+    .mobile-horse-title {
+        font-size: 1.15rem;
+        min-width: 0;
+    }
+
+    .mobile-horse-probability {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.3rem;
+        flex-shrink: 0;
+    }
+
+    .mobile-prob-label {
+        font-size: 0.62rem;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--muted);
+        white-space: nowrap;
+    }
+
+    .mobile-horse-connections {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.65rem;
+        margin-top: 0.75rem;
+    }
+
+    .mobile-connection {
+        min-width: 0;
+    }
+
+    .mobile-connection .mobile-card-label {
+        margin-bottom: 0.18rem;
+        font-size: 0.62rem;
+        letter-spacing: 0.12em;
+    }
+
+    .mobile-connection-value {
+        color: var(--subtle);
+        font-size: 0.82rem;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
+
+    .mobile-horse-metrics {
+        display: grid;
+        grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+        gap: 0.65rem;
+        margin-top: 0.85rem;
+    }
+
+    .mobile-card-stat {
+        min-width: 0;
+        padding: 0.7rem 0.8rem;
+    }
+
+    .mobile-card-value {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        min-width: 0;
+    }
+
+    .mobile-card-muted {
+        color: var(--muted);
+    }
+
+    .mobile-rating-stars {
+        color: var(--gold);
+        font-size: 0.82rem;
+        letter-spacing: 0.06em;
+        white-space: nowrap;
+    }
+
+    .mobile-rating-score {
+        color: var(--muted);
+        font-size: 0.8rem;
+        font-weight: 700;
+        white-space: nowrap;
+    }
+
+    .mobile-horse-note {
+        margin-top: 0.75rem;
+        padding-top: 0.75rem;
+        font-size: 0.82rem;
+        line-height: 1.45;
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+    }
+
+    .rt-win-prob {
+        width: 48px;
+        height: 48px;
+    }
+}
+
+@media (max-width: 540px) {
+    .mobile-horse-topline {
+        flex-wrap: wrap;
+    }
+
+    .mobile-horse-connections,
+    .mobile-horse-metrics {
+        grid-template-columns: 1fr;
+    }
+}

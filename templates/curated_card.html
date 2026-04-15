@@ -428,6 +428,7 @@ body[data-view-mode="full-card"] .race-panel:last-child{margin-bottom:0;}
 .cc-footer a{color:var(--sky);text-decoration:none}
 .cc-footer a:hover{text-decoration:underline}
 </style>
+<link href="/static/css/curated-card.css?v=1.0.0" rel="stylesheet">
 </head>
 <body class="theme-dark standalone-page curated-card-page" data-view-mode="{{ view_mode }}" data-selected-race="{{ selected_race_number or '' }}">
 <!-- NAV -->
@@ -596,44 +597,82 @@ body[data-view-mode="full-card"] .race-panel:last-child{margin-bottom:0;}
           {% set is_top = p_name and race.top_pick and (p_name|lower == race.top_pick|lower) %}
           {% set is_val = p_name and race.value_play and (p_name|lower == race.value_play|lower) %}
           {% set is_long = p_name and race.longshot and (p_name|lower == race.longshot|lower) %}
+          {% set ml = prediction.morning_line_odds or '' %}
           {% set p_win = prediction.win_probability or prediction.probability or prediction.win_prob or 0 %}
           {% set p_win_float = p_win|float %}
           {% set r = prediction.composite_rating or prediction.rating or prediction.score or 0 %}
           {% set r_float = r|float %}
+          {% if r_float > 80 %}
+          {% set rating_stars = '★★★★★' %}
+          {% elif r_float > 60 %}
+          {% set rating_stars = '★★★★☆' %}
+          {% elif r_float > 40 %}
+          {% set rating_stars = '★★★☆☆' %}
+          {% elif r_float > 20 %}
+          {% set rating_stars = '★★☆☆☆' %}
+          {% else %}
+          {% set rating_stars = '★☆☆☆☆' %}
+          {% endif %}
           <div class="mobile-horse-card">
             <div class="mobile-horse-header">
-              <div>
-                <span class="mobile-card-label">Post · Horse</span>
-                <div class="mobile-horse-title"><span class="rt-post">{{ prediction.post_position or prediction.post or '?' }}</span> {{ p_name or 'Unknown' }}</div>
-                <div class="mobile-horse-sub">{{ prediction.jockey or 'N/A' }} · {{ prediction.trainer or 'N/A' }}</div>
-                {% if is_top %}<div class="mobile-horse-role"><span class="rt-role top-pick">Top Pick</span></div>
-                {% elif is_val %}<div class="mobile-horse-role"><span class="rt-role value-play">Value Play</span></div>
-                {% elif is_long %}<div class="mobile-horse-role"><span class="rt-role longshot">Longshot</span></div>
-                {% endif %}
+              <div class="mobile-horse-main">
+                <div class="mobile-horse-topline">
+                  <span class="mobile-card-label">Post · Horse</span>
+                  {% if is_top %}<span class="rt-role top-pick">Top Pick</span>
+                  {% elif is_val %}<span class="rt-role value-play">Value Play</span>
+                  {% elif is_long %}<span class="rt-role longshot">Longshot</span>
+                  {% endif %}
+                </div>
+                <div class="mobile-horse-title-row">
+                  <span class="rt-post">{{ prediction.post_position or prediction.post or '?' }}</span>
+                  <div class="mobile-horse-title">{{ p_name or 'Unknown' }}</div>
+                </div>
+                <div class="mobile-horse-connections">
+                  <div class="mobile-connection">
+                    <span class="mobile-card-label">Jockey</span>
+                    <div class="mobile-connection-value">{{ prediction.jockey or 'N/A' }}</div>
+                  </div>
+                  <div class="mobile-connection">
+                    <span class="mobile-card-label">Trainer</span>
+                    <div class="mobile-connection-value">{{ prediction.trainer or 'N/A' }}</div>
+                  </div>
+                </div>
               </div>
-              <div class="rt-win-prob {% if p_win_float >= 35 %}prob-heavy{% elif p_win_float >= 20 %}prob-strong{% elif p_win_float >= 10 %}prob-mid{% else %}prob-low{% endif %}">
-                {% set stroke = (p_win_float / 100.0) * 113.097 %}
-                <svg viewBox="0 0 40 40">
-                  <circle class="bg" cx="20" cy="20" r="18"></circle>
-                  <circle class="fg" cx="20" cy="20" r="18" style="stroke-dasharray: {{ stroke }} 113.097"></circle>
-                </svg>
-                <span>{{ p_win_float|round|int }}</span>
+              <div class="mobile-horse-probability">
+                <div class="rt-win-prob {% if p_win_float >= 35 %}prob-heavy{% elif p_win_float >= 20 %}prob-strong{% elif p_win_float >= 10 %}prob-mid{% else %}prob-low{% endif %}">
+                  {% set stroke = (p_win_float / 100.0) * 113.097 %}
+                  <svg viewBox="0 0 40 40">
+                    <circle class="bg" cx="20" cy="20" r="18"></circle>
+                    <circle class="fg" cx="20" cy="20" r="18" style="stroke-dasharray: {{ stroke }} 113.097"></circle>
+                  </svg>
+                  <span>{{ p_win_float|round|int }}</span>
+                </div>
+                <span class="mobile-prob-label">Win Prob</span>
               </div>
             </div>
 
             <div class="mobile-horse-metrics">
               <div class="mobile-card-stat">
                 <span class="mobile-card-label">ML Odds</span>
-                <div class="mobile-card-value">{{ prediction.morning_line_odds or '—' }}</div>
+                <div class="mobile-card-value">
+                  {% if ml %}
+                  <span class="ml-odds-chip">{{ ml }}</span>
+                  {% else %}
+                  <span class="mobile-card-muted">—</span>
+                  {% endif %}
+                </div>
               </div>
-              <div class="mobile-card-stat">
+              <div class="mobile-card-stat mobile-rating-stat">
                 <span class="mobile-card-label">Rating</span>
-                <div class="mobile-card-value">{{ r_float|round(1) }}</div>
+                <div class="mobile-card-value">
+                  <span class="mobile-rating-stars">{{ rating_stars }}</span>
+                  <span class="mobile-rating-score">{{ r_float|round(1) }}</span>
+                </div>
               </div>
             </div>
 
-            {% if prediction.notes or race.race_notes %}
-            <div class="mobile-horse-note">{{ prediction.notes or race.race_notes }}</div>
+            {% if prediction.notes %}
+            <div class="mobile-horse-note">{{ prediction.notes }}</div>
             {% endif %}
           </div>
           {% endfor %}
