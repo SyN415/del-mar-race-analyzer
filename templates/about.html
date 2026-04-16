@@ -19,16 +19,16 @@
             <p class="about-copy">RaceTrackStar is built around one goal: turn noisy race-day information into compact, decision-ready public cards. We focus on speed, structure, and clarity so users can navigate straight from dashboard to card to verified review.</p>
             <div class="metric-strip about-metric-strip">
                 <div class="metric-tile">
-                    <span class="metric-label">Future domain</span>
-                    <strong>RaceTrackStar.ai</strong>
-                </div>
-                <div class="metric-tile">
                     <span class="metric-label">30-day win rate</span>
                     <strong>{{ summary.top_pick_win_rate_pct or 0 }}%</strong>
                 </div>
                 <div class="metric-tile">
                     <span class="metric-label">Recap days</span>
                     <strong>{{ summary.total_days_recapped or 0 }}</strong>
+                </div>
+                <div class="metric-tile">
+                    <span class="metric-label">Tracks covered</span>
+                    <strong>{{ supported_tracks|length }}</strong>
                 </div>
             </div>
         </section>
@@ -44,14 +44,10 @@
         </aside>
 
         <section class="dashboard-panel about-section-panel">
-            <div class="section-eyebrow">Philosophy</div>
+            <div class="section-eyebrow">Philosophy &amp; Approach</div>
             <h3>Information density without decision fatigue.</h3>
             <p>Our interface is designed to expose the most important signals immediately: live status, card routing, ranked contenders, and verified historical outcomes. That means fewer oversized cards, fewer redundant screens, and faster movement from scan to action.</p>
-        </section>
-
-        <section class="dashboard-panel about-section-panel">
-            <div class="section-eyebrow">Approach</div>
-            <div class="about-principles">
+            <div class="about-principles mt-3">
                 <div>
                     <strong>Structured inputs</strong>
                     <p>Entries, odds context, public race-card metadata, and recap outputs are normalized into a consistent operating layer.</p>
@@ -67,14 +63,9 @@
             </div>
         </section>
 
-        <section class="dashboard-panel about-section-panel">
-            <div class="section-eyebrow">Operational confidentiality</div>
-            <h3>The public output is transparent. The internal process remains protected.</h3>
-            <p>RaceTrackStar will always explain what users are looking at and how to interpret the output responsibly. We will not disclose the exact weighting, model orchestration, workflow sequencing, or proprietary logic that power the final board.</p>
-        </section>
-
-        <section class="dashboard-panel about-section-panel">
-            <div class="section-eyebrow">Responsible wagering</div>
+        <section class="dashboard-panel about-section-panel about-responsible-panel">
+            <div class="section-eyebrow"><i class="fas fa-shield-halved"></i> Responsible wagering</div>
+            <h3>Use every card as information &mdash; never as a guarantee.</h3>
             <p>Horse racing is high variance. RaceTrackStar is intended as an analytical tool, not a promise of outcome. Treat every card as information for disciplined decision-making, manage bankroll risk carefully, and stop immediately if wagering stops being recreational or controlled.</p>
         </section>
 

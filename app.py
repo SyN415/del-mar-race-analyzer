@@ -1126,6 +1126,16 @@ async def _build_public_card_context(
     full_card_url = _to_public_absolute_url(request, full_card_path)
     card["public_url"] = full_card_path
 
+    recap_path: Optional[str] = None
+    try:
+        recap_record = await asyncio.wait_for(
+            session_manager.get_recap_record(race_date, track_id), timeout=2.0
+        )
+        if recap_record:
+            recap_path = _build_public_recap_path(track_id, race_date)
+    except Exception as exc:
+        logger.warning("Failed to resolve recap for curated card context: %s", exc)
+
     card_meta = {
         "path": full_card_path,
         "absolute_url": full_card_url,
@@ -1171,6 +1181,7 @@ async def _build_public_card_context(
         selected_race_number=selected_race_number,
         active_race=race_lookup.get(selected_race_number) if selected_race_number else None,
         full_card_url=full_card_path,
+        recap_url=recap_path,
         meta_description=selected_meta["description"],
         canonical_url=selected_meta["absolute_url"],
         og_title=selected_meta["title"],

@@ -68,6 +68,25 @@ body.curated-card-page .cc-footer{margin-inline:0;}
   display:flex;align-items:center;gap:.35rem;transition:color .2s;
 }
 .cc-nav-back:hover{color:var(--sky)}
+.cc-nav-actions{display:flex;align-items:center;gap:1.25rem;flex-wrap:wrap;justify-content:flex-end}
+.cc-nav-recap{
+  font-size:.78rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--gold);text-decoration:none;display:inline-flex;align-items:center;gap:.4rem;
+  padding:.4rem .85rem;border-radius:999px;
+  background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.35);
+  transition:background .2s,color .2s;
+}
+.cc-nav-recap:hover{background:rgba(201,168,76,.2);color:#f0d48a}
+.cc-hero-recap-cta{margin-top:1.25rem;display:flex;justify-content:center}
+.cc-recap-button{
+  display:inline-flex;align-items:center;gap:.55rem;
+  padding:.7rem 1.3rem;border-radius:999px;
+  background:linear-gradient(135deg,rgba(201,168,76,.18),rgba(201,168,76,.08));
+  border:1px solid rgba(201,168,76,.45);
+  color:var(--gold);font-size:.88rem;font-weight:700;letter-spacing:.04em;
+  text-decoration:none;transition:transform .2s,box-shadow .2s,background .2s;
+}
+.cc-recap-button:hover{transform:translateY(-1px);box-shadow:0 6px 22px rgba(201,168,76,.18);background:rgba(201,168,76,.22)}
 
 /* ── HERO ──────────────────────────────── */
 .cc-hero{
@@ -437,7 +456,12 @@ body[data-view-mode="full-card"] .race-panel:last-child{margin-bottom:0;}
     <img src="/static/img/asset1.jpg" alt="{{ brand_name }}">
     <span>{{ brand_name }}</span>
   </a>
-  <a class="cc-nav-back" href="/">← Dashboard</a>
+  <div class="cc-nav-actions">
+    {% if recap_url %}
+    <a class="cc-nav-recap" href="{{ recap_url }}"><i class="fas fa-flag-checkered"></i> View Recap</a>
+    {% endif %}
+    <a class="cc-nav-back" href="/">← Dashboard</a>
+  </div>
 </nav>
 
 <!-- HERO -->
@@ -457,6 +481,14 @@ body[data-view-mode="full-card"] .race-panel:last-child{margin-bottom:0;}
     <span class="cc-chip" style="background:var(--color-neutral-soft);color:var(--color-text-secondary);border:1px solid var(--color-neutral-border)">🏁 Completed</span>
     {% endif %}
   </div>
+  {% if recap_url %}
+  <div class="cc-hero-recap-cta">
+    <a class="cc-recap-button" href="{{ recap_url }}">
+      <i class="fas fa-flag-checkered"></i> View Verified Recap for this Card
+      <i class="fas fa-arrow-right"></i>
+    </a>
+  </div>
+  {% endif %}
 </section>
 
 {% if card.races_json %}

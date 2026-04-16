@@ -5,47 +5,14 @@
 {% set summary = track_record_summary.summary if track_record_summary and track_record_summary.summary else {} %}
 
 {% macro market_row(pc, status='live') %}
-{% set strategy = pc.betting_strategy or '' %}
-{% set destination_url = pc.destination_url or pc.card_url %}
-{% set destination_label = pc.destination_label or 'Open Card' %}
+{% set destination_url = pc.card_url %}
 <a href="{{ destination_url }}" class="market-row market-row--{{ status }} text-decoration-none">
-    <div class="market-cell market-cell--status">
-        <span class="market-status-badge status-{{ status }}">
-            {% if status == 'live' %}<i class="fas fa-signal"></i> Live
-            {% elif status == 'upcoming' %}<i class="fas fa-calendar-alt"></i> Upcoming
-            {% else %}<i class="fas fa-flag-checkered"></i> Final{% endif %}
-        </span>
-    </div>
     <div class="market-cell market-cell--event" data-label="Card">
-        <span class="market-cell-label">Card</span>
         <strong>{{ pc.track_name or pc.track_id }}</strong>
-        <span>
-            {{ pc.race_date }}
-            {% if status == 'completed' and pc.destination_type == 'recap' %}
-            · Recap ready{% endif %}
-        </span>
-    </div>
-    <div class="market-cell market-cell--pick" data-label="Top Pick">
-        <span class="market-cell-label">Top Pick</span>
-        <strong>{{ pc.top_pick_json.name if pc.top_pick_json else '—' }}</strong>
-    </div>
-    <div class="market-cell market-cell--value" data-label="Value">
-        <span class="market-cell-label">Value</span>
-        <strong>{{ pc.value_play_json.name if pc.value_play_json else '—' }}</strong>
-    </div>
-    <div class="market-cell market-cell--longshot" data-label="Longshot">
-        <span class="market-cell-label">Longshot</span>
-        <strong>{{ pc.longshot_json.name if pc.longshot_json else '—' }}</strong>
-    </div>
-    <div class="market-cell market-cell--strategy" data-label="Strategy">
-        <span class="market-cell-label">Strategy</span>
-        <span>{{ strategy[:110] ~ ('…' if strategy|length > 110 else '') if strategy else 'Condensed race-level strategy available inside the full card.' }}</span>
+        <span>{{ pc.race_date }}</span>
     </div>
     <div class="market-cell market-cell--action">
-        <span class="market-action">{{ destination_label }} <i class="fas fa-arrow-right"></i></span>
-        {% if status == 'completed' and pc.recap_score is defined and pc.recap_score is not none %}
-        <span class="market-action-note">Score {{ pc.recap_score }}</span>
-        {% endif %}
+        <span class="market-action">Open Card <i class="fas fa-arrow-right"></i></span>
     </div>
 </a>
 {% endmacro %}
@@ -111,6 +78,7 @@
                         <a href="#live-cards" class="btn btn-primary btn-lg">View active cards</a>
                         <a href="/record" class="btn btn-outline-light btn-lg">Open track record</a>
                     </div>
+                    <p class="dashboard-hero-note"><i class="fas fa-shield-halved"></i> <strong>Responsible wagering:</strong> Horse racing is high variance. Use every card as information for disciplined decisions, manage bankroll risk, and stop if wagering is no longer recreational.</p>
                 </div>
                 <div class="metric-strip">
                     <div class="metric-tile">
@@ -141,9 +109,6 @@
                     </div>
                     <span class="section-count section-count--live">{{ live_cards|length }} active</span>
                 </div>
-                <div class="market-head">
-                    <span>Status</span><span>Card</span><span>Top Pick</span><span>Value</span><span>Longshot</span><span>Strategy</span><span>Action</span>
-                </div>
                 <div class="market-list">
                     {% for pc in live_cards %}
                     {{ market_row(pc, 'live') }}
@@ -166,9 +131,6 @@
                         <h3>Published boards scheduled ahead</h3>
                     </div>
                     <span class="section-count section-count--upcoming">{{ upcoming_cards|length }} scheduled</span>
-                </div>
-                <div class="market-head">
-                    <span>Status</span><span>Card</span><span>Top Pick</span><span>Value</span><span>Longshot</span><span>Strategy</span><span>Action</span>
                 </div>
                 <div class="market-list">
                     {% for pc in upcoming_cards %}
@@ -194,9 +156,6 @@
                         <h3>Recent completed cards</h3>
                     </div>
                     <span class="section-count section-count--completed">{{ past_cards|length }} archived</span>
-                </div>
-                <div class="market-head">
-                    <span>Status</span><span>Card</span><span>Top Pick</span><span>Value</span><span>Longshot</span><span>Strategy</span><span>Action</span>
                 </div>
                 <div class="market-list">
                     {% for pc in past_cards[:10] %}
