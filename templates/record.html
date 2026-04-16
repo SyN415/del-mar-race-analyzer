@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-<link href="/static/css/style.css?v=7.0.0" rel="stylesheet">
+<link href="/static/css/style.css?v=7.1.0" rel="stylesheet">
 {% if structured_data_json %}
 <script type="application/ld+json">{{ structured_data_json|safe }}</script>
 {% endif %}
@@ -26,7 +26,7 @@
 :root{--bg:var(--color-bg-primary);--bg2:var(--color-bg-surface);--bg3:var(--color-bg-elevated);--gold:var(--color-accent-gold);--emerald:var(--color-accent-turf);--sky:var(--color-accent-blue);--text:var(--color-text-primary);--muted:var(--color-text-secondary);--subtle:#d6e3db;--border:var(--color-turf-border);--r:18px;--r-lg:26px}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html{background:var(--bg)}body{font-family:'Inter',system-ui,sans-serif;color:var(--text);line-height:1.5;min-height:100vh;display:flex;flex-direction:column;background:var(--bg)}a{text-decoration:none;color:inherit}
 .cc-nav{display:flex;align-items:center;justify-content:space-between;padding:1rem clamp(1rem,5vw,3rem);border-bottom:1px solid var(--border);background:var(--color-bg-glass);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);position:sticky;top:0;z-index:50;margin-inline:calc(var(--page-gutter) * -1)}
-.cc-brand{font-family:'Playfair Display',serif;font-weight:900;font-size:1.3rem;letter-spacing:-.02em;color:var(--text);display:flex;align-items:center;gap:.5rem}.cc-nav-back{font-size:.82rem;color:var(--muted);display:flex;align-items:center;gap:.35rem;transition:color .2s}.cc-nav-back:hover{color:var(--sky)}
+.cc-brand{display:flex;align-items:center;gap:.7rem;color:var(--text);text-decoration:none}.cc-nav-back{font-size:.82rem;color:var(--muted);display:flex;align-items:center;gap:.35rem;transition:color .2s}.cc-nav-back:hover{color:var(--sky)}
 .cc-hero{position:relative;z-index:1;text-align:center;padding:clamp(4rem,11vw,6rem) clamp(1rem,4vw,2rem) clamp(2rem,5vw,3rem);margin-top:1rem;background:url('/static/img/asset3.jpg') center/cover no-repeat;border-radius:var(--r-lg);overflow:hidden}.cc-hero::before{content:"";position:absolute;inset:0;z-index:-1;background:rgba(5,12,9,.62)}
 .cc-eyebrow{display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);margin-bottom:1rem;padding:.35rem 1rem;border-radius:999px;border:1px solid rgba(201,168,76,.3);background:rgba(201,168,76,.08)}
 .cc-hero-title{font-family:'Playfair Display',Georgia,serif;font-size:clamp(2rem,6vw,3.5rem);font-weight:900;line-height:1.1;margin-bottom:.75rem;background:linear-gradient(135deg,#f8fafc 30%,var(--gold) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
@@ -45,7 +45,13 @@
 </head>
 <body class="theme-dark standalone-page record-page" data-view-mode="{{ view_mode }}" data-selected-key="{% if selected_record %}{{ selected_record.track_id }}::{{ selected_record.race_date }}{% endif %}">
 <nav class="cc-nav">
-  <a href="/" class="cc-brand"><img src="/static/img/asset1.jpg" alt="RaceTrackStar" style="width:32px;height:32px;border-radius:8px;"><span>RaceTrackStar</span></a>
+  <a href="/" class="cc-brand">
+    <img src="/static/img/asset1.jpg" alt="RaceTrackStar" class="brand-logo">
+    <span class="brand-wordmark">
+      <span>RaceTrackStar</span>
+      <span class="brand-submark">Fast, data-driven racing intelligence</span>
+    </span>
+  </a>
   <a class="cc-nav-back" href="/">← Home</a>
 </nav>
 
@@ -115,8 +121,24 @@
 
   <div class="recap-panel-shell" id="recap-panel-shell">
     <div class="recap-empty-state {% if not selected_record %}is-active{% endif %}" id="record-empty-state">
-      <h2 style="font-family:'Playfair Display',serif;font-size:2rem;margin-bottom:.5rem;">Select a recap day</h2>
-      <p>Choose any recap from the summary above to open a routeable, shareable day-by-day breakdown.</p>
+      <h2 style="font-family:'Playfair Display',serif;font-size:1.6rem;margin-bottom:.35rem;">Support RaceTrackStar</h2>
+      <p style="margin-bottom:1.25rem;">Keep the verified public cards free — tips in crypto help cover infrastructure and data costs.</p>
+      <div style="display:flex;justify-content:center;gap:2rem;flex-wrap:wrap;">
+        <div class="crypto-wallet">
+          <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem;">
+            <i class="fab fa-bitcoin" style="color:#f7931a;font-size:1.1rem;"></i>
+            <span style="font-size:.78rem;font-weight:600;color:#f7931a;">Bitcoin (BTC)</span>
+          </div>
+          <code class="crypto-address" title="Click to copy" onclick="navigator.clipboard.writeText('3JBSDy1o89G6FxtKDmA8ZfnYCm1QRXASmM').then(()=>{this.classList.add('copied');setTimeout(()=>this.classList.remove('copied'),1500)})">3JBSDy1o89G6FxtKDmA8ZfnYCm1QRXASmM</code>
+        </div>
+        <div class="crypto-wallet">
+          <div style="display:flex;align-items:center;gap:.4rem;margin-bottom:.4rem;">
+            <i class="fab fa-ethereum" style="color:#627eea;font-size:1.1rem;"></i>
+            <span style="font-size:.78rem;font-weight:600;color:#627eea;">Ethereum (ETH)</span>
+          </div>
+          <code class="crypto-address" title="Click to copy" onclick="navigator.clipboard.writeText('0x1b904804Cf095828F8e77DCdAEB3a4b84c798861').then(()=>{this.classList.add('copied');setTimeout(()=>this.classList.remove('copied'),1500)})">0x1b904804Cf095828F8e77DCdAEB3a4b84c798861</code>
+        </div>
+      </div>
     </div>
 
     {% for r in records %}
