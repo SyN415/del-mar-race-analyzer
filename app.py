@@ -49,6 +49,7 @@ try:
     from services.race_card_admin import (
         AdminRaceCardJSONError,
         _EMPTY_FIELD_VALUES,
+        apply_deep_dive_field_corrections,
         build_equibase_card_overview_url,
         build_equibase_race_urls,
         extract_json_object,
@@ -71,6 +72,7 @@ except ImportError as e:
     AIAnalysisEnhancer = None
     AdminRaceCardJSONError = ValueError
     _EMPTY_FIELD_VALUES: set = set()
+    apply_deep_dive_field_corrections = None
     build_equibase_card_overview_url = None
     build_equibase_race_urls = None
     extract_json_object = None
@@ -2320,10 +2322,18 @@ async def admin_race_deep_dive(request: AdminDeepDiveRequest, http_request: Requ
 
 RACE: {race_info}
 
-HORSES ({len(horses)} starters):
+HORSES CURRENTLY ON CARD ({len(horses)} listed):
 {chr(10).join(horse_lines)}
 
-For EACH horse above, search the web and collect ALL of the following data points:
+BEFORE enriching the horses above, perform FIELD VERIFICATION:
+1. Search the web to confirm the COMPLETE published field for this EXACT race/date. Priority sources: equibase.com/static/entry/<TRACK><MMDDYY>USA-EQB.html, the track's own .com entries page (keeneland.com/racing/entries, dmtc.com, santaanita.com, churchilldowns.com, etc.), entries.horseracingnation.com, and bloodhorse.com. Cross-reference at least TWO independent sources.
+2. Build the `field_corrections` object by comparing the HORSES list above to the real published field:
+   - `scratched`: horses listed above that are marked SCRATCHED on the race-day entry sheet.
+   - `missing_from_card`: horses in the real field that are NOT listed above. Provide their program_number, jockey, trainer, and morning_line_odds if published.
+   - `extra_in_card`: horses listed above that do NOT appear in ANY reachable source for this race (phantom horses the card invented).
+3. In the `horses[]` array, include deep-dive data for every ACTIVE horse in the REAL field (both horses originally listed above AND any you identify in `missing_from_card`). Do NOT enrich scratched or phantom horses — but do still list them in `field_corrections` so the card can be corrected.
+
+For EACH active horse in `horses[]`, collect:
 1. **Recent race results** — Last 5 races: date, track, distance, surface, finish position, speed figure/Beyer, beaten lengths, odds, race type/class
 2. **Recent workouts** — Last 4 weeks: date, track, distance, time, rank (e.g. "1/20"), workout type (bullet/handily/breezing)
 3. **Jockey stats** — Win % at {track_full}, win % at this distance/surface, last-30-day form (starts-wins-places-shows)
@@ -2338,6 +2348,17 @@ Return ONLY a valid JSON object with this exact structure:
   "race_number": {request.race_number},
   "race_date": "{request.race_date}",
   "track_id": "{request.track_id}",
+  "field_corrections": {{
+    "scratched": [
+      {{"name": "Horse Name", "program_number": 2}}
+    ],
+    "missing_from_card": [
+      {{"name": "Horse Name", "program_number": 12, "jockey": "Jockey Name", "trainer": "Trainer Name", "morning_line_odds": "8-1"}}
+    ],
+    "extra_in_card": [
+      {{"name": "Horse Name"}}
+    ]
+  }},
   "horses": [
     {{
       "name": "Horse Name",
@@ -2357,7 +2378,9 @@ Return ONLY a valid JSON object with this exact structure:
     }}
   ],
   "deep_dive_summary": "Overall race dynamics and standout horses"
-}}"""
+}}
+
+If the HORSES list above already matches the published field exactly, return empty arrays inside `field_corrections`."""
 
     try:
         response = await openrouter_client.call_model(
@@ -2403,6 +2426,34 @@ Return ONLY a valid JSON object with this exact structure:
                         "quality_rating": 0.0,
                         "profile_url": "",
                     },
+                )
+
+        # Apply any field corrections the deep-dive returned so scratched and
+        # phantom horses are dropped from the card and any horses the initial
+        # web_search pass missed are added BEFORE auto-curate runs.
+        corrections = deep_dive_data.get("field_corrections") or {}
+        if corrections and apply_deep_dive_field_corrections:
+            try:
+                reconciliation = apply_deep_dive_field_corrections(
+                    session_results=session_results,
+                    race_number=request.race_number,
+                    corrections=corrections,
+                    deep_dive_horses=enriched_horses,
+                )
+                if reconciliation.get("changed"):
+                    await session_manager.save_session_results(
+                        request.session_id, session_results
+                    )
+                    logger.info(
+                        "🔧 Race %s field reconciliation applied | removed=%d | added=%d",
+                        request.race_number,
+                        reconciliation.get("removed", 0),
+                        reconciliation.get("added", 0),
+                    )
+            except Exception as rec_exc:  # pragma: no cover — best-effort only
+                logger.warning(
+                    "Field reconciliation failed for race %s: %s",
+                    request.race_number, rec_exc,
                 )
 
         source_urls = merge_source_urls(

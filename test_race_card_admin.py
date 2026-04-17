@@ -205,7 +205,7 @@ from services.race_card_admin import (
     AdminRaceCardJSONError,
     _is_imperva_challenge,
     _parse_equibase_expected_horses_by_race,
-    _poll_until_challenge_clears,
+    apply_deep_dive_field_corrections,
     build_equibase_card_overview_url,
     extract_json_object,
     extract_structured_horse_names_by_race,
@@ -1510,115 +1510,6 @@ class ImpervaChallengeDetectionTests(unittest.TestCase):
     def test_empty_input_is_not_a_challenge(self):
         self.assertFalse(_is_imperva_challenge(""))
         self.assertFalse(_is_imperva_challenge(None))
-
-
-class ImpervaChallengePollingTests(unittest.TestCase):
-    """Unit tests for the Imperva challenge polling loop."""
-
-    _CHALLENGE_HTML = (
-        "<!DOCTYPE html><html><head>"
-        "<noscript><title>Pardon Our Interruption</title></noscript>"
-        "<script>window.reeseSkipExpirationCheck = true;</script>"
-        "</head></html>"
-    )
-    _REAL_HTML = "<html><body>" + ("<p>horse entry " + "x" * 80 + "</p>") * 40 + "</body></html>"
-
-    def _run(self, coro):
-        return app_module.asyncio.run(coro)
-
-    def test_returns_first_non_challenge_html(self):
-        htmls = [self._CHALLENGE_HTML, self._CHALLENGE_HTML, self._REAL_HTML]
-        sleeps = []
-        nudges = []
-
-        async def fetch_html():
-            return htmls.pop(0)
-
-        async def nudge(attempt):
-            nudges.append(attempt)
-
-        async def fake_sleep(ms):
-            sleeps.append(ms)
-
-        result = self._run(_poll_until_challenge_clears(
-            fetch_html=fetch_html,
-            nudge=nudge,
-            max_attempts=5,
-            interval_ms=2000,
-            sleep=fake_sleep,
-        ))
-
-        self.assertFalse(_is_imperva_challenge(result))
-        self.assertIn("horse entry", result)
-        # Two challenges seen → nudge called twice, sleep called twice.
-        self.assertEqual(nudges, [1, 2])
-        self.assertEqual(sleeps, [2000, 2000])
-
-    def test_returns_last_html_when_attempts_exhausted(self):
-        call_count = {"n": 0}
-        sleeps = []
-
-        async def fetch_html():
-            call_count["n"] += 1
-            return self._CHALLENGE_HTML
-
-        async def fake_sleep(ms):
-            sleeps.append(ms)
-
-        result = self._run(_poll_until_challenge_clears(
-            fetch_html=fetch_html,
-            nudge=None,
-            max_attempts=3,
-            interval_ms=500,
-            sleep=fake_sleep,
-        ))
-
-        self.assertTrue(_is_imperva_challenge(result))
-        self.assertEqual(call_count["n"], 3)
-        # Sleeps only happen between attempts, so one fewer than max_attempts.
-        self.assertEqual(sleeps, [500, 500])
-
-    def test_nudge_exception_does_not_abort_polling(self):
-        htmls = [self._CHALLENGE_HTML, self._REAL_HTML]
-
-        async def fetch_html():
-            return htmls.pop(0)
-
-        async def failing_nudge(attempt):
-            raise RuntimeError("boom")
-
-        async def fake_sleep(ms):
-            pass
-
-        result = self._run(_poll_until_challenge_clears(
-            fetch_html=fetch_html,
-            nudge=failing_nudge,
-            max_attempts=5,
-            interval_ms=1,
-            sleep=fake_sleep,
-        ))
-
-        self.assertFalse(_is_imperva_challenge(result))
-
-    def test_succeeds_on_first_attempt_without_sleeping(self):
-        sleeps = []
-
-        async def fetch_html():
-            return self._REAL_HTML
-
-        async def fake_sleep(ms):
-            sleeps.append(ms)
-
-        result = self._run(_poll_until_challenge_clears(
-            fetch_html=fetch_html,
-            nudge=None,
-            max_attempts=10,
-            interval_ms=2000,
-            sleep=fake_sleep,
-        ))
-
-        self.assertFalse(_is_imperva_challenge(result))
-        self.assertEqual(sleeps, [])
 
 
 if __name__ == "__main__":

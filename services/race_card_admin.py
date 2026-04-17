@@ -330,13 +330,16 @@ async def fetch_equibase_all_data_async(
     timeout_seconds: float = 12.0,
     country: str = "USA",
 ) -> tuple:
-    """Async variant of :func:`fetch_equibase_all_data` with Playwright fallback.
+    """Async variant of :func:`fetch_equibase_all_data`.
 
-    Tries the lightweight urllib fetch first.  If it is blocked by the Imperva
-    WAF (or returns anything else the parser can't make sense of), falls back
-    to a stealth Playwright navigation that can clear the interstitial and
-    return the real overview HTML.  The same parsers run against whichever
-    HTML source succeeds, so downstream callers are unchanged.
+    Runs the lightweight urllib fetch and parses the overview HTML.  When the
+    request egresses from a datacenter IP range (e.g. Render), Equibase's
+    Imperva WAF returns an interstitial challenge page that the Reese JS
+    loader expects the client to solve; we previously attempted a stealth
+    Playwright fallback for this, but in practice every attempt was still
+    blocked and the 40s polling budget was pure latency.  The fallback has
+    been removed — the caller is expected to degrade to LLM-aggregated
+    multi-source grounding when ``entry_details`` comes back empty.
     """
     html = _fetch_equibase_card_overview_html(
         track_id, race_date, timeout_seconds=timeout_seconds, country=country
@@ -348,250 +351,14 @@ async def fetch_equibase_all_data_async(
         entry_details = _parse_equibase_entry_details(html)
         expected_horses = _parse_equibase_expected_horses_by_race(html)
 
-    # If the urllib path yielded nothing (WAF challenge, network error, or an
-    # unrecognised page), try the Playwright fallback.  It is slower but has
-    # real browser fingerprints + stealth scripts that clear the WAF.
     if not entry_details:
         logger.info(
-            "🛡️ urllib overview fetch yielded no entry details — attempting Playwright fallback"
+            "🛡️ urllib overview fetch yielded no entry details — caller will "
+            "fall back to LLM multi-source grounding for %s on %s",
+            track_id, race_date,
         )
-        playwright_html = await _fetch_equibase_card_overview_html_playwright(
-            track_id, race_date, country=country
-        )
-        if playwright_html:
-            entry_details = _parse_equibase_entry_details(playwright_html)
-            expected_horses = _parse_equibase_expected_horses_by_race(playwright_html)
-            if entry_details:
-                logger.info(
-                    "✅ Playwright fallback recovered %d races of entry details",
-                    len(entry_details),
-                )
 
     return expected_horses, entry_details
-
-
-CHALLENGE_POLL_INTERVAL_MS = 2000
-CHALLENGE_POLL_MAX_ATTEMPTS = 20  # ≈ 40 s total budget for the Reese JS challenge
-
-
-async def _poll_until_challenge_clears(
-    fetch_html,
-    nudge=None,
-    max_attempts: int = CHALLENGE_POLL_MAX_ATTEMPTS,
-    interval_ms: int = CHALLENGE_POLL_INTERVAL_MS,
-    sleep=None,
-) -> str:
-    """Poll ``fetch_html`` until it returns HTML that is not an Imperva challenge.
-
-    This is a pure, browser-independent helper so the polling contract can be
-    unit-tested without spinning up Playwright.  Between attempts it calls the
-    optional ``nudge`` coroutine (e.g. to simulate scrolling/mouse activity)
-    and then sleeps ``interval_ms`` via ``sleep`` (defaults to ``asyncio.sleep``).
-    Returns the first non-challenge HTML encountered, or the last HTML seen if
-    the budget is exhausted (callers use ``_is_imperva_challenge`` to decide).
-    """
-    if sleep is None:
-        async def sleep(ms: int) -> None:
-            await asyncio.sleep(ms / 1000)
-
-    last_html = ""
-    for attempt in range(1, max_attempts + 1):
-        html = await fetch_html() or ""
-        last_html = html
-        if html and not _is_imperva_challenge(html):
-            logger.info(
-                "✅ Imperva challenge cleared on attempt %d/%d | html_len=%d",
-                attempt, max_attempts, len(html),
-            )
-            return html
-        if attempt == max_attempts:
-            break
-        if nudge is not None:
-            try:
-                await nudge(attempt)
-            except Exception as exc:
-                logger.debug("nudge coroutine raised on attempt %d: %s", attempt, exc)
-        await sleep(interval_ms)
-    return last_html
-
-
-async def _fetch_equibase_card_overview_html_playwright(
-    track_id: str,
-    race_date: str,
-    country: str = "USA",
-) -> str:
-    """Fetch the Equibase overview page via a stealth Playwright context.
-
-    Used as a fallback when the plain urllib fetch is blocked by the Imperva
-    WAF.  Warms up a session on the Equibase homepage (to collect the Imperva
-    cookie + Reese cookie), accepts the cookie banner, then navigates to the
-    overview URL.  If the Imperva interstitial is still showing, polls for up
-    to ~40 s — giving the invisible Reese JS challenge time to self-resolve —
-    while gently simulating scroll/mouse activity between checks to satisfy
-    Imperva's behavioural heuristics.  When available, playwright-stealth is
-    used to apply a comprehensive set of fingerprint evasions.
-    """
-    try:
-        from playwright.async_api import async_playwright
-    except Exception as exc:  # pragma: no cover - import-time environment issue
-        logger.error("❌ Playwright import failed — cannot fall back to browser: %s", exc)
-        return ""
-
-    # playwright-stealth applies a much more comprehensive set of fingerprint
-    # evasions (navigator.webdriver, plugins, languages, webgl vendor, chrome
-    # runtime, user-agent client hints, etc.) than what we were patching by
-    # hand.  Fall back gracefully if the package is missing so local dev envs
-    # without it don't break.
-    try:
-        from playwright_stealth import Stealth  # type: ignore
-        _stealth_available = True
-    except Exception as exc:  # pragma: no cover - optional dependency
-        Stealth = None  # type: ignore
-        _stealth_available = False
-        logger.warning(
-            "⚠️ playwright-stealth not installed — falling back to manual stealth hacks: %s",
-            exc,
-        )
-
-    overview_url = build_equibase_card_overview_url(track_id, race_date, country=country)
-    logger.info(
-        "🌐 Playwright overview fetch starting | url=%s | stealth=%s",
-        overview_url, "on" if _stealth_available else "off",
-    )
-
-    browser = None
-    try:
-        if _stealth_available:
-            pw_cm = Stealth().use_async(async_playwright())
-        else:
-            pw_cm = async_playwright()
-
-        async with pw_cm as pw:
-            browser = await pw.chromium.launch(
-                headless=True,
-                args=[
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-features=VizDisplayCompositor",
-                ],
-            )
-            context = await browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/131.0.0.0 Safari/537.36"
-                ),
-                viewport={"width": 1920, "height": 1080},
-                locale="en-US",
-                timezone_id="America/New_York",
-                extra_http_headers={
-                    "Accept": (
-                        "text/html,application/xhtml+xml,application/xml;q=0.9,"
-                        "image/avif,image/webp,*/*;q=0.8"
-                    ),
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Accept-Encoding": "gzip, deflate, br",
-                    "Upgrade-Insecure-Requests": "1",
-                    "Sec-Fetch-Dest": "document",
-                    "Sec-Fetch-Mode": "navigate",
-                    "Sec-Fetch-Site": "none",
-                },
-            )
-            if not _stealth_available:
-                # Minimal manual fallback when playwright-stealth is unavailable.
-                await context.add_init_script(
-                    """
-                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-                    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-                    window.chrome = { runtime: {} };
-                    """
-                )
-
-            page = await context.new_page()
-
-            # Warm up on the homepage so Imperva can set its baseline cookies.
-            try:
-                await page.goto(
-                    "https://www.equibase.com",
-                    wait_until="domcontentloaded",
-                    timeout=30000,
-                )
-                await page.wait_for_timeout(2000)
-                try:
-                    cookie_btn = await page.query_selector("#onetrust-accept-btn-handler")
-                    if cookie_btn:
-                        await cookie_btn.click()
-                        await page.wait_for_timeout(1000)
-                except Exception:
-                    pass
-            except Exception as exc:
-                logger.warning("⚠️ Equibase homepage warm-up failed: %s", exc)
-
-            # Navigate to the overview URL.  Use domcontentloaded first so we
-            # get control quickly, then let the polling loop below handle any
-            # Reese JS challenge.
-            try:
-                await page.goto(overview_url, wait_until="domcontentloaded", timeout=45000)
-            except Exception as exc:
-                logger.error("❌ Playwright overview navigation failed: %s", exc)
-                return ""
-
-            async def _read_current_html() -> str:
-                try:
-                    return await page.content()
-                except Exception as exc:
-                    logger.debug("page.content() raised during poll: %s", exc)
-                    return ""
-
-            async def _nudge(attempt: int) -> None:
-                # Simulate light human activity between checks.  Imperva's
-                # Reese challenge watches for mouse movement / scroll events
-                # before deciding whether to issue its clearance cookie.
-                try:
-                    await page.mouse.move(200 + attempt * 17, 300 + attempt * 11)
-                except Exception:
-                    pass
-                try:
-                    await page.evaluate(
-                        "window.scrollBy(0, Math.floor(Math.random() * 400) + 200)"
-                    )
-                except Exception:
-                    pass
-                # Let networkidle settle opportunistically — do not block.
-                try:
-                    await page.wait_for_load_state("networkidle", timeout=1500)
-                except Exception:
-                    pass
-
-            html = await _poll_until_challenge_clears(
-                fetch_html=_read_current_html,
-                nudge=_nudge,
-            )
-
-            if _is_imperva_challenge(html):
-                logger.error(
-                    "❌ Playwright fetch still returned WAF challenge after polling | "
-                    "url=%s | html_len=%d | attempts=%d",
-                    overview_url, len(html), CHALLENGE_POLL_MAX_ATTEMPTS,
-                )
-                return ""
-
-            logger.info(
-                "✅ Playwright overview fetch succeeded | url=%s | html_len=%d",
-                overview_url, len(html),
-            )
-            return html
-    except Exception as exc:
-        logger.error("❌ Playwright overview fetch raised: %s", exc)
-        return ""
-    finally:
-        if browser is not None:
-            try:
-                await browser.close()
-            except Exception:
-                pass
 
 
 def extract_structured_race_numbers(structured_card: Dict[str, Any]) -> List[int]:
@@ -709,6 +476,116 @@ def find_races_with_incomplete_fields(
             incomplete[race_number] = race_gaps
 
     return incomplete
+
+
+def apply_deep_dive_field_corrections(
+    session_results: Dict[str, Any],
+    race_number: int,
+    corrections: Dict[str, Any],
+    deep_dive_horses: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, int]:
+    """Apply a deep-dive ``field_corrections`` payload to a session's predictions.
+
+    The deep-dive LLM returns a ``field_corrections`` object describing the
+    delta between the card's horse list and the real published field:
+
+    * ``scratched``  - card entries that are actually scratched on race day
+    * ``extra_in_card`` - phantom entries the card invented
+    * ``missing_from_card`` - entries in the real field the card missed
+
+    Scratched and phantom horses are dropped from ``predictions``; missing
+    horses are appended with sensible defaults (composite_rating=50 so
+    softmax reshuffles them toward the middle; jockey/trainer/MLO populated
+    from the correction payload or the enriched ``horses`` array).  The
+    caller is responsible for persisting the mutated ``session_results``.
+
+    Returns a summary dict so the caller can decide whether a save is needed
+    and emit an informative log line.
+    """
+    summary = {"removed": 0, "added": 0, "changed": 0}
+    if not isinstance(session_results, dict) or not isinstance(corrections, dict):
+        return summary
+
+    raw_races = session_results.get("race_analyses") or session_results.get("races") or []
+    target_race = None
+    for race in raw_races:
+        if _to_int(race.get("race_number") or race.get("number"), -1) == race_number:
+            target_race = race
+            break
+    if target_race is None:
+        return summary
+
+    predictions = target_race.get("predictions") or target_race.get("entries") or target_race.get("horses") or []
+    if not isinstance(predictions, list):
+        return summary
+
+    dd_by_name = {
+        _horse_name_key(h.get("name") or ""): h
+        for h in (deep_dive_horses or [])
+        if isinstance(h, dict) and h.get("name")
+    }
+
+    drop_keys = set()
+    for entry in list(corrections.get("scratched") or []):
+        key = _horse_name_key((entry or {}).get("name") or "")
+        if key:
+            drop_keys.add(key)
+    for entry in list(corrections.get("extra_in_card") or []):
+        key = _horse_name_key((entry or {}).get("name") or "")
+        if key:
+            drop_keys.add(key)
+
+    retained: List[Dict[str, Any]] = []
+    for prediction in predictions:
+        name = prediction.get("horse_name") or prediction.get("name") or prediction.get("horse") or ""
+        if _horse_name_key(name) in drop_keys:
+            summary["removed"] += 1
+            continue
+        retained.append(prediction)
+
+    existing_keys = {
+        _horse_name_key(p.get("horse_name") or p.get("name") or p.get("horse") or "")
+        for p in retained
+    }
+
+    for entry in list(corrections.get("missing_from_card") or []):
+        if not isinstance(entry, dict):
+            continue
+        name = entry.get("name")
+        if not name:
+            continue
+        key = _horse_name_key(name)
+        if not key or key in existing_keys:
+            continue
+        dd_horse = dd_by_name.get(key, {})
+        retained.append({
+            "horse_name": _normalize_horse_name(name),
+            "post_position": entry.get("program_number") or dd_horse.get("post_position") or "",
+            "jockey": entry.get("jockey") or dd_horse.get("jockey") or "",
+            "trainer": entry.get("trainer") or dd_horse.get("trainer") or "",
+            "morning_line_odds": entry.get("morning_line_odds") or "",
+            "composite_rating": 50.0,
+            "win_probability": 0.0,
+            "factors": {},
+            "notes": "Added via deep-dive field reconciliation.",
+        })
+        existing_keys.add(key)
+        summary["added"] += 1
+
+    if summary["removed"] or summary["added"]:
+        # Re-sort by composite_rating so the display ordering stays sane
+        # after insertions; softmax win probabilities are recomputed over
+        # the new set.
+        retained.sort(key=lambda p: float(p.get("composite_rating") or 0.0), reverse=True)
+        _SOFTMAX_T = 15.0
+        scores = [math.exp(float(p.get("composite_rating") or 0.0) / _SOFTMAX_T) for p in retained]
+        total = sum(scores) or 1.0
+        for p, s in zip(retained, scores):
+            p["win_probability"] = round((s / total) * 100, 1)
+        target_race["predictions"] = retained
+        summary["changed"] = 1
+
+    return summary
 
 
 def merge_structured_race_cards(*structured_cards: Dict[str, Any]) -> Dict[str, Any]:
