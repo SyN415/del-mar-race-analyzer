@@ -2121,6 +2121,23 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
         )
 
         await session_manager.save_session_results(session_id, normalized_results)
+
+        # Invalidate any cached per-race deep-dives for this (date, track) so
+        # the downstream auto-curate / display paths rebuild against the field
+        # of the card we just published.  The race_data_cache is keyed only on
+        # (race_date, track_id, race_number), so stale rows from an earlier
+        # session would otherwise silently poison the deep-dive step (and the
+        # full-card auto-curate prompt that reads from it).
+        try:
+            await session_manager.delete_deep_dives_for_card(
+                request.race_date, request.track_id
+            )
+        except Exception as cache_exc:  # pragma: no cover — best-effort only
+            logger.warning(
+                "Deep-dive cache invalidation failed for %s %s: %s",
+                request.track_id, request.race_date, cache_exc,
+            )
+
         await session_manager.update_session_status(
             session_id, "completed", 100, "analysis_complete", "Admin race card saved"
         )

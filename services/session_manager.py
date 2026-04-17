@@ -727,6 +727,61 @@ class SessionManager:
             logger.error(f"Failed to delete deep dive: {e}")
             return False
 
+    async def delete_deep_dives_for_card(self, race_date: str, track_id: str) -> int:
+        """Delete every cached race deep-dive for a given (race_date, track_id).
+
+        Called when a fresh admin race card is published so downstream
+        deep-dive / auto-curate / public-display paths rebuild from the
+        current card's field instead of inheriting data from a prior
+        session.  Returns the number of rows deleted (best-effort; 0 on
+        error).
+        """
+        try:
+            if self.storage_backend == 'supabase':
+                # PostgREST does not return an affected-row count on DELETE
+                # by default; we fetch first so we can log how many rows the
+                # call will touch, then delete.
+                existing = await self._supabase_request(
+                    'GET',
+                    'race_data_cache',
+                    params={
+                        'race_date': f'eq.{race_date}',
+                        'track_id': f'eq.{track_id}',
+                        'select': 'race_number',
+                    },
+                )
+                count = len(existing or [])
+                if count:
+                    await self._supabase_request(
+                        'DELETE',
+                        'race_data_cache',
+                        params={
+                            'race_date': f'eq.{race_date}',
+                            'track_id': f'eq.{track_id}',
+                        },
+                    )
+                logger.info(
+                    "🗑️ Invalidated deep-dive cache | date=%s | track=%s | rows=%s",
+                    race_date, track_id, count,
+                )
+                return count
+
+            async with aiosqlite.connect(self.db_path) as db:
+                cursor = await db.execute(
+                    'DELETE FROM race_data_cache WHERE race_date = ? AND track_id = ?',
+                    (race_date, track_id),
+                )
+                count = cursor.rowcount if cursor.rowcount is not None else 0
+                await db.commit()
+            logger.info(
+                "🗑️ Invalidated deep-dive cache | date=%s | track=%s | rows=%s",
+                race_date, track_id, count,
+            )
+            return count
+        except Exception as e:
+            logger.error(f"Failed to invalidate deep-dive cache: {e}")
+            return 0
+
     async def save_curated_card(
         self,
         race_date: str,

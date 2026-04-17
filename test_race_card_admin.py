@@ -633,6 +633,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         self.session_manager.create_session = AsyncMock(return_value="session-123")
         self.session_manager.update_session_status = AsyncMock()
         self.session_manager.save_session_results = AsyncMock()
+        self.session_manager.delete_deep_dives_for_card = AsyncMock(return_value=0)
 
         self.openrouter_client = type("OpenRouterClientStub", (), {})()
         self.openrouter_client.api_key = "test-key"
@@ -716,6 +717,12 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             ["https://example.com/hint", official_card_url, "https://example.com/search"],
         )
         self.assertEqual(saved_results["admin_metadata"]["workflow"], "admin_openrouter_web_search")
+        # A successful card build must invalidate the race_data_cache for the
+        # (date, track) pair so any stale per-race deep-dives from a prior
+        # session do not poison auto-curate / display.
+        self.session_manager.delete_deep_dives_for_card.assert_awaited_once_with(
+            "2026-03-13", "SA"
+        )
 
     def test_create_admin_race_card_requires_admin_auth_when_enabled(self):
         original_admin_password = app_module.app_state.config.web.admin_password
