@@ -371,7 +371,7 @@ async def fetch_equibase_all_data_async(
 
 
 CHALLENGE_POLL_INTERVAL_MS = 2000
-CHALLENGE_POLL_MAX_ATTEMPTS = 14  # ≈ 28 s total budget for the Reese JS challenge
+CHALLENGE_POLL_MAX_ATTEMPTS = 20  # ≈ 40 s total budget for the Reese JS challenge
 
 
 async def _poll_until_challenge_clears(
@@ -426,9 +426,10 @@ async def _fetch_equibase_card_overview_html_playwright(
     WAF.  Warms up a session on the Equibase homepage (to collect the Imperva
     cookie + Reese cookie), accepts the cookie banner, then navigates to the
     overview URL.  If the Imperva interstitial is still showing, polls for up
-    to ~28 s — giving the invisible Reese JS challenge time to self-resolve —
+    to ~40 s — giving the invisible Reese JS challenge time to self-resolve —
     while gently simulating scroll/mouse activity between checks to satisfy
-    Imperva's behavioural heuristics.
+    Imperva's behavioural heuristics.  When available, playwright-stealth is
+    used to apply a comprehensive set of fingerprint evasions.
     """
     try:
         from playwright.async_api import async_playwright
@@ -436,12 +437,36 @@ async def _fetch_equibase_card_overview_html_playwright(
         logger.error("❌ Playwright import failed — cannot fall back to browser: %s", exc)
         return ""
 
+    # playwright-stealth applies a much more comprehensive set of fingerprint
+    # evasions (navigator.webdriver, plugins, languages, webgl vendor, chrome
+    # runtime, user-agent client hints, etc.) than what we were patching by
+    # hand.  Fall back gracefully if the package is missing so local dev envs
+    # without it don't break.
+    try:
+        from playwright_stealth import Stealth  # type: ignore
+        _stealth_available = True
+    except Exception as exc:  # pragma: no cover - optional dependency
+        Stealth = None  # type: ignore
+        _stealth_available = False
+        logger.warning(
+            "⚠️ playwright-stealth not installed — falling back to manual stealth hacks: %s",
+            exc,
+        )
+
     overview_url = build_equibase_card_overview_url(track_id, race_date, country=country)
-    logger.info("🌐 Playwright overview fetch starting | url=%s", overview_url)
+    logger.info(
+        "🌐 Playwright overview fetch starting | url=%s | stealth=%s",
+        overview_url, "on" if _stealth_available else "off",
+    )
 
     browser = None
     try:
-        async with async_playwright() as pw:
+        if _stealth_available:
+            pw_cm = Stealth().use_async(async_playwright())
+        else:
+            pw_cm = async_playwright()
+
+        async with pw_cm as pw:
             browser = await pw.chromium.launch(
                 headless=True,
                 args=[
@@ -473,14 +498,16 @@ async def _fetch_equibase_card_overview_html_playwright(
                     "Sec-Fetch-Site": "none",
                 },
             )
-            await context.add_init_script(
-                """
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-                window.chrome = { runtime: {} };
-                """
-            )
+            if not _stealth_available:
+                # Minimal manual fallback when playwright-stealth is unavailable.
+                await context.add_init_script(
+                    """
+                    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                    Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                    window.chrome = { runtime: {} };
+                    """
+                )
 
             page = await context.new_page()
 
