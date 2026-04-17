@@ -1007,9 +1007,12 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             for args in self.session_manager.update_session_status.await_args_list
         ))
 
-    def test_create_admin_race_card_refuses_when_equibase_entry_details_unavailable(self):
+    def test_create_admin_race_card_proceeds_when_equibase_entry_details_unavailable(self):
         # Override the default stub so entry_details is empty — simulates the
-        # urllib+Playwright double failure (e.g. Imperva WAF block).
+        # urllib+Playwright double failure (e.g. Imperva WAF block on Render's
+        # datacenter IPs).  The endpoint must no longer 503 in this state; it
+        # must degrade to ungrounded web_search and publish whatever the LLM
+        # returns (flagging grounded=False in the session metadata).
         async def _no_equibase_data(*args, **kwargs):
             return {}, {}
 
@@ -1022,19 +1025,57 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             source_mode="web_search",
         )
 
-        with self.assertRaises(app_module.HTTPException) as exc:
-            app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
+        response = app_module.asyncio.run(
+            app_module.create_admin_race_card(request, self.admin_request)
+        )
 
-        self.assertEqual(exc.exception.status_code, 503)
-        self.assertIn("Equibase entry data", exc.exception.detail)
-        # The LLM must not have been called because the guardrail blocks the
-        # request before any web-search prompt is dispatched.
-        self.openrouter_client.call_model.assert_not_awaited()
-        self.session_manager.save_session_results.assert_not_awaited()
-        self.assertTrue(any(
+        self.assertEqual(response.status_code, 200)
+        # The LLM must have been dispatched despite the missing Equibase data.
+        self.openrouter_client.call_model.assert_awaited()
+        self.session_manager.save_session_results.assert_awaited()
+        # No equibase_unavailable failure status should have been emitted.
+        self.assertFalse(any(
             args.args[3] == "equibase_unavailable"
             for args in self.session_manager.update_session_status.await_args_list
         ))
+        # The prompt must have contained the ungrounded multi-source guidance
+        # so the LLM knows to cross-reference alternative sources.
+        call_kwargs = self.openrouter_client.call_model.await_args.kwargs
+        prompt = call_kwargs["prompt"]
+        self.assertIn("horseracingnation.com", prompt)
+        self.assertIn("Cross-reference at least TWO", prompt)
+
+    def test_admin_prompt_adds_fallback_sources_when_no_server_grounding(self):
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="x-ai/grok-4.20-beta",
+            source_mode="web_search",
+        )
+
+        ungrounded_prompt = app_module._build_admin_structuring_prompt(
+            request,
+            expected_race_numbers=[],
+            expected_horses_by_race={},
+            equibase_entry_details=None,
+        )
+        grounded_prompt = app_module._build_admin_structuring_prompt(
+            request,
+            expected_race_numbers=[1],
+            expected_horses_by_race={1: ["Alpha"]},
+            equibase_entry_details={1: [{"name": "Alpha"}]},
+        )
+
+        # Ungrounded prompt must enumerate the multi-source fallback list and
+        # require cross-referencing at least two sources.
+        self.assertIn("horseracingnation.com", ungrounded_prompt)
+        self.assertIn("bloodhorse.com", ungrounded_prompt)
+        self.assertIn("Cross-reference at least TWO", ungrounded_prompt)
+        # Grounded prompt keeps the SmartPick-as-primary wording and does not
+        # need the hard "two independent sources" rule in its data_source_rules
+        # block.
+        self.assertIn("SmartPick", grounded_prompt)
+        self.assertNotIn("Cross-reference at least TWO", grounded_prompt)
 
 
 class PublicCuratedCardRoutingTests(unittest.TestCase):

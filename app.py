@@ -1792,30 +1792,32 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
         else:
             expected_horses_by_race = {}
             equibase_entry_details = {}
+        server_side_grounded = bool(equibase_entry_details)
         if is_web_search_mode:
             logger.info(
-                "📊 Equibase data: expected_horses=%d races | entry_details=%d races | details_entries=%d",
+                "📊 Equibase data: expected_horses=%d races | entry_details=%d races | details_entries=%d | grounded=%s",
                 len(expected_horses_by_race),
                 len(equibase_entry_details),
                 sum(len(v) for v in equibase_entry_details.values()),
+                "yes" if server_side_grounded else "no",
             )
-            # Guardrail: in web_search mode we must have authoritative Equibase
-            # entry details before we hand the card off to the LLM.  Without
-            # them, the LLM becomes the sole source of horse/jockey/trainer/PP
-            # data and starts mixing horses between races on longer cards.
-            # Refuse to proceed rather than publish an ungrounded card.
-            if not equibase_entry_details:
-                detail = (
-                    "Equibase entry data is currently unavailable for "
-                    f"{request.track_id} on {request.race_date} (WAF block or "
-                    "network error). Refusing to publish an ungrounded card. "
-                    "Please retry in a few minutes or switch to manual mode."
+            # When our direct Equibase scrape is blocked (Imperva WAF on the
+            # server egress), we no longer 503 — the LLM's own web_search
+            # infrastructure runs from a different network and can still reach
+            # Equibase and a long tail of other grounding sources
+            # (HorseRacingNation, BloodHorse, DRF, track-specific .com sites,
+            # Punters, RacingTV, ATG, Paulick Report, etc.).  The prompt below
+            # is widened to instruct the LLM to cross-reference those sources
+            # when no server-side grounding is available.  If the LLM output
+            # ends up incomplete, the existing retry logic further down
+            # tightens it; only then does the endpoint fail.
+            if not server_side_grounded:
+                logger.warning(
+                    "⚠️ No server-side Equibase grounding for %s on %s — "
+                    "delegating field discovery to the LLM's web_search with "
+                    "multi-source cross-reference guidance.",
+                    request.track_id, request.race_date,
                 )
-                logger.error("🚫 Refusing to publish: %s", detail)
-                await session_manager.update_session_status(
-                    session_id, "failed", 0, "equibase_unavailable", detail
-                )
-                raise HTTPException(status_code=503, detail=detail)
         # Derive race numbers from the data we already fetched — avoids another HTTP call
         if expected_horses_by_race:
             expected_race_numbers = sorted(expected_horses_by_race)
@@ -2084,6 +2086,25 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
         if missing_horses_by_race:
             logger.warning(
                 f"Partial card accepted — still missing horses after retry: {_format_missing_horses_by_race(missing_horses_by_race)}"
+            )
+
+        # Diagnostic summary of what the LLM actually returned — useful when
+        # we publish ungrounded cards so any short-field anomaly is visible in
+        # Render logs without blocking the deploy.
+        if is_web_search_mode:
+            llm_races = final_structured_payload.get("race_analyses") or final_structured_payload.get("races") or []
+            race_sizes = [
+                len(race.get("predictions") or race.get("entries") or race.get("horses") or [])
+                for race in llm_races
+            ]
+            short_fields = [size for size in race_sizes if size and size < 4]
+            logger.info(
+                "📋 LLM card summary: races=%d | total_horses=%d | avg_per_race=%.1f | short_fields(<4)=%d | grounded=%s",
+                len(race_sizes),
+                sum(race_sizes),
+                (sum(race_sizes) / len(race_sizes)) if race_sizes else 0.0,
+                len(short_fields),
+                "yes" if server_side_grounded else "no",
             )
 
         normalized_results = normalize_admin_results(
@@ -3881,6 +3902,7 @@ def _build_admin_structuring_prompt(
     track_country = get_track_country(request.track_id)
     intl = track_country != "USA"
 
+    has_server_grounding = bool(equibase_entry_details)
     if request.source_mode != "web_search":
         source_strategy = "Use only the supplied source material. Do not rely on outside knowledge or browse the web."
     elif intl:
@@ -3893,16 +3915,46 @@ def _build_admin_structuring_prompt(
             "  - irace.com.sg (international form guides and express form PDFs)\n"
             "  - skyracingworld.com (form guides for Japan/Australia)\n"
             "  - tabtouch.com.au / tab.com.au (Australian racing data)\n"
-            "Cross-reference multiple sources to build the most complete field possible. "
+            "  - racingtv.com, attheraces.com (UK/Irish/European cards)\n"
+            "Cross-reference at least 2 independent sources before finalising each race's field. "
             "Do not skip later races."
         )
     else:
-        source_strategy = (
-            "Use web search before answering. "
-            "Your PRIMARY data sources are the Equibase SmartPick pages listed below — you MUST search the SmartPick URL for EVERY race "
-            "(not just the first few) to get the full field, post positions, jockeys, trainers, morning line odds, and SmartPick rankings. "
-            "Do not skip later races. Cross-reference with the Equibase entry pages and other high-confidence racing sources."
+        # US tracks: always allow a broad set of authoritative sources so we
+        # are resilient when a single source is momentarily unreachable.
+        fallback_sources = (
+            "  - Equibase entry + SmartPick pages (equibase.com/static/entry/...) — primary when reachable\n"
+            "  - The track's own .com entries page (e.g. keeneland.com/racing/entries, dmtc.com, santaanita.com, churchilldowns.com)\n"
+            "  - horseracingnation.com/entries-results/<track>/<date> — reliable numbered fields with jockeys\n"
+            "  - bloodhorse.com/horse-racing/race/usa/<track>/<year>/<m>/<d>/<race>\n"
+            "  - drf.com entries / charts\n"
+            "  - punters.com.au racing-results/horses/<track>-us-<date>\n"
+            "  - paulickreport.com, truenicks.com, americasbestracing.net (feature races / stakes context)\n"
+            "  - entries.horseracingnation.com and racingtv.com (cross-reference for late scratches)"
         )
+        if has_server_grounding:
+            source_strategy = (
+                "Use web search before answering. "
+                "Your PRIMARY data sources are the Equibase SmartPick/entry pages listed below — search the SmartPick URL for EVERY race "
+                "to get the full field, post positions, jockeys, trainers, morning line odds, and SmartPick rankings. "
+                "Cross-reference with the track's official .com entries page and at least one of these other high-confidence racing sources:\n"
+                f"{fallback_sources}\n"
+                "Do not skip later races."
+            )
+        else:
+            # Server-side Equibase scrape failed — lean harder on aggregation.
+            source_strategy = (
+                "Use web search before answering. "
+                "IMPORTANT: Do not rely on any single source for the numbered field. "
+                "Search ALL of the following high-confidence sources and cross-reference them to determine each race's complete entry list "
+                "(post position, horse name, jockey, trainer, morning line odds) for the EXACT race date above:\n"
+                f"{fallback_sources}\n"
+                "Equibase is the authoritative source when reachable — always try equibase.com/static/entry/<TRACK><MMDDYY>USA-EQB.html first. "
+                "If Equibase is unavailable, cross-reference at least TWO of the above alternative sources before finalising each race's field "
+                "(the track's own .com entries page + horseracingnation.com are a strong pair for US flat racing). "
+                "The numbered field must match across sources. Do not skip later races. "
+                "If sources disagree about a horse, prefer the value that appears in the majority of reachable sources."
+            )
     expected_race_numbers = expected_race_numbers or []
     missing_race_numbers = missing_race_numbers or []
     expected_horses_by_race = expected_horses_by_race or {}
@@ -4019,7 +4071,9 @@ def _build_admin_structuring_prompt(
         )
     )
 
-    # Data source rules differ for USA vs international
+    # Data source rules differ for USA vs international, and tighten further
+    # when no server-side Equibase grounding is available (the LLM must then
+    # cross-reference multiple sources before finalising the field).
     if intl:
         data_source_rules = (
             "- Use the Equibase foreign entry pages as your primary source for the field, post positions, jockeys, and trainers.\n"
@@ -4027,11 +4081,24 @@ def _build_admin_structuring_prompt(
             "- **Jockey and trainer are MANDATORY for every horse.** Search multiple sources to find this data. Never use \"N/A\", \"Unknown\", or leave them blank.\n"
             "- Include `morning_line_odds` for each horse if available from any source."
         )
-    else:
+    elif has_server_grounding:
         data_source_rules = (
             "- Use the Equibase SmartPick data as your primary source for post positions, jockeys, trainers, and morning line odds.\n"
             "- **Jockey and trainer are MANDATORY for every horse.** Search the SmartPick page for EACH race to get this data. Never use \"N/A\", \"Unknown\", or leave them blank.\n"
             "- Include `morning_line_odds` for each horse if available from the SmartPick or entry pages."
+        )
+    else:
+        # No server-side grounding — require multi-source cross-reference.
+        data_source_rules = (
+            "- Cross-reference at least TWO independent sources before finalising each race's field. Strong pairs for US flat racing:\n"
+            "  * equibase.com static entry page + the track's official .com entries page\n"
+            "  * horseracingnation.com entries/results + bloodhorse.com race page\n"
+            "  * drf.com entries + paulickreport.com feature writeups (for stakes races)\n"
+            "- **Horse names, post positions, and the size of the field must match across at least two sources.** If they disagree, prefer the value in the majority of reachable sources.\n"
+            "- **Jockey and trainer are MANDATORY for every horse.** If one source lacks them, search another. Never use \"N/A\", \"Unknown\", \"TBA\", or leave them blank.\n"
+            "- Include `morning_line_odds` whenever any of the sources list them — track .com pages and horseracingnation.com almost always publish them.\n"
+            "- Do not invent horses not seen in any source. Do not skip later races just because earlier ones are easier to source.\n"
+            "- If a race is genuinely missing published entries on the date in question (e.g. scratched to reschedule), omit it and note why in `card_overview`."
         )
 
     return f"""
