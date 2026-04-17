@@ -13,14 +13,6 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-# Import captcha solver
-try:
-    from services.captcha_solver import get_captcha_solver, solve_equibase_captcha
-    CAPTCHA_SOLVER_AVAILABLE = True
-except ImportError:
-    logger.warning("⚠️  Captcha solver not available - captcha challenges will fail")
-    CAPTCHA_SOLVER_AVAILABLE = False
-
 
 class FixedPlaywrightSmartPickScraper:
     """Fixed SmartPick scraper that properly handles Angular/JavaScript rendering"""
@@ -29,7 +21,6 @@ class FixedPlaywrightSmartPickScraper:
         self.playwright = None
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
-        self.captcha_solver = get_captcha_solver() if CAPTCHA_SOLVER_AVAILABLE else None
         self.session_established = False
         # Circuit breaker controls
         self.captcha_fail_streak = 0
@@ -225,45 +216,19 @@ class FixedPlaywrightSmartPickScraper:
             logger.info("⏳ Waiting for Angular app to initialize...")
             await page.wait_for_timeout(5000)
 
-            # Check if we're on an Incapsula challenge page
+            # Check if we're on an Incapsula/Imperva challenge page.  The
+            # 2Captcha integration has been removed — if the WAF challenge is
+            # still present after the initial navigation, we abort this
+            # scrape and let the caller retry later.
             page_content = await page.content()
             if 'incapsula' in page_content.lower() or 'imperva' in page_content.lower():
-                logger.warning("🛡️  Challenge page detected - attempting to solve...")
-
-                if CAPTCHA_SOLVER_AVAILABLE and self.captcha_solver:
-                    captcha_solved = await solve_equibase_captcha(page, self.captcha_solver)
-                    if not captcha_solved:
-                        logger.error("❌ Failed to solve captcha")
-                        # increment circuit breaker streak
-                        self.captcha_fail_streak += 1
-                        try:
-                            await page.close()
-                        except Exception:
-                            pass
-                        return {}
-
-                    # Wait for page to reload after captcha
-                    logger.info("⏳ Waiting for page to reload after captcha...")
-                    await page.wait_for_timeout(3000)
-
-                    # Wait for network to settle after captcha
-                    try:
-                        await page.wait_for_load_state('networkidle', timeout=15000)
-                        logger.info("✅ Network idle after captcha")
-                    except Exception as e:
-                        logger.warning(f"⚠️  Network idle timeout after captcha: {e}")
-
-                    # Additional wait for Angular to fetch and render data
-                    logger.info("⏳ Waiting for Angular to fetch race data...")
-                    await page.wait_for_timeout(10000)  # Increased from 5s to 10s
-                else:
-                    logger.error("❌ Challenge page detected but no captcha solver available")
-                    self.captcha_fail_streak += 1
-                    try:
-                        await page.close()
-                    except Exception:
-                        pass
-                    return {}
+                logger.error("🛡️  Challenge page detected — aborting SmartPick fetch")
+                self.captcha_fail_streak += 1
+                try:
+                    await page.close()
+                except Exception:
+                    pass
+                return {}
 
             # CRITICAL FIX: Wait for Angular app to render the horse data
             logger.info("⏳ Waiting for Angular app to render horse data...")

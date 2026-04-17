@@ -33,8 +33,6 @@ services:
         value: "0"
       - key: RACE_TZ_OFFSET_HOURS
         value: "-7"
-      - key: TWOCAPTCHA_API_KEY
-        sync: false
       - key: ENVIRONMENT
         value: "production"
       - key: PUBLIC_BASE_URL

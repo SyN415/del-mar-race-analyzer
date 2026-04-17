@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -369,6 +370,51 @@ async def fetch_equibase_all_data_async(
     return expected_horses, entry_details
 
 
+CHALLENGE_POLL_INTERVAL_MS = 2000
+CHALLENGE_POLL_MAX_ATTEMPTS = 14  # ≈ 28 s total budget for the Reese JS challenge
+
+
+async def _poll_until_challenge_clears(
+    fetch_html,
+    nudge=None,
+    max_attempts: int = CHALLENGE_POLL_MAX_ATTEMPTS,
+    interval_ms: int = CHALLENGE_POLL_INTERVAL_MS,
+    sleep=None,
+) -> str:
+    """Poll ``fetch_html`` until it returns HTML that is not an Imperva challenge.
+
+    This is a pure, browser-independent helper so the polling contract can be
+    unit-tested without spinning up Playwright.  Between attempts it calls the
+    optional ``nudge`` coroutine (e.g. to simulate scrolling/mouse activity)
+    and then sleeps ``interval_ms`` via ``sleep`` (defaults to ``asyncio.sleep``).
+    Returns the first non-challenge HTML encountered, or the last HTML seen if
+    the budget is exhausted (callers use ``_is_imperva_challenge`` to decide).
+    """
+    if sleep is None:
+        async def sleep(ms: int) -> None:
+            await asyncio.sleep(ms / 1000)
+
+    last_html = ""
+    for attempt in range(1, max_attempts + 1):
+        html = await fetch_html() or ""
+        last_html = html
+        if html and not _is_imperva_challenge(html):
+            logger.info(
+                "✅ Imperva challenge cleared on attempt %d/%d | html_len=%d",
+                attempt, max_attempts, len(html),
+            )
+            return html
+        if attempt == max_attempts:
+            break
+        if nudge is not None:
+            try:
+                await nudge(attempt)
+            except Exception as exc:
+                logger.debug("nudge coroutine raised on attempt %d: %s", attempt, exc)
+        await sleep(interval_ms)
+    return last_html
+
+
 async def _fetch_equibase_card_overview_html_playwright(
     track_id: str,
     race_date: str,
@@ -378,9 +424,11 @@ async def _fetch_equibase_card_overview_html_playwright(
 
     Used as a fallback when the plain urllib fetch is blocked by the Imperva
     WAF.  Warms up a session on the Equibase homepage (to collect the Imperva
-    cookie), accepts the cookie banner, then navigates to the overview URL.
-    If the challenge page is still present and a 2Captcha solver is available,
-    attempts to solve it before returning the final HTML.
+    cookie + Reese cookie), accepts the cookie banner, then navigates to the
+    overview URL.  If the Imperva interstitial is still showing, polls for up
+    to ~28 s — giving the invisible Reese JS challenge time to self-resolve —
+    while gently simulating scroll/mouse activity between checks to satisfy
+    Imperva's behavioural heuristics.
     """
     try:
         from playwright.async_api import async_playwright
@@ -436,7 +484,7 @@ async def _fetch_equibase_card_overview_html_playwright(
 
             page = await context.new_page()
 
-            # Warm up on the homepage first so Imperva sets its cookie.
+            # Warm up on the homepage so Imperva can set its baseline cookies.
             try:
                 await page.goto(
                     "https://www.equibase.com",
@@ -454,25 +502,52 @@ async def _fetch_equibase_card_overview_html_playwright(
             except Exception as exc:
                 logger.warning("⚠️ Equibase homepage warm-up failed: %s", exc)
 
-            # Navigate to the overview URL.
+            # Navigate to the overview URL.  Use domcontentloaded first so we
+            # get control quickly, then let the polling loop below handle any
+            # Reese JS challenge.
             try:
                 await page.goto(overview_url, wait_until="domcontentloaded", timeout=45000)
-                await page.wait_for_timeout(2500)
             except Exception as exc:
                 logger.error("❌ Playwright overview navigation failed: %s", exc)
                 return ""
 
-            html = await page.content()
+            async def _read_current_html() -> str:
+                try:
+                    return await page.content()
+                except Exception as exc:
+                    logger.debug("page.content() raised during poll: %s", exc)
+                    return ""
 
-            # If the WAF page is still showing, try to solve the captcha.
-            if _is_imperva_challenge(html):
-                logger.warning("🛡️ Challenge still present after navigation — attempting captcha solve")
-                html = await _try_solve_equibase_challenge(page) or html
+            async def _nudge(attempt: int) -> None:
+                # Simulate light human activity between checks.  Imperva's
+                # Reese challenge watches for mouse movement / scroll events
+                # before deciding whether to issue its clearance cookie.
+                try:
+                    await page.mouse.move(200 + attempt * 17, 300 + attempt * 11)
+                except Exception:
+                    pass
+                try:
+                    await page.evaluate(
+                        "window.scrollBy(0, Math.floor(Math.random() * 400) + 200)"
+                    )
+                except Exception:
+                    pass
+                # Let networkidle settle opportunistically — do not block.
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=1500)
+                except Exception:
+                    pass
+
+            html = await _poll_until_challenge_clears(
+                fetch_html=_read_current_html,
+                nudge=_nudge,
+            )
 
             if _is_imperva_challenge(html):
                 logger.error(
-                    "❌ Playwright fetch still returned WAF challenge | url=%s | html_len=%d",
-                    overview_url, len(html),
+                    "❌ Playwright fetch still returned WAF challenge after polling | "
+                    "url=%s | html_len=%d | attempts=%d",
+                    overview_url, len(html), CHALLENGE_POLL_MAX_ATTEMPTS,
                 )
                 return ""
 
@@ -490,46 +565,6 @@ async def _fetch_equibase_card_overview_html_playwright(
                 await browser.close()
             except Exception:
                 pass
-
-
-async def _try_solve_equibase_challenge(page) -> str:
-    """Attempt to solve an Equibase hCaptcha challenge via the 2Captcha solver.
-
-    Returns the page HTML after the solve, or an empty string if no solver is
-    configured or the solve failed.  The caller decides whether the result
-    still looks like a challenge page.
-    """
-    try:
-        from services.captcha_solver import get_captcha_solver, solve_equibase_captcha
-    except Exception as exc:
-        logger.info("ℹ️ Captcha solver unavailable (%s) — skipping challenge bypass", exc)
-        return ""
-
-    solver = get_captcha_solver()
-    if solver is None or not getattr(solver, "solver", None):
-        logger.info("ℹ️ No 2Captcha API key configured — skipping challenge bypass")
-        return ""
-
-    try:
-        ok = await solve_equibase_captcha(page, solver)
-    except Exception as exc:
-        logger.error("❌ Captcha solve raised: %s", exc)
-        return ""
-
-    if not ok:
-        logger.warning("⚠️ Captcha solver reported failure")
-        return ""
-
-    try:
-        await page.wait_for_timeout(3000)
-        try:
-            await page.wait_for_load_state("networkidle", timeout=15000)
-        except Exception:
-            pass
-        return await page.content()
-    except Exception as exc:
-        logger.error("❌ Failed to read page after captcha solve: %s", exc)
-        return ""
 
 
 def extract_structured_race_numbers(structured_card: Dict[str, Any]) -> List[int]:

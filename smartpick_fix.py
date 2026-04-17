@@ -11,14 +11,6 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
 
-# Import captcha solver
-try:
-    from services.captcha_solver import get_captcha_solver, solve_equibase_captcha
-    CAPTCHA_SOLVER_AVAILABLE = True
-except ImportError:
-    logger.warning("⚠️  Captcha solver not available - captcha challenges will fail")
-    CAPTCHA_SOLVER_AVAILABLE = False
-
 
 class FixedPlaywrightSmartPickScraper:
     """Fixed SmartPick scraper that properly handles Angular/JavaScript rendering"""
@@ -27,7 +19,6 @@ class FixedPlaywrightSmartPickScraper:
         self.playwright = None
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
-        self.captcha_solver = get_captcha_solver() if CAPTCHA_SOLVER_AVAILABLE else None
         self.session_established = False
     
     async def __aenter__(self):
@@ -127,23 +118,12 @@ class FixedPlaywrightSmartPickScraper:
             logger.info("⏳ Waiting for Angular app to initialize...")
             await page.wait_for_timeout(5000)
             
-            # Check if we're on an Incapsula challenge page
+            # Check if we're on an Incapsula/Imperva challenge page.  The
+            # 2Captcha integration has been removed — abort and let the caller retry.
             page_content = await page.content()
             if 'incapsula' in page_content.lower() or 'imperva' in page_content.lower():
-                logger.warning("🛡️  Challenge page detected - attempting to solve...")
-                
-                if CAPTCHA_SOLVER_AVAILABLE and self.captcha_solver:
-                    captcha_solved = await solve_equibase_captcha(page, self.captcha_solver)
-                    if not captcha_solved:
-                        logger.error("❌ Failed to solve captcha")
-                        return {}
-                    
-                    # Wait for page to reload after captcha
-                    logger.info("⏳ Waiting for page to reload after captcha...")
-                    await page.wait_for_timeout(5000)
-                else:
-                    logger.error("❌ Challenge page detected but no captcha solver available")
-                    return {}
+                logger.error("🛡️  Challenge page detected — aborting SmartPick fetch")
+                return {}
 
             # CRITICAL FIX: Wait for Angular app to render the horse data
             logger.info("⏳ Waiting for Angular app to render horse data...")
