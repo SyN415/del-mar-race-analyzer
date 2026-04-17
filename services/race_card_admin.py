@@ -323,6 +323,215 @@ def fetch_equibase_all_data(
     return expected_horses, entry_details
 
 
+async def fetch_equibase_all_data_async(
+    track_id: str,
+    race_date: str,
+    timeout_seconds: float = 12.0,
+    country: str = "USA",
+) -> tuple:
+    """Async variant of :func:`fetch_equibase_all_data` with Playwright fallback.
+
+    Tries the lightweight urllib fetch first.  If it is blocked by the Imperva
+    WAF (or returns anything else the parser can't make sense of), falls back
+    to a stealth Playwright navigation that can clear the interstitial and
+    return the real overview HTML.  The same parsers run against whichever
+    HTML source succeeds, so downstream callers are unchanged.
+    """
+    html = _fetch_equibase_card_overview_html(
+        track_id, race_date, timeout_seconds=timeout_seconds, country=country
+    )
+
+    entry_details: Dict[int, List[Dict[str, Any]]] = {}
+    expected_horses: Dict[int, List[str]] = {}
+    if html:
+        entry_details = _parse_equibase_entry_details(html)
+        expected_horses = _parse_equibase_expected_horses_by_race(html)
+
+    # If the urllib path yielded nothing (WAF challenge, network error, or an
+    # unrecognised page), try the Playwright fallback.  It is slower but has
+    # real browser fingerprints + stealth scripts that clear the WAF.
+    if not entry_details:
+        logger.info(
+            "🛡️ urllib overview fetch yielded no entry details — attempting Playwright fallback"
+        )
+        playwright_html = await _fetch_equibase_card_overview_html_playwright(
+            track_id, race_date, country=country
+        )
+        if playwright_html:
+            entry_details = _parse_equibase_entry_details(playwright_html)
+            expected_horses = _parse_equibase_expected_horses_by_race(playwright_html)
+            if entry_details:
+                logger.info(
+                    "✅ Playwright fallback recovered %d races of entry details",
+                    len(entry_details),
+                )
+
+    return expected_horses, entry_details
+
+
+async def _fetch_equibase_card_overview_html_playwright(
+    track_id: str,
+    race_date: str,
+    country: str = "USA",
+) -> str:
+    """Fetch the Equibase overview page via a stealth Playwright context.
+
+    Used as a fallback when the plain urllib fetch is blocked by the Imperva
+    WAF.  Warms up a session on the Equibase homepage (to collect the Imperva
+    cookie), accepts the cookie banner, then navigates to the overview URL.
+    If the challenge page is still present and a 2Captcha solver is available,
+    attempts to solve it before returning the final HTML.
+    """
+    try:
+        from playwright.async_api import async_playwright
+    except Exception as exc:  # pragma: no cover - import-time environment issue
+        logger.error("❌ Playwright import failed — cannot fall back to browser: %s", exc)
+        return ""
+
+    overview_url = build_equibase_card_overview_url(track_id, race_date, country=country)
+    logger.info("🌐 Playwright overview fetch starting | url=%s", overview_url)
+
+    browser = None
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-features=VizDisplayCompositor",
+                ],
+            )
+            context = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/131.0.0.0 Safari/537.36"
+                ),
+                viewport={"width": 1920, "height": 1080},
+                locale="en-US",
+                timezone_id="America/New_York",
+                extra_http_headers={
+                    "Accept": (
+                        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+                        "image/avif,image/webp,*/*;q=0.8"
+                    ),
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Accept-Encoding": "gzip, deflate, br",
+                    "Upgrade-Insecure-Requests": "1",
+                    "Sec-Fetch-Dest": "document",
+                    "Sec-Fetch-Mode": "navigate",
+                    "Sec-Fetch-Site": "none",
+                },
+            )
+            await context.add_init_script(
+                """
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+                window.chrome = { runtime: {} };
+                """
+            )
+
+            page = await context.new_page()
+
+            # Warm up on the homepage first so Imperva sets its cookie.
+            try:
+                await page.goto(
+                    "https://www.equibase.com",
+                    wait_until="domcontentloaded",
+                    timeout=30000,
+                )
+                await page.wait_for_timeout(2000)
+                try:
+                    cookie_btn = await page.query_selector("#onetrust-accept-btn-handler")
+                    if cookie_btn:
+                        await cookie_btn.click()
+                        await page.wait_for_timeout(1000)
+                except Exception:
+                    pass
+            except Exception as exc:
+                logger.warning("⚠️ Equibase homepage warm-up failed: %s", exc)
+
+            # Navigate to the overview URL.
+            try:
+                await page.goto(overview_url, wait_until="domcontentloaded", timeout=45000)
+                await page.wait_for_timeout(2500)
+            except Exception as exc:
+                logger.error("❌ Playwright overview navigation failed: %s", exc)
+                return ""
+
+            html = await page.content()
+
+            # If the WAF page is still showing, try to solve the captcha.
+            if _is_imperva_challenge(html):
+                logger.warning("🛡️ Challenge still present after navigation — attempting captcha solve")
+                html = await _try_solve_equibase_challenge(page) or html
+
+            if _is_imperva_challenge(html):
+                logger.error(
+                    "❌ Playwright fetch still returned WAF challenge | url=%s | html_len=%d",
+                    overview_url, len(html),
+                )
+                return ""
+
+            logger.info(
+                "✅ Playwright overview fetch succeeded | url=%s | html_len=%d",
+                overview_url, len(html),
+            )
+            return html
+    except Exception as exc:
+        logger.error("❌ Playwright overview fetch raised: %s", exc)
+        return ""
+    finally:
+        if browser is not None:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+
+
+async def _try_solve_equibase_challenge(page) -> str:
+    """Attempt to solve an Equibase hCaptcha challenge via the 2Captcha solver.
+
+    Returns the page HTML after the solve, or an empty string if no solver is
+    configured or the solve failed.  The caller decides whether the result
+    still looks like a challenge page.
+    """
+    try:
+        from services.captcha_solver import get_captcha_solver, solve_equibase_captcha
+    except Exception as exc:
+        logger.info("ℹ️ Captcha solver unavailable (%s) — skipping challenge bypass", exc)
+        return ""
+
+    solver = get_captcha_solver()
+    if solver is None or not getattr(solver, "solver", None):
+        logger.info("ℹ️ No 2Captcha API key configured — skipping challenge bypass")
+        return ""
+
+    try:
+        ok = await solve_equibase_captcha(page, solver)
+    except Exception as exc:
+        logger.error("❌ Captcha solve raised: %s", exc)
+        return ""
+
+    if not ok:
+        logger.warning("⚠️ Captcha solver reported failure")
+        return ""
+
+    try:
+        await page.wait_for_timeout(3000)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
+        return await page.content()
+    except Exception as exc:
+        logger.error("❌ Failed to read page after captcha solve: %s", exc)
+        return ""
+
+
 def extract_structured_race_numbers(structured_card: Dict[str, Any]) -> List[int]:
     """Extract normalized race numbers from a structured card payload."""
     raw_races = structured_card.get("race_analyses") or structured_card.get("races") or []
@@ -800,6 +1009,33 @@ def _to_int(value: Any, default: int) -> int:
         return default
 
 
+# Signature fragments used by Equibase's Imperva/Incapsula WAF interstitial
+# ("Pardon Our Interruption" page).  If any of these show up in the response
+# body we must treat the fetch as blocked — the HTML contains no race data.
+_IMPERVA_CHALLENGE_MARKERS = (
+    "Pardon Our Interruption",
+    "reeseSkipExpirationCheck",
+    "onProtectionInitialized",
+    "_Incapsula_Resource",
+    "window.isImpervaSpaSupport",
+)
+
+
+def _is_imperva_challenge(html: str) -> bool:
+    """Return True when the HTML looks like the Imperva/Incapsula challenge page."""
+    if not html:
+        return False
+    if len(html) > 20000:
+        # Real Equibase overview pages are large; challenges are ~4–8 KB.
+        # Skip the expensive substring scan when clearly not a challenge.
+        return False
+    lowered = html
+    for marker in _IMPERVA_CHALLENGE_MARKERS:
+        if marker in lowered:
+            return True
+    return False
+
+
 def _fetch_equibase_card_overview_html(track_id: str, race_date: str, timeout_seconds: float = 12.0, country: str = "USA") -> str:
     overview_url = build_equibase_card_overview_url(track_id, race_date, country=country)
     req = urllib_request.Request(
@@ -814,9 +1050,20 @@ def _fetch_equibase_card_overview_html(track_id: str, race_date: str, timeout_se
 
     try:
         with urllib_request.urlopen(req, timeout=timeout_seconds) as response:
-            return response.read().decode("utf-8", errors="ignore")
-    except Exception:
+            html = response.read().decode("utf-8", errors="ignore")
+    except Exception as exc:
+        logger.warning("⚠️ Equibase overview fetch failed for %s: %s", overview_url, exc)
         return ""
+
+    if _is_imperva_challenge(html):
+        logger.error(
+            "🛡️ Equibase WAF challenge detected on overview fetch | url=%s | html_len=%d — "
+            "urllib path is blocked, Playwright fallback required",
+            overview_url, len(html),
+        )
+        return ""
+
+    return html
 
 
 def _extract_equibase_runner_refnos(html: str) -> set[str]:

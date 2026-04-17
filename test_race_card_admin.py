@@ -203,6 +203,7 @@ _restore_original_modules()
 
 from services.race_card_admin import (
     AdminRaceCardJSONError,
+    _is_imperva_challenge,
     _parse_equibase_expected_horses_by_race,
     build_equibase_card_overview_url,
     extract_json_object,
@@ -622,6 +623,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         self.original_fetch_equibase_all_data = app_module.fetch_equibase_all_data
         self.original_fetch_expected_horses_by_race = app_module.fetch_equibase_expected_horses_by_race
         self.original_fetch_expected_race_numbers = app_module.fetch_equibase_expected_race_numbers
+        self.original_fetch_equibase_all_data_async = app_module.fetch_equibase_all_data_async
         self.original_admin_password = app_module.app_state.config.web.admin_password
         self.original_auth_secret = app_module.app_state.config.web.auth_secret
         self.original_cached_auth_secret = app_module._AUTH_SECRET
@@ -655,6 +657,28 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         app_module.fetch_equibase_expected_horses_by_race = lambda *args, **kwargs: {}
         app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: []
 
+        # Default Equibase fetch stub: returns non-empty entry_details so the
+        # production guardrail (which refuses to publish an ungrounded card in
+        # web_search mode) does not fire.  Individual tests that exercise the
+        # guardrail should override this stub.
+        async def _default_equibase_all_data_async(*args, **kwargs):
+            entry_details = {
+                1: [
+                    {
+                        "name": "Alpha",
+                        "post_position": 1,
+                        "program_number": 1,
+                        "jockey": "A. Rider",
+                        "trainer": "T. One",
+                        "morning_line": "5/2",
+                        "scratched": False,
+                    }
+                ]
+            }
+            return {}, entry_details
+
+        app_module.fetch_equibase_all_data_async = _default_equibase_all_data_async
+
     def tearDown(self):
         app_module.app_state.session_manager = self.original_session_manager
         app_module.app_state.openrouter_client = self.original_openrouter_client
@@ -664,6 +688,7 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         app_module._AUTH_SECRET = self.original_cached_auth_secret
         app_module.fetch_equibase_expected_horses_by_race = self.original_fetch_expected_horses_by_race
         app_module.fetch_equibase_expected_race_numbers = self.original_fetch_expected_race_numbers
+        app_module.fetch_equibase_all_data_async = self.original_fetch_equibase_all_data_async
 
     def test_create_admin_race_card_uses_web_plugin_in_web_search_mode(self):
         request = app_module.AdminRaceCardRequest(
@@ -978,6 +1003,35 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         self.assertEqual(saved_results["race_analyses"][0]["predictions"][0]["horse_name"], "Alpha")
         self.assertTrue(any(
             args.args[3] == "admin_retry_malformed_json"
+            for args in self.session_manager.update_session_status.await_args_list
+        ))
+
+    def test_create_admin_race_card_refuses_when_equibase_entry_details_unavailable(self):
+        # Override the default stub so entry_details is empty — simulates the
+        # urllib+Playwright double failure (e.g. Imperva WAF block).
+        async def _no_equibase_data(*args, **kwargs):
+            return {}, {}
+
+        app_module.fetch_equibase_all_data_async = _no_equibase_data
+
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="x-ai/grok-4.20-beta",
+            source_mode="web_search",
+        )
+
+        with self.assertRaises(app_module.HTTPException) as exc:
+            app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
+
+        self.assertEqual(exc.exception.status_code, 503)
+        self.assertIn("Equibase entry data", exc.exception.detail)
+        # The LLM must not have been called because the guardrail blocks the
+        # request before any web-search prompt is dispatched.
+        self.openrouter_client.call_model.assert_not_awaited()
+        self.session_manager.save_session_results.assert_not_awaited()
+        self.assertTrue(any(
+            args.args[3] == "equibase_unavailable"
             for args in self.session_manager.update_session_status.await_args_list
         ))
 
@@ -1381,6 +1435,33 @@ class GenerateRecapNormalizationTests(unittest.TestCase):
         self.assertEqual(saved_race["trifecta_payout_source"], 120.6)
         self.assertEqual(saved_race["exotic_payout_unit"], "1_dollar")
         self.assertEqual(self.session_manager.save_recap_record.await_args.kwargs["best_trifecta_payout"], 241.2)
+
+
+class ImpervaChallengeDetectionTests(unittest.TestCase):
+    """Unit tests for the Equibase WAF interstitial detector."""
+
+    def test_detects_pardon_our_interruption_page(self):
+        # Reduced fixture matching the actual 4,563-byte Imperva page served
+        # when Equibase decides to block a bot request.
+        html = (
+            "<!DOCTYPE html><html><head>"
+            "<noscript><title>Pardon Our Interruption</title></noscript>"
+            "<script>window.reeseSkipExpirationCheck = true;</script>"
+            "<script>window.onProtectionInitialized = function() {};</script>"
+            "</head></html>"
+        )
+        self.assertTrue(_is_imperva_challenge(html))
+
+    def test_passes_through_real_overview_html(self):
+        # Large, realistic-looking page fragment should never be flagged.
+        html = "<html>" + ("<p>" + "horse entry " * 80 + "</p>") * 60 + "</html>"
+        self.assertGreater(len(html), 20000)
+        self.assertFalse(_is_imperva_challenge(html))
+
+    def test_empty_input_is_not_a_challenge(self):
+        self.assertFalse(_is_imperva_challenge(""))
+        self.assertFalse(_is_imperva_challenge(None))
+
 
 if __name__ == "__main__":
     unittest.main()

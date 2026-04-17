@@ -53,6 +53,7 @@ try:
         build_equibase_race_urls,
         extract_json_object,
         fetch_equibase_all_data,
+        fetch_equibase_all_data_async,
         fetch_equibase_entry_details_by_race,
         fetch_equibase_expected_horses_by_race,
         fetch_equibase_expected_race_numbers,
@@ -74,6 +75,7 @@ except ImportError as e:
     build_equibase_race_urls = None
     extract_json_object = None
     fetch_equibase_all_data = None
+    fetch_equibase_all_data_async = None
     fetch_equibase_entry_details_by_race = None
     fetch_equibase_expected_horses_by_race = None
     fetch_equibase_expected_race_numbers = None
@@ -1775,20 +1777,45 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
             if is_web_search_mode
             else None
         )
-        # Fetch expected horses AND entry details in a single HTTP call
-        if is_web_search_mode and fetch_equibase_all_data:
+        # Fetch expected horses AND entry details in a single workflow.
+        # Prefer the async helper (urllib → Playwright fallback on WAF block);
+        # fall back to the sync helper when the async variant isn't available
+        # (e.g. service initialization failure).
+        if is_web_search_mode and fetch_equibase_all_data_async:
+            expected_horses_by_race, equibase_entry_details = await fetch_equibase_all_data_async(
+                request.track_id, request.race_date, country=track_country
+            )
+        elif is_web_search_mode and fetch_equibase_all_data:
             expected_horses_by_race, equibase_entry_details = fetch_equibase_all_data(
                 request.track_id, request.race_date, country=track_country
             )
+        else:
+            expected_horses_by_race = {}
+            equibase_entry_details = {}
+        if is_web_search_mode:
             logger.info(
                 "📊 Equibase data: expected_horses=%d races | entry_details=%d races | details_entries=%d",
                 len(expected_horses_by_race),
                 len(equibase_entry_details),
                 sum(len(v) for v in equibase_entry_details.values()),
             )
-        else:
-            expected_horses_by_race = {}
-            equibase_entry_details = {}
+            # Guardrail: in web_search mode we must have authoritative Equibase
+            # entry details before we hand the card off to the LLM.  Without
+            # them, the LLM becomes the sole source of horse/jockey/trainer/PP
+            # data and starts mixing horses between races on longer cards.
+            # Refuse to proceed rather than publish an ungrounded card.
+            if not equibase_entry_details:
+                detail = (
+                    "Equibase entry data is currently unavailable for "
+                    f"{request.track_id} on {request.race_date} (WAF block or "
+                    "network error). Refusing to publish an ungrounded card. "
+                    "Please retry in a few minutes or switch to manual mode."
+                )
+                logger.error("🚫 Refusing to publish: %s", detail)
+                await session_manager.update_session_status(
+                    session_id, "failed", 0, "equibase_unavailable", detail
+                )
+                raise HTTPException(status_code=503, detail=detail)
         # Derive race numbers from the data we already fetched — avoids another HTTP call
         if expected_horses_by_race:
             expected_race_numbers = sorted(expected_horses_by_race)
