@@ -18,196 +18,181 @@
 {% endmacro %}
 
 {% block content %}
-<section class="landing-dashboard">
-    <div class="ad-slot ad-slot-banner mb-3">
+<!-- Hero -->
+<section class="hero">
+    <div class="hero-slideshow">
+        <div class="hero-slide" style="background-image: url('/static/img/DMTC-Aerial.jpeg')"></div>
+        <div class="hero-slide" style="background-image: url('/static/img/DMTC-FinishLine.jpg')"></div>
+        <div class="hero-slide" style="background-image: url('/static/img/DMTC-Jockeys.jpg')"></div>
+        <div class="hero-slide" style="background-image: url('/static/img/DMTC-Paddock.jpg')"></div>
+    </div>
+    <div class="hero-overlay"></div>
+    <div class="hero-inner">
+        <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:48px;align-items:center;">
+            <div>
+                <h1>Professional race-card intelligence built for fast decision-making.</h1>
+                <p class="hero-sub">RaceTrackStar surfaces live and upcoming cards, ranked contenders, strategy notes, and verified historical performance in a dense interface that keeps the most actionable information above the fold.</p>
+                <div style="display:flex;gap:12px;">
+                    <a class="btn btn-secondary" href="#live-cards">View active cards</a>
+                    <a class="btn btn-outline" href="/record">Open track record</a>
+                </div>
+            </div>
+            <div class="metric-strip">
+                <div class="metric-card"><div class="label">Live cards</div><div class="value">{{ live_cards|length }}</div></div>
+                <div class="metric-card"><div class="label">Upcoming</div><div class="value">{{ upcoming_cards|length }}</div></div>
+                <div class="metric-card"><div class="label">30-day win rate</div><div class="value">{{ summary.top_pick_win_rate_pct or 0 }}%</div></div>
+                <div class="metric-card"><div class="label">Avg score</div><div class="value">{{ summary.average_daily_score or '—' }}</div></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<div class="skew-divider"></div>
+
+<!-- Content -->
+<div class="content">
+    <div class="ad-slot ad-slot-banner">
         <span class="ad-slot-label">Advertisement</span>
         <strong>Top Banner Placement</strong>
         <p>Reserved for leaderboard creative or sponsor messaging.</p>
     </div>
 
     <div class="dashboard-grid">
-        <aside class="dashboard-sidebar">
-            <div class="dashboard-panel sidebar-panel sidebar-panel--nav">
-                <div class="sidebar-nav-links">
-                    <a href="#live-cards">Active cards</a>
+        <aside>
+            <div class="panel">
+                <div class="panel-nav">
+                    <a href="#live-cards" class="active">Active cards</a>
                     <a href="#upcoming-cards">Upcoming cards</a>
                     <a href="#historical-data">Recent cards</a>
                     <a href="/record">Track record</a>
                     <a href="/about">About</a>
                 </div>
             </div>
-
-            <div class="dashboard-panel sidebar-panel">
-                <div class="section-eyebrow">Quick access</div>
-                <div class="quick-card-list">
+            <div class="panel" style="margin-top:24px;">
+                <div class="panel-header">
+                    <div class="eyebrow">Quick access</div>
+                </div>
+                <div class="panel-body">
                     {% for pc in live_cards[:4] %}
-                    <a href="{{ pc.card_url }}" class="quick-card-link">
-                        <strong>{{ pc.track_name or pc.track_id }}</strong>
-                        <span>Live card · {{ pc.race_date }}</span>
+                    <a href="{{ pc.card_url }}" class="market-row" style="padding:12px 0;">
+                        <div class="market-cell"><strong>{{ pc.track_name or pc.track_id }}</strong><span>Live card · {{ pc.race_date }}</span></div>
+                        <div class="market-action">→</div>
                     </a>
                     {% endfor %}
                     {% for pc in upcoming_cards[:4] %}
-                    <a href="{{ pc.card_url }}" class="quick-card-link">
-                        <strong>{{ pc.track_name or pc.track_id }}</strong>
-                        <span>Upcoming · {{ pc.race_date }}</span>
+                    <a href="{{ pc.card_url }}" class="market-row" style="padding:12px 0;">
+                        <div class="market-cell"><strong>{{ pc.track_name or pc.track_id }}</strong><span>Upcoming · {{ pc.race_date }}</span></div>
+                        <div class="market-action">→</div>
                     </a>
                     {% endfor %}
                     {% if not live_cards and not upcoming_cards %}
-                    <div class="empty-note">Fresh cards will appear here as soon as the next cycle is published.</div>
+                    <p style="font-size:14px;color:var(--neutral-gray);">Fresh cards will appear here as soon as the next cycle is published.</p>
                     {% endif %}
                 </div>
             </div>
-
-            <div class="ad-slot ad-slot-rail">
+            <div class="ad-slot" style="margin-top:24px;">
                 <span class="ad-slot-label">Advertisement</span>
                 <strong>Sidebar Placement</strong>
                 <p>Sticky-ready inventory for sponsor modules, affiliate offers, or seasonal campaigns.</p>
             </div>
         </aside>
 
-        <div class="dashboard-main">
-            <section class="dashboard-panel dashboard-hero-panel">
-                <div class="dashboard-hero-copy">
-
-                    <h1 class="dashboard-hero-title">Professional race-card intelligence built for fast decision-making.</h1>
-                    <p class="dashboard-hero-text">RaceTrackStar surfaces live and upcoming cards, ranked contenders, strategy notes, and verified historical performance in a dense interface that keeps the most actionable information above the fold.</p>
-                    <div class="dashboard-hero-actions">
-                        <a href="#live-cards" class="btn btn-primary btn-lg">View active cards</a>
-                        <a href="/record" class="btn btn-outline-light btn-lg">Open track record</a>
-                    </div>
-                    <p class="dashboard-hero-note"><i class="fas fa-shield-halved"></i> <strong>Responsible wagering:</strong> Horse racing is high variance. Use every card as information for disciplined decisions, manage bankroll risk, and stop if wagering is no longer recreational.</p>
-                </div>
-                <div class="metric-strip">
-                    <div class="metric-tile">
-                        <span class="metric-label">Live cards</span>
-                        <strong>{{ live_cards|length }}</strong>
-                    </div>
-                    <div class="metric-tile">
-                        <span class="metric-label">Upcoming</span>
-                        <strong>{{ upcoming_cards|length }}</strong>
-                    </div>
-                    <div class="metric-tile">
-                        <span class="metric-label">30-day win rate</span>
-                        <strong>{{ summary.top_pick_win_rate_pct or 0 }}%</strong>
-                    </div>
-                    <div class="metric-tile">
-                        <span class="metric-label">Avg score</span>
-                        <strong>{{ summary.average_daily_score or '—' }}</strong>
-                    </div>
-                </div>
-            </section>
-
+        <main>
             {% if live_cards %}
-            <section class="dashboard-panel market-section" id="live-cards">
-                <div class="market-section-header">
-                    <div>
-                        <div class="section-eyebrow">Live cards</div>
-                        <h3>Cards currently in play</h3>
-                    </div>
-                    <span class="section-count section-count--live">{{ live_cards|length }} active</span>
+            <div class="panel" style="margin-bottom:24px;" id="live-cards">
+                <div class="panel-header">
+                    <div class="eyebrow">Live cards</div>
+                    <div class="panel-title">Cards currently in play</div>
                 </div>
-                <div class="market-list">
+                <div>
                     {% for pc in live_cards %}
                     {{ market_row(pc, 'live') }}
                     {% endfor %}
                 </div>
-            </section>
+            </div>
             {% endif %}
 
-            <div class="ad-slot ad-slot-inline my-3">
+            <div class="ad-slot ad-slot-inline">
                 <span class="ad-slot-label">Advertisement</span>
                 <strong>Inline Placement</strong>
                 <p>Responsive unit positioned between high-engagement market sections.</p>
             </div>
 
             {% if upcoming_cards %}
-            <section class="dashboard-panel market-section" id="upcoming-cards">
-                <div class="market-section-header">
-                    <div>
-                        <div class="section-eyebrow">Upcoming cards</div>
-                        <h3>Published boards scheduled ahead</h3>
-                    </div>
-                    <span class="section-count section-count--upcoming">{{ upcoming_cards|length }} scheduled</span>
+            <div class="panel" style="margin-bottom:24px;" id="upcoming-cards">
+                <div class="panel-header">
+                    <div class="eyebrow">Upcoming cards</div>
+                    <div class="panel-title">Published boards scheduled ahead</div>
                 </div>
-                <div class="market-list">
+                <div>
                     {% for pc in upcoming_cards %}
                     {{ market_row(pc, 'upcoming') }}
                     {% endfor %}
                 </div>
-            </section>
+            </div>
             {% endif %}
 
             {% if not live_cards and not upcoming_cards %}
-            <section class="dashboard-panel empty-state-panel text-center">
-                <div class="section-eyebrow">Monitoring</div>
+            <div class="panel empty-state-panel text-center" style="margin-bottom:24px;">
+                <div class="eyebrow">Monitoring</div>
                 <h3>No active boards are posted yet.</h3>
                 <p>RaceTrackStar is monitoring the next publication cycle. Check back shortly for newly released cards.</p>
-            </section>
+            </div>
             {% endif %}
 
             {% if past_cards %}
-            <section class="dashboard-panel market-section" id="historical-data">
-                <div class="market-section-header">
-                    <div>
-                        <div class="section-eyebrow">Recent cards</div>
-                        <h3>Recent completed cards</h3>
-                    </div>
-                    <span class="section-count section-count--completed">{{ past_cards|length }} archived</span>
+            <div class="panel" style="margin-bottom:24px;" id="historical-data">
+                <div class="panel-header">
+                    <div class="eyebrow">Recent cards</div>
+                    <div class="panel-title">Recent completed cards</div>
                 </div>
-                <div class="market-list">
+                <div>
                     {% for pc in past_cards[:10] %}
                     {{ market_row(pc, 'completed') }}
                     {% endfor %}
                 </div>
-            </section>
+            </div>
             {% endif %}
-        </div>
+        </main>
 
-        <aside class="dashboard-rail">
-            <div class="dashboard-panel rail-panel">
-                <div class="section-eyebrow">Verified results</div>
-
-                <div class="rail-metrics">
-                    <div>
-                        <span>Top-pick win rate</span>
-                        <strong>{{ summary.top_pick_win_rate_pct or 0 }}%</strong>
-                    </div>
-                    <div>
-                        <span>Exacta hit rate</span>
-                        <strong>{{ summary.exacta_hit_rate_pct or 0 }}%</strong>
-                    </div>
-                    <div>
-                        <span>Trifecta hit rate</span>
-                        <strong>{{ summary.trifecta_hit_rate_pct or 0 }}%</strong>
-                    </div>
-                    <div>
-                        <span>Days recapped</span>
-                        <strong>{{ summary.total_days_recapped or 0 }}</strong>
-                    </div>
+        <aside>
+            <div class="panel" style="margin-bottom:24px;">
+                <div class="panel-header">
+                    <div class="eyebrow">Verified results</div>
                 </div>
-                <a href="/record" class="btn btn-outline-success w-100 mt-3">Review full track record</a>
+                <div class="panel-body">
+                    <div class="rail-metrics">
+                        <div class="rail-metric"><span>Top-pick win</span><strong>{{ summary.top_pick_win_rate_pct or 0 }}%</strong></div>
+                        <div class="rail-metric"><span>Exacta hit</span><strong>{{ summary.exacta_hit_rate_pct or 0 }}%</strong></div>
+                        <div class="rail-metric"><span>Trifecta hit</span><strong>{{ summary.trifecta_hit_rate_pct or 0 }}%</strong></div>
+                        <div class="rail-metric"><span>Days recapped</span><strong>{{ summary.total_days_recapped or 0 }}</strong></div>
+                    </div>
+                    <a class="btn btn-outline w-100 mt-3" href="/record" style="margin-top:16px;">Review full track record</a>
+                </div>
             </div>
 
             {% if track_record_summary and track_record_summary.records %}
-            <div class="dashboard-panel rail-panel">
-                <div class="section-eyebrow">Recent recaps</div>
-                <div class="recap-mini-list">
+            <div class="panel" style="margin-bottom:24px;">
+                <div class="panel-header">
+                    <div class="eyebrow">Recent recaps</div>
+                </div>
+                <div class="panel-body">
                     {% for record in track_record_summary.records[:5] %}
-                    <a href="{{ record.public_url or '/record' }}" class="recap-mini-link">
-                        <strong>{{ record.track_name }}</strong>
-                        <span>{{ record.race_date }} · Score {{ record.profitability_score or record.daily_score or 0 }}</span>
+                    <a href="{{ record.public_url or '/record' }}" class="market-row" style="padding:12px 0;">
+                        <div class="market-cell"><strong>{{ record.track_name }}</strong><span>{{ record.race_date }} · Score {{ record.profitability_score or record.daily_score or 0 }}</span></div>
+                        <div class="market-action">→</div>
                     </a>
                     {% endfor %}
                 </div>
             </div>
             {% endif %}
 
-            <div class="ad-slot ad-slot-skyscraper">
+            <div class="ad-slot">
                 <span class="ad-slot-label">Advertisement</span>
                 <strong>Rail Placement</strong>
                 <p>Tall-format inventory for premium sponsorship or exchange placement.</p>
             </div>
         </aside>
     </div>
-</section>
+</div>
 {% endblock %}

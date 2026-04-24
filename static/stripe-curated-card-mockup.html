@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Del Mar — Curated Card | RaceTrackStar</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --brand-primary: #635BFF;
+            --brand-accent: #00D4FF;
+            --neutral-dark: #0A2540;
+            --neutral-gray: #425466;
+            --bg-light: #F6F9FC;
+            --canvas-white: #FFFFFF;
+            --border-subtle: #E6EBF1;
+            --shadow-low: 0 4px 6px rgba(50,50,93,0.11), 0 1px 3px rgba(0,0,0,0.08);
+            --shadow-high: 0 15px 35px rgba(50,50,93,0.10), 0 5px 15px rgba(0,0,0,0.07);
+            --radius-btn: 8px;
+            --radius-card: 16px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-light); color: var(--neutral-dark); }
+        body { line-height: 1.6; min-height: 100vh; }
+        a { color: inherit; text-decoration: none; }
+
+        /* Nav */
+        .navbar {
+            background: var(--canvas-white);
+            border-bottom: 1px solid var(--border-subtle);
+            padding: 0 32px;
+            height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+        .navbar-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--neutral-dark); }
+        .brand-sub { font-size: 11px; font-weight: 600; color: var(--neutral-gray); letter-spacing: 0.05em; text-transform: uppercase; }
+        .nav-links { display: flex; gap: 24px; align-items: center; font-size: 14px; font-weight: 500; color: var(--neutral-gray); }
+        .nav-links a:hover { color: var(--brand-primary); }
+        .nav-btn {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 6px 14px; border-radius: var(--radius-btn); font-size: 13px; font-weight: 600;
+            border: 1px solid var(--border-subtle); background: var(--canvas-white); color: var(--neutral-gray);
+            transition: all .15s; cursor: pointer;
+        }
+        .nav-btn:hover { border-color: var(--brand-primary); color: var(--brand-primary); }
+
+        /* Hero */
+        .hero {
+            position: relative; overflow: hidden;
+            padding: 72px 32px 96px; background: var(--neutral-dark);
+        }
+        .hero-slideshow { position: absolute; inset: 0; z-index: 0; }
+        .hero-slide {
+            position: absolute; inset: 0; background-size: cover; background-position: center;
+            opacity: 0; animation: heroFade 24s infinite;
+        }
+        .hero-slide:nth-child(1) { animation-delay: 0s; background-image: url('img/DMTC-Aerial.jpeg'); }
+        .hero-slide:nth-child(2) { animation-delay: 6s; background-image: url('img/DMTC-FinishLine.jpg'); }
+        .hero-slide:nth-child(3) { animation-delay: 12s; background-image: url('img/DMTC-Jockeys.jpg'); }
+        .hero-slide:nth-child(4) { animation-delay: 18s; background-image: url('img/DMTC-Paddock.jpg'); }
+        @keyframes heroFade {
+            0% { opacity: 0; } 4% { opacity: 1; } 25% { opacity: 1; } 29% { opacity: 0; } 100% { opacity: 0; }
+        }
+        .hero-overlay { position: absolute; inset: 0; z-index: 1; background: rgba(10,37,64,0.62); }
+        .hero-inner { position: relative; z-index: 2; max-width: 1100px; margin: 0 auto; text-align: center; }
+        .hero-eyebrow {
+            display: inline-flex; align-items: center; gap: 8px;
+            font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+            color: var(--brand-accent); margin-bottom: 16px;
+            padding: 6px 14px; border-radius: 999px;
+            background: rgba(0,212,255,0.12); border: 1px solid rgba(0,212,255,0.25);
+        }
+        .hero h1 { font-size: clamp(2rem,5vw,3.2rem); line-height: 1.1; font-weight: 700; color: var(--canvas-white); margin-bottom: 12px; text-shadow: 0 2px 8px rgba(0,0,0,0.25); }
+        .hero-sub { font-size: 17px; color: rgba(255,255,255,0.82); max-width: 560px; margin: 0 auto 24px; text-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+        .hero-chips { display: flex; justify-content: center; flex-wrap: wrap; gap: 10px; margin-bottom: 28px; }
+        .chip {
+            font-size: 13px; font-weight: 600; padding: 5px 14px; border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.9);
+        }
+        .chip-live { border-color: rgba(74,222,128,0.4); background: rgba(74,222,128,0.12); color: #4ade80; }
+
+        /* Stripe Buttons */
+        .btn-primary {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--brand-primary); color: var(--canvas-white);
+            padding: 11px 22px; border-radius: var(--radius-btn); font-size: 15px; font-weight: 600;
+            box-shadow: var(--shadow-low); border: none; cursor: pointer; transition: transform 0.15s, box-shadow 0.2s, background 0.2s;
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: var(--shadow-high); background: #5248e5; }
+        .btn-secondary {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--canvas-white); color: var(--neutral-dark);
+            padding: 11px 22px; border-radius: var(--radius-btn); font-size: 15px; font-weight: 600;
+            box-shadow: var(--shadow-low); border: none; cursor: pointer; transition: transform 0.15s, box-shadow 0.2s;
+        }
+        .btn-secondary:hover { transform: translateY(-1px); box-shadow: var(--shadow-high); }
+        .btn-outline {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: transparent; color: var(--canvas-white);
+            padding: 11px 22px; border-radius: var(--radius-btn); font-size: 15px; font-weight: 600;
+            border: 1px solid rgba(255,255,255,0.35); cursor: pointer; transition: background 0.15s;
+        }
+        .btn-outline:hover { background: rgba(255,255,255,0.12); }
+        .btn-ghost {
+            display: inline-flex; align-items: center; gap: 6px;
+            background: transparent; color: var(--neutral-gray);
+            padding: 8px 16px; border-radius: var(--radius-btn); font-size: 13px; font-weight: 600;
+            border: 1px solid var(--border-subtle); cursor: pointer; transition: all 0.15s;
+        }
+        .btn-ghost:hover { border-color: var(--brand-primary); color: var(--brand-primary); }
+
+        /* Skew divider */
+        .skew-divider { height: 60px; background: var(--bg-light); transform: skewY(-3deg); margin-top: -30px; position: relative; z-index: 2; }
+
+        /* Content */
+        .content { max-width: 1100px; margin: -12px auto 60px; padding: 0 32px; position: relative; z-index: 3; }
+
+        /* Overview */
+        .overview { background: var(--canvas-white); border-radius: var(--radius-card); box-shadow: var(--shadow-high); border: 1px solid var(--border-subtle); overflow: hidden; margin-bottom: 32px; }
+        .overview-header { padding: 20px 28px; border-bottom: 1px solid var(--border-subtle); }
+        .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--brand-primary); margin-bottom: 6px; }
+        .panel-title { font-size: 18px; font-weight: 600; color: var(--neutral-dark); }
+        .overview-body { padding: 20px 28px; font-size: 15px; line-height: 1.7; color: var(--neutral-gray); }
+
+        /* Layout */
+        .dashboard { display: grid; grid-template-columns: 64px 1fr; gap: 24px; align-items: start; }
+        @media(max-width:767px){ .dashboard { grid-template-columns: 1fr; } }
+
+        /* Race Rail */
+        .race-rail { display: flex; flex-direction: column; gap: 8px; position: sticky; top: 80px; }
+        @media(max-width:767px){ .race-rail { flex-direction: row; overflow-x: auto; gap: 10px; padding-bottom: 8px; } }
+        .rail-item {
+            width: 64px; height: 64px; display: flex; align-items: center; justify-content: center;
+            border-radius: 12px; border: 1px solid var(--border-subtle); background: var(--canvas-white);
+            color: var(--neutral-gray); font-size: 15px; font-weight: 700; cursor: pointer;
+            transition: all .15s; text-decoration: none; position: relative; overflow: hidden;
+        }
+        @media(max-width:767px){ .rail-item { min-width: 64px; } }
+        .rail-item:hover { border-color: var(--brand-primary); color: var(--brand-primary); }
+        .rail-item.active { border-color: var(--brand-primary); background: rgba(99,91,255,0.06); color: var(--brand-primary); }
+        .rail-item.active::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: var(--brand-primary); }
+        .rail-item.fc { font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; line-height: 1.3; text-align: center; }
+
+        /* Race Panel */
+        .race-panel { background: var(--canvas-white); border-radius: var(--radius-card); box-shadow: var(--shadow-high); border: 1px solid var(--border-subtle); overflow: hidden; margin-bottom: 24px; }
+        .rp-header { padding: 18px 24px; border-bottom: 1px solid var(--border-subtle); background: var(--bg-light); display: flex; align-items: center; justify-content: space-between; }
+        .rp-title { font-size: 15px; font-weight: 700; color: var(--neutral-dark); letter-spacing: 0.04em; }
+        .rp-badge { font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--brand-primary); padding: 5px 14px; border-radius: 999px; background: rgba(99,91,255,0.08); border: 1px solid rgba(99,91,255,0.25); }
+
+        /* Table */
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+        th { padding: 14px 20px; font-size: 11px; font-weight: 700; color: var(--neutral-gray); text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid var(--border-subtle); white-space: nowrap; background: var(--bg-light); }
+        td { padding: 16px 20px; border-bottom: 1px solid var(--border-subtle); vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        tr.top td:first-child { border-left: 3px solid var(--brand-primary); padding-left: 17px; }
+        .horse-name { font-weight: 700; font-size: 15px; color: var(--neutral-dark); }
+        .post { color: var(--neutral-gray); margin-right: 6px; font-weight: 600; }
+        .secondary { font-size: 13px; color: var(--neutral-gray); margin-top: 4px; }
+        .ml-chip {
+            display: inline-block; font-size: 13px; font-weight: 700; padding: 3px 10px; border-radius: 999px;
+            background: rgba(99,91,255,0.06); border: 1px solid rgba(99,91,255,0.18); color: var(--brand-primary); letter-spacing: 0.02em;
+        }
+        .prob-ring { display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; position: relative; margin: 0 auto; }
+        .prob-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+        .prob-ring .bg { fill: none; stroke: var(--border-subtle); stroke-width: 3; }
+        .prob-ring .fg { fill: none; stroke: var(--brand-primary); stroke-width: 3; stroke-linecap: round; }
+        .prob-ring span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; color: var(--neutral-dark); }
+        .stars { color: var(--brand-primary); font-size: 14px; letter-spacing: 0.1em; white-space: nowrap; }
+        .role-pill {
+            font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+            padding: 4px 10px; border-radius: 999px; display: inline-block; white-space: nowrap;
+        }
+        .role-top { background: rgba(99,91,255,0.08); color: var(--brand-primary); border: 1px solid rgba(99,91,255,0.2); }
+        .role-value { background: rgba(74,222,128,0.08); color: #16a34a; border: 1px solid rgba(74,222,128,0.25); }
+        .role-long { background: rgba(193,102,107,0.08); color: #b91c1c; border: 1px solid rgba(193,102,107,0.2); }
+
+        /* Drilldown */
+        .drilldown { background: var(--bg-light); border-top: 1px solid var(--border-subtle); padding: 20px 24px; }
+        .dd-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--border-subtle); margin-bottom: 16px; }
+        .dd-tab { padding-bottom: 10px; color: var(--neutral-gray); font-size: 13px; font-weight: 600; cursor: pointer; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 2px solid transparent; transition: all .15s; }
+        .dd-tab:hover { color: var(--neutral-dark); }
+        .dd-tab.active { color: var(--brand-primary); border-bottom-color: var(--brand-primary); }
+        .dd-body { font-size: 15px; line-height: 1.7; color: var(--neutral-gray); }
+
+        /* Strategy Footer */
+        .strategy { padding: 18px 24px; background: rgba(99,91,255,0.03); border-top: 1px solid rgba(99,91,255,0.12); display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+        .strategy-label { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--brand-primary); display: block; margin-bottom: 6px; }
+        .strategy-text { flex: 1; font-size: 14px; line-height: 1.6; color: var(--neutral-dark); font-weight: 500; }
+        .strategy-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+        /* Footer */
+        footer { text-align: center; padding: 32px; border-top: 1px solid var(--border-subtle); color: var(--neutral-gray); font-size: 13px; background: var(--canvas-white); }
+        footer a { color: var(--brand-primary); font-weight: 600; }
+
+        @media(max-width:640px){
+            .navbar { padding: 0 16px; }
+            .hero { padding: 48px 16px 72px; }
+            .content { padding: 0 16px; }
+            th, td { padding: 10px 12px !important; font-size: 13px; }
+            .strategy { flex-direction: column; align-items: flex-start; }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <a class="navbar-brand" href="#">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#635BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div>
+                <div>RaceTrackStar</div>
+                <div class="brand-sub">Fast, data-driven racing intelligence</div>
+            </div>
+        </a>
+        <div class="nav-links">
+            <a class="nav-btn" href="#"><i class="fas fa-arrow-left"></i> Dashboard</a>
+            <a class="btn-primary" href="#" style="padding:8px 18px;font-size:13px;"><i class="fas fa-flag-checkered"></i> View Recap</a>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="hero-slideshow">
+            <div class="hero-slide"></div>
+            <div class="hero-slide"></div>
+            <div class="hero-slide"></div>
+            <div class="hero-slide"></div>
+        </div>
+        <div class="hero-overlay"></div>
+        <div class="hero-inner">
+            <div class="hero-eyebrow"><i class="fas fa-horse-head"></i> Curated Betting Card</div>
+            <h1>Del Mar Thoroughbred Club</h1>
+            <p class="hero-sub">Data-driven full-card analysis with compact access to every race on the board.</p>
+            <div class="hero-chips">
+                <span class="chip">📅 2025-04-24</span>
+                <span class="chip">🏟 Del Mar</span>
+                <span class="chip">📖 Full Card View</span>
+                <span class="chip chip-live">● Live</span>
+            </div>
+            <a class="btn-secondary" href="#"><i class="fas fa-flag-checkered"></i> View Verified Recap</a>
+        </div>
+    </section>
+
+    <div class="skew-divider"></div>
+
+    <div class="content">
+        <!-- Overview -->
+        <div class="overview">
+            <div class="overview-header">
+                <div class="eyebrow">Card Overview</div>
+                <div class="panel-title">Trainer & Jockey angles headline this nine-race program.</div>
+            </div>
+            <div class="overview-body">
+                Fast main-track surface expected with a slight rail bias. Sprint races favor early speed; route races should see strong closers. Watch for toteboard moves in the late double.
+            </div>
+        </div>
+
+        <!-- Dashboard -->
+        <div class="dashboard">
+            <aside>
+                <div class="race-rail">
+                    <a class="rail-item fc active">Full<br>Card</a>
+                    <a class="rail-item">1</a>
+                    <a class="rail-item">2</a>
+                    <a class="rail-item">3</a>
+                    <a class="rail-item">4</a>
+                    <a class="rail-item">5</a>
+                </div>
+            </aside>
+
+            <main>
+                <!-- Race 1 -->
+                <div class="race-panel">
+                    <div class="rp-header">
+                        <div style="display:flex;align-items:center;gap:14px;">
+                            <span class="rp-title">ENTRIES & ODDS</span>
+                            <span class="rp-badge">RACE 1</span>
+                        </div>
+                        <i class="fa-solid fa-horse" style="font-size:1.3rem;color:var(--neutral-gray);opacity:.6;"></i>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Post · Horse</th>
+                                    <th>Jockey / Trainer</th>
+                                    <th style="text-align:center">ML Odds</th>
+                                    <th style="text-align:center">Win Prob</th>
+                                    <th>Rating</th>
+                                    <th>Role</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="top">
+                                    <td><div class="horse-name"><span class="post">5</span> Coastal Storm</div></td>
+                                    <td><div class="secondary">J. Ortiz<br>B. Baffert</div></td>
+                                    <td style="text-align:center"><span class="ml-chip">2-1</span></td>
+                                    <td>
+                                        <div class="prob-ring">
+                                            <svg viewBox="0 0 40 40"><circle class="bg" cx="20" cy="20" r="18"/><circle class="fg" cx="20" cy="20" r="18" style="stroke-dasharray:40 113"/></svg>
+                                            <span>35</span>
+                                        </div>
+                                    </td>
+                                    <td><span class="stars">★★★★★</span><div style="font-size:12px;color:var(--neutral-gray);margin-top:2px;font-weight:600;">82.4</div></td>
+                                    <td><span class="role-pill role-top">Top Pick</span></td>
+                                </tr>
+                                <tr>
+                                    <td><div class="horse-name"><span class="post">2</span> Midnight Ruler</div></td>
+                                    <td><div class="secondary">F. Prat<br>S. Asmussen</div></td>
+                                    <td style="text-align:center"><span class="ml-chip">4-1</span></td>
+                                    <td>
+                                        <div class="prob-ring">
+                                            <svg viewBox="0 0 40 40"><circle class="bg" cx="20" cy="20" r="18"/><circle class="fg" cx="20" cy="20" r="18" style="stroke-dasharray:28 113"/></svg>
+                                            <span>25</span>
+                                        </div>
+                                    </td>
+                                    <td><span class="stars">★★★★☆</span><div style="font-size:12px;color:var(--neutral-gray);margin-top:2px;font-weight:600;">71.2</div></td>
+                                    <td><span class="role-pill role-value">Value Play</span></td>
+                                </tr>
+                                <tr>
+                                    <td><div class="horse-name"><span class="post">7</span> Desert Mirage</div></td>
+                                    <td><div class="secondary">A. Quinonez<br>D. O'Neill</div></td>
+                                    <td style="text-align:center"><span class="ml-chip">12-1</span></td>
+                                    <td>
+                                        <div class="prob-ring">
+                                            <svg viewBox="0 0 40 40"><circle class="bg" cx="20" cy="20" r="18"/><circle class="fg" cx="20" cy="20" r="18" style="stroke-dasharray:11 113;stroke:#b91c1c;"/></svg>
+                                            <span>10</span>
+                                        </div>
+                                    </td>
+                                    <td><span class="stars">★★☆☆☆</span><div style="font-size:12px;color:var(--neutral-gray);margin-top:2px;font-weight:600;">38.6</div></td>
+                                    <td><span class="role-pill role-long">Longshot</span></td>
+                                </tr>
+                                <tr>
+                                    <td><div class="horse-name"><span class="post">1</span> Golden Ace</div></td>
+                                    <td><div class="secondary">M. Smith<br>B. Cox</div></td>
+                                    <td style="text-align:center"><span class="ml-chip">6-1</span></td>
+                                    <td>
+                                        <div class="prob-ring">
+                                            <svg viewBox="0 0 40 40"><circle class="bg" cx="20" cy="20" r="18"/><circle class="fg" cx="20" cy="20" r="18" style="stroke-dasharray:17 113"/></svg>
+                                            <span>15</span>
+                                        </div>
+                                    </td>
+                                    <td><span class="stars">★★★☆☆</span><div style="font-size:12px;color:var(--neutral-gray);margin-top:2px;font-weight:600;">54.1</div></td>
+                                    <td>—</td>
+                                </tr>
+                                <tr>
+                                    <td><div class="horse-name"><span class="post">3</span> Silver Tide</div></td>
+                                    <td><div class="secondary">R. Bejarano<br>P. Miller</div></td>
+                                    <td style="text-align:center"><span class="ml-chip">8-1</span></td>
+                                    <td>
+                                        <div class="prob-ring">
+                                            <svg viewBox="0 0 40 40"><circle class="bg" cx="20" cy="20" r="18"/><circle class="fg" cx="20" cy="20" r="18" style="stroke-dasharray:14 113"/></svg>
+                                            <span>12</span>
+                                        </div>
+                                    </td>
+                                    <td><span class="stars">★★★☆☆</span><div style="font-size:12px;color:var(--neutral-gray);margin-top:2px;font-weight:600;">48.3</div></td>
+                                    <td>—</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="drilldown">
+                        <div class="dd-tabs">
+                            <div class="dd-tab active">Race Analysis</div>
+                            <div class="dd-tab">Top Pick Breakdown</div>
+                        </div>
+                        <div class="dd-body">
+                            Coastal Storm exits a sharp bullet workout and gets a class drop with top connections. The outside draw should provide a clean trip. Midnight Ruler is the clear second choice with consistent figures but may be compromised by a wide trip from the two hole. Desert Mirage is a longshot worth including in verticals based on trainer stat at the meet.
+                        </div>
+                    </div>
+
+                    <div class="strategy">
+                        <div>
+                            <span class="strategy-label">Strategy</span>
+                            <div class="strategy-text">Key Coastal Storm on top. Exacta key 5 with 2,7. Trifecta box 5-2-7-1.</div>
+                        </div>
+                        <div class="strategy-actions">
+                            <button class="btn-primary" style="padding:8px 16px;font-size:13px;">Win</button>
+                            <button class="btn-ghost"><i class="fas fa-layer-group"></i> Exacta Key</button>
+                            <button class="btn-ghost"><i class="fas fa-cube"></i> Trifecta Box</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Race 2 -->
+                <div class="race-panel">
+                    <div class="rp-header">
+                        <div style="display:flex;align-items:center;gap:14px;">
+                            <span class="rp-title">ENTRIES & ODDS</span>
+                            <span class="rp-badge">RACE 2</span>
+                        </div>
+                        <i class="fa-solid fa-horse" style="font-size:1.3rem;color:var(--neutral-gray);opacity:.6;"></i>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Post · Horse</th>
+                                    <th>Jockey / Trainer</th>
+                                    <th style="text-align:center">ML Odds</th>
+                                    <th style="text-align:center">Win Prob</th>
+                                    <th>Rating</th>
+                                    <th>Role</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="top">
+                                    <td><div class="horse-name"><span class="post">4</span> Thunder Ridge</div></td>
+                                    <td><div class="secondary">F. Prat<br>B. Baffert</div></td>
+                                    <td style="text-align:center"><span class="ml-chip">5-2</span></td>
+                                    <td>
+                                        <div class="prob-ring">
+                                            <svg viewBox="0 0 40 40"><circle class="bg" cx="20" cy="20" r="18"/><circle class="fg" cx="20" cy="20" r="18" style="stroke-dasharray:32 113"/></svg>
+                                            <span>28</span>
+                                        </div>
+                                    </td>
+                                    <td><span class="stars">★★★★☆</span><div style="font-size:12px;color:var(--neutral-gray);margin-top:2px;font-weight:600;">76.8</div></td>
+                                    <td><span class="role-pill role-top">Top Pick</span></td>
+                                </tr>
+                                <tr>
+                                    <td><div class="horse-name"><span class="post">6</span> Blue Horizon</div></td>
+                                    <td><div class="secondary">J. Ortiz<br>S. Asmussen</div></td>
+                                    <td style="text-align:center"><span class="ml-chip">3-1</span></td>
+                                    <td>
+                                        <div class="prob-ring">
+                                            <svg viewBox="0 0 40 40"><circle class="bg" cx="20" cy="20" r="18"/><circle class="fg" cx="20" cy="20" r="18" style="stroke-dasharray:34 113"/></svg>
+                                            <span>30</span>
+                                        </div>
+                                    </td>
+                                    <td><span class="stars">★★★★☆</span><div style="font-size:12px;color:var(--neutral-gray);margin-top:2px;font-weight:600;">73.5</div></td>
+                                    <td><span class="role-pill role-value">Value Play</span></td>
+                                </tr>
+                                <tr>
+                                    <td><div class="horse-name"><span class="post">8</span> Hidden Gem</div></td>
+                                    <td><div class="secondary">A. Quinonez<br>D. O'Neill</div></td>
+                                    <td style="text-align:center"><span class="ml-chip">15-1</span></td>
+                                    <td>
+                                        <div class="prob-ring">
+                                            <svg viewBox="0 0 40 40"><circle class="bg" cx="20" cy="20" r="18"/><circle class="fg" cx="20" cy="20" r="18" style="stroke-dasharray:8 113;stroke:#b91c1c;"/></svg>
+                                            <span>7</span>
+                                        </div>
+                                    </td>
+                                    <td><span class="stars">★★☆☆☆</span><div style="font-size:12px;color:var(--neutral-gray);margin-top:2px;font-weight:600;">32.1</div></td>
+                                    <td><span class="role-pill role-long">Longshot</span></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="strategy">
+                        <div>
+                            <span class="strategy-label">Strategy</span>
+                            <div class="strategy-text">Two-horse race. Key Thunder Ridge over Blue Horizon in exacta. Consider doubling into Race 1 all-vertical.</div>
+                        </div>
+                        <div class="strategy-actions">
+                            <button class="btn-primary" style="padding:8px 16px;font-size:13px;">Win</button>
+                            <button class="btn-ghost"><i class="fas fa-layer-group"></i> Exacta Key</button>
+                            <button class="btn-ghost"><i class="fas fa-cube"></i> Trifecta Box</button>
+                        </div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <footer>
+        <p>Built by <a href="#">RaceTrackStar</a> — professional race-card intelligence for disciplined horseplayers.</p>
+        <p style="margin-top:6px;font-size:12px;">For research and entertainment purposes. Always wager responsibly.</p>
+    </footer>
+</body>
+</html>

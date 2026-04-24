@@ -18,53 +18,40 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
-<link href="/static/css/style.css?v=7.1.0" rel="stylesheet">
+<link href="/static/css/stripe-style.css?v=1.0.0" rel="stylesheet">
 {% if structured_data_json %}
 <script type="application/ld+json">{{ structured_data_json|safe }}</script>
 {% endif %}
-<style>
-:root{--bg:var(--color-bg-primary);--bg2:var(--color-bg-surface);--bg3:var(--color-bg-elevated);--gold:var(--color-accent-gold);--emerald:var(--color-accent-turf);--sky:var(--color-accent-blue);--text:var(--color-text-primary);--muted:var(--color-text-secondary);--subtle:#d6e3db;--border:var(--color-turf-border);--r:18px;--r-lg:26px}
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}html{background:var(--bg)}body{font-family:'Inter',system-ui,sans-serif;color:var(--text);line-height:1.5;min-height:100vh;display:flex;flex-direction:column;background:var(--bg)}a{text-decoration:none;color:inherit}
-.cc-nav{display:flex;align-items:center;justify-content:space-between;padding:1rem clamp(1rem,5vw,3rem);border-bottom:1px solid var(--border);background:var(--color-bg-glass);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);position:sticky;top:0;z-index:50;margin-inline:calc(var(--page-gutter) * -1)}
-.cc-brand{display:flex;align-items:center;gap:.7rem;color:var(--text);text-decoration:none}.cc-nav-back{font-size:.82rem;color:var(--muted);display:flex;align-items:center;gap:.35rem;transition:color .2s}.cc-nav-back:hover{color:var(--sky)}
-.cc-hero{position:relative;z-index:1;text-align:center;padding:clamp(4rem,11vw,6rem) clamp(1rem,4vw,2rem) clamp(2rem,5vw,3rem);margin-top:1rem;background:url('/static/img/asset3.jpg') center/cover no-repeat;border-radius:var(--r-lg);overflow:hidden}.cc-hero::before{content:"";position:absolute;inset:0;z-index:-1;background:rgba(5,12,9,.62)}
-.cc-eyebrow{display:inline-block;font-size:.7rem;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:var(--gold);margin-bottom:1rem;padding:.35rem 1rem;border-radius:999px;border:1px solid rgba(201,168,76,.3);background:rgba(201,168,76,.08)}
-.cc-hero-title{font-family:'Playfair Display',Georgia,serif;font-size:clamp(2rem,6vw,3.5rem);font-weight:900;line-height:1.1;margin-bottom:.75rem;background:linear-gradient(135deg,#f8fafc 30%,var(--gold) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.cc-hero-sub{font-size:clamp(.9rem,2vw,1.1rem);color:var(--subtle);margin:0 auto 1.25rem;max-width:620px}.cc-meta-chips{display:flex;justify-content:center;flex-wrap:wrap;gap:.6rem}.cc-chip{display:inline-flex;align-items:center;gap:.45rem;padding:.42rem .8rem;border-radius:999px;border:1px solid var(--border);background:rgba(255,255,255,.03);font-size:.78rem;color:var(--subtle)}.cc-view-chip{background:rgba(201,168,76,.08);color:var(--gold);border-color:rgba(201,168,76,.25)}
-.stats-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.85rem;max-width:1200px;margin:2rem auto 3rem;padding:0 clamp(1rem,4vw,2rem)}.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:1.5rem;text-align:center}.stat-val{font-size:2rem;font-weight:800;color:var(--gold);line-height:1.1;margin-bottom:.25rem}.stat-val.em{color:var(--emerald)}.stat-val.sky{color:var(--sky)}.stat-val.tpi-cold{color:var(--sky)}.stat-val.tpi-sharp{color:var(--emerald)}.stat-val.tpi-elite{color:var(--gold)}.stat-lbl{font-size:.95rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;color:var(--muted)}
-.record-container{max-width:1200px;margin:0 auto 4rem;padding:0 clamp(1rem,4vw,2rem)}.rec-table-wrap,.recap-panel-shell{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}.recap-panel-shell{margin-top:1.25rem;padding:1.25rem}.rec-table{width:100%;border-collapse:collapse;text-align:left;min-width:900px}.rec-table th{padding:1rem 1.5rem;font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);background:rgba(255,255,255,.02)}.rec-table td{padding:1rem 1.5rem;border-bottom:1px solid var(--border);vertical-align:middle;color:var(--subtle);font-size:.9rem}.rec-table tbody tr:last-child td{border-bottom:none}.rec-summary-row{cursor:pointer;transition:background .2s,border-color .2s}.rec-summary-row:hover{background:rgba(255,255,255,.02)}.rec-summary-row.is-active{background:rgba(201,168,76,.08)}.rec-summary-row:focus-visible{outline:2px solid var(--sky);outline-offset:-2px}.rec-row-link{display:inline-flex;align-items:center;gap:.45rem;color:var(--text);font-weight:700}.rec-row-link:hover{color:var(--gold)}.rec-track-cell{font-weight:600;color:var(--text)}.rec-score{font-weight:800;font-size:1.1rem}.score-high{color:var(--emerald)}.score-mid{color:var(--gold)}.score-low{color:var(--muted)}
-.mobile-cards{display:none;padding:1rem;gap:1rem}.mobile-record-link{display:block;background:var(--bg3);border:1px solid var(--border);border-radius:16px;padding:1rem;transition:border-color .2s,transform .2s}.mobile-record-link:hover{transform:translateY(-1px)}.mobile-record-link.is-active{border-color:var(--gold);background:rgba(201,168,76,.08)}.rec-mobile-head{display:flex;align-items:flex-start;justify-content:space-between;gap:1rem}.rec-mobile-track{color:var(--subtle);font-size:.92rem;margin-top:.25rem}.rec-mobile-score{font-size:1.45rem;font-weight:800;line-height:1;white-space:nowrap}.mobile-card-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.85rem;margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border)}.mobile-card-label{display:block;font-size:.74rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:.28rem}.mobile-card-value{font-weight:700;color:var(--text)}.rec-mobile-hint{display:block;margin-top:.85rem;color:var(--muted);font-size:.82rem}
-.recap-empty-state,.recap-panel{display:none}.recap-empty-state.is-active,.recap-panel.is-active{display:block}.recap-empty-state{padding:2rem;border:1px dashed var(--border);border-radius:18px;text-align:center;color:var(--muted)}.recap-panel-head{display:flex;justify-content:space-between;gap:1rem;align-items:flex-start;padding-bottom:1rem;border-bottom:1px solid var(--border)}.recap-panel-kicker{font-size:.74rem;letter-spacing:.12em;text-transform:uppercase;color:var(--gold);margin-bottom:.45rem}.recap-panel-title{font-family:'Playfair Display',serif;font-size:clamp(1.6rem,4vw,2.4rem);line-height:1.1}.recap-panel-sub{color:var(--subtle);margin-top:.45rem;max-width:720px}.recap-panel-actions{display:flex;flex-wrap:wrap;gap:.65rem}.recap-panel-action{display:inline-flex;align-items:center;gap:.4rem;padding:.55rem .9rem;border-radius:999px;border:1px solid var(--border);background:rgba(255,255,255,.03);font-size:.82rem;color:var(--subtle)}.recap-panel-action:hover{color:var(--gold);border-color:rgba(201,168,76,.35)}
-.recap-stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.85rem;margin:1.25rem 0}.recap-stat-card{background:var(--bg3);border:1px solid var(--border);border-radius:16px;padding:1rem}.recap-stat-value{font-size:1.4rem;font-weight:800;color:var(--text)}.recap-stat-label{margin-top:.3rem;font-size:.76rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
-.recap-races{display:flex;flex-direction:column;gap:1rem}.detail-race{padding:1rem 1.1rem;background:var(--bg3);border:1px solid var(--border);border-radius:16px}.dr-head{font-weight:700;color:var(--text);margin-bottom:.25rem;font-size:.95rem}.dr-note{color:var(--subtle);font-size:.88rem}.dr-hits{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:.75rem}.hit-badge{font-size:.65rem;font-weight:700;padding:.2rem .55rem;border-radius:999px;background:var(--color-turf-success-bg);color:var(--emerald);border:1px solid var(--border)}.dr-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.85rem;margin-top:.9rem}.dr-stat{font-size:.84rem;color:var(--subtle)}.dr-stat strong{display:block;color:var(--muted);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;margin-bottom:.18rem}
-@media (min-width:641px){.stats-grid{grid-template-columns:repeat(auto-fit,minmax(148px,1fr));}}
-@media (max-width:860px){.recap-panel-head{flex-direction:column}.table-desktop{display:none}.mobile-cards{display:grid}.rec-table{min-width:0}}
-@media (max-width:640px){.record-container{padding:0 0 .5rem}.recap-panel-shell{margin-inline:1rem}.stats-grid{padding:0 1rem}}
-@media (max-width:420px){.stats-grid{grid-template-columns:1fr}.mobile-card-grid{grid-template-columns:1fr}}
-</style>
 </head>
-<body class="theme-dark standalone-page record-page" data-view-mode="{{ view_mode }}" data-selected-key="{% if selected_record %}{{ selected_record.track_id }}::{{ selected_record.race_date }}{% endif %}">
-<nav class="cc-nav">
-  <a href="/" class="cc-brand">
-    <img src="/static/img/asset1.jpg" alt="RaceTrackStar" class="brand-logo">
-    <span class="brand-wordmark">
-      <span>RaceTrackStar</span>
-      <span class="brand-submark">Fast, data-driven racing intelligence</span>
-    </span>
-  </a>
-  <a class="cc-nav-back" href="/">← Home</a>
+<body data-view-mode="{{ view_mode }}" data-selected-key="{% if selected_record %}{{ selected_record.track_id }}::{{ selected_record.race_date }}{% endif %}">
+<nav class="navbar">
+    <a class="navbar-brand" href="/">
+        <img src="/static/img/asset1.jpg" alt="RaceTrackStar">
+        <div>
+            <div>RaceTrackStar</div>
+            <div class="brand-submark">Fast, data-driven racing intelligence</div>
+        </div>
+    </a>
+    <div class="nav-links">
+        <a class="nav-btn" href="/">← Home</a>
+    </div>
 </nav>
 
-<section class="cc-hero">
-  <div class="cc-eyebrow">🏇 Verified Performance</div>
-  <h1 class="cc-hero-title">30-Day Track Record</h1>
-  <p class="cc-hero-sub" id="record-hero-subtitle">{% if selected_record %}Focused recap review for {{ selected_record.track_name }} on {{ selected_record.race_date }}.{% else %}Verified outcomes, disciplined review, and transparent public performance tracking across official Equibase results.{% endif %}</p>
-  <div class="cc-meta-chips">
-    <span class="cc-chip">📆 {{ summary.total_days_recapped or 0 }} Days Recapped</span>
-    <span class="cc-chip">🎯 {{ summary.top_pick_win_rate_pct or 0 }}% Top Pick Win Rate</span>
-    <span class="cc-chip cc-view-chip" id="record-view-chip">{% if selected_record %}🧾 {{ selected_record.track_name }} Recap{% else %}📊 30-Day Summary{% endif %}</span>
-  </div>
+<section class="hero" style="padding:56px 32px 80px;background:var(--neutral-dark);">
+    <div class="hero-overlay" style="background:rgba(10,37,64,0.55);"></div>
+    <div class="hero-inner" style="text-align:center;position:relative;z-index:2;">
+        <div class="hero-eyebrow"><i class="fas fa-flag-checkered"></i> Verified Performance</div>
+        <h1>30-Day Track Record</h1>
+        <p class="hero-sub" id="record-hero-subtitle">{% if selected_record %}Focused recap review for {{ selected_record.track_name }} on {{ selected_record.race_date }}.{% else %}Verified outcomes, disciplined review, and transparent public performance tracking across official Equibase results.{% endif %}</p>
+        <div class="hero-chips">
+            <span class="chip">📆 {{ summary.total_days_recapped or 0 }} Days Recapped</span>
+            <span class="chip">🎯 {{ summary.top_pick_win_rate_pct or 0 }}% Top Pick Win Rate</span>
+            <span class="chip" id="record-view-chip">{% if selected_record %}🧾 {{ selected_record.track_name }} Recap{% else %}📊 30-Day Summary{% endif %}</span>
+        </div>
+    </div>
 </section>
+
+<div class="skew-divider"></div>
 
 <div class="stats-grid">
   <div class="stat-card"><div class="stat-val">{{ summary.top_pick_win_rate_pct or 0 }}%</div><div class="stat-lbl">Top Pick Win Rate</div></div>

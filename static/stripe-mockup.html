@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RaceTrackStar — Stripe Design Mockup</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --brand-primary: #635BFF;
+            --brand-accent: #00D4FF;
+            --neutral-dark: #0A2540;
+            --neutral-gray: #425466;
+            --bg-light: #F6F9FC;
+            --canvas-white: #FFFFFF;
+            --border-subtle: #E6EBF1;
+            --shadow-low: 0 4px 6px rgba(50,50,93,0.11), 0 1px 3px rgba(0,0,0,0.08);
+            --shadow-high: 0 15px 35px rgba(50,50,93,0.10), 0 5px 15px rgba(0,0,0,0.07);
+            --radius-btn: 8px;
+            --radius-card: 16px;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html { font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-light); color: var(--neutral-dark); }
+        body { line-height: 1.6; min-height: 100vh; }
+        a { color: inherit; text-decoration: none; }
+
+        /* Nav */
+        .navbar {
+            background: var(--canvas-white);
+            border-bottom: 1px solid var(--border-subtle);
+            padding: 0 32px;
+            height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+        .navbar-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; color: var(--neutral-dark); }
+        .brand-sub { font-size: 11px; font-weight: 600; color: var(--neutral-gray); letter-spacing: 0.05em; text-transform: uppercase; }
+        .nav-links { display: flex; gap: 28px; align-items: center; font-size: 14px; font-weight: 500; color: var(--neutral-gray); }
+        .nav-links a:hover { color: var(--brand-primary); }
+
+        /* Photo Slideshow Hero */
+        .hero {
+            position: relative;
+            overflow: hidden;
+            padding: 80px 32px 120px;
+            background: var(--neutral-dark);
+        }
+        .hero-slideshow {
+            position: absolute;
+            inset: 0;
+            z-index: 0;
+        }
+        .hero-slide {
+            position: absolute;
+            inset: 0;
+            background-size: cover;
+            background-position: center;
+            opacity: 0;
+            animation: heroFade 24s infinite;
+        }
+        .hero-slide:nth-child(1) { animation-delay: 0s; background-image: url('img/DMTC-Aerial.jpeg'); }
+        .hero-slide:nth-child(2) { animation-delay: 6s; background-image: url('img/DMTC-FinishLine.jpg'); }
+        .hero-slide:nth-child(3) { animation-delay: 12s; background-image: url('img/DMTC-Jockeys.jpg'); }
+        .hero-slide:nth-child(4) { animation-delay: 18s; background-image: url('img/DMTC-Paddock.jpg'); }
+
+        @keyframes heroFade {
+            0%   { opacity: 0; }
+            4%   { opacity: 1; }
+            25%  { opacity: 1; }
+            29%  { opacity: 0; }
+            100% { opacity: 0; }
+        }
+
+        .hero-overlay {
+            position: absolute;
+            inset: 0;
+            z-index: 1;
+            background: rgba(10, 37, 64, 0.62);
+        }
+        .hero-inner { position: relative; z-index: 2; max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1.2fr 1fr; gap: 48px; align-items: center; }
+        .hero h1 { font-size: 48px; line-height: 1.1; font-weight: 600; color: var(--canvas-white); margin-bottom: 20px; text-shadow: 0 2px 8px rgba(0,0,0,0.25); }
+        .hero p { font-size: 18px; line-height: 1.6; color: rgba(255,255,255,0.9); margin-bottom: 28px; max-width: 520px; text-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+        .btn-primary {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: var(--canvas-white); color: var(--brand-primary);
+            padding: 12px 24px; border-radius: var(--radius-btn); font-size: 15px; font-weight: 600;
+            box-shadow: var(--shadow-low); border: none; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: var(--shadow-high); }
+        .btn-outline {
+            display: inline-flex; align-items: center; gap: 8px;
+            background: rgba(255,255,255,0.12); color: var(--canvas-white);
+            padding: 12px 24px; border-radius: var(--radius-btn); font-size: 15px; font-weight: 600;
+            border: 1px solid rgba(255,255,255,0.25); cursor: pointer; transition: background 0.2s;
+        }
+        .btn-outline:hover { background: rgba(255,255,255,0.22); }
+
+        /* Glass Metric Strip */
+        .metric-strip {
+            display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;
+        }
+        .metric-card {
+            background: rgba(255,255,255,0.15);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.25);
+            border-radius: var(--radius-card);
+            padding: 20px;
+            color: var(--canvas-white);
+        }
+        .metric-card .label { font-size: 12px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; opacity: 0.8; margin-bottom: 6px; }
+        .metric-card .value { font-size: 28px; font-weight: 700; }
+
+        /* Skewed section divider */
+        .skew-divider { height: 80px; background: var(--bg-light); transform: skewY(-3deg); margin-top: -40px; position: relative; z-index: 2; }
+
+        /* Dashboard Grid */
+        .dashboard { max-width: 1200px; margin: -20px auto 0; padding: 0 32px 60px; display: grid; grid-template-columns: 240px 1fr 280px; gap: 32px; position: relative; z-index: 3; }
+        .panel {
+            background: var(--canvas-white);
+            border-radius: var(--radius-card);
+            box-shadow: var(--shadow-high);
+            border: 1px solid var(--border-subtle);
+            overflow: hidden;
+        }
+        .panel-nav a {
+            display: block; padding: 14px 20px; font-size: 14px; font-weight: 500; color: var(--neutral-gray);
+            border-left: 3px solid transparent; transition: all 0.15s;
+        }
+        .panel-nav a:hover, .panel-nav a.active { background: var(--bg-light); color: var(--brand-primary); border-left-color: var(--brand-primary); }
+        .panel-header { padding: 20px 24px; border-bottom: 1px solid var(--border-subtle); }
+        .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--brand-primary); margin-bottom: 6px; }
+        .panel-title { font-size: 18px; font-weight: 600; color: var(--neutral-dark); }
+        .panel-body { padding: 20px 24px; }
+        .market-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 16px 24px; border-bottom: 1px solid var(--border-subtle);
+            transition: background 0.15s;
+        }
+        .market-row:hover { background: var(--bg-light); }
+        .market-row:last-child { border-bottom: none; }
+        .market-cell strong { display: block; font-size: 15px; font-weight: 600; color: var(--neutral-dark); }
+        .market-cell span { font-size: 13px; color: var(--neutral-gray); }
+        .market-action { font-size: 13px; font-weight: 600; color: var(--brand-primary); }
+
+        /* Rail stats */
+        .rail-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .rail-metric { text-align: center; }
+        .rail-metric span { display: block; font-size: 12px; color: var(--neutral-gray); margin-bottom: 4px; }
+        .rail-metric strong { font-size: 22px; font-weight: 700; color: var(--neutral-dark); }
+        .rail-btn {
+            display: block; width: 100%; margin-top: 20px; text-align: center;
+            padding: 10px; border-radius: var(--radius-btn); border: 1px solid var(--brand-primary);
+            color: var(--brand-primary); font-size: 13px; font-weight: 600; transition: all 0.15s;
+        }
+        .rail-btn:hover { background: var(--brand-primary); color: var(--canvas-white); }
+
+        @media (max-width: 1024px) {
+            .dashboard { grid-template-columns: 1fr; }
+            .hero-inner { grid-template-columns: 1fr; }
+            .metric-strip { grid-template-columns: repeat(4, 1fr); }
+        }
+        @media (max-width: 640px) {
+            .hero h1 { font-size: 32px; }
+            .metric-strip { grid-template-columns: repeat(2, 1fr); }
+            .dashboard { padding: 0 16px 40px; }
+            .navbar { padding: 0 16px; }
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="#635BFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <div>
+                <div>RaceTrackStar</div>
+                <div class="brand-sub">Fast, data-driven racing intelligence</div>
+            </div>
+        </div>
+        <div class="nav-links">
+            <a href="#">Dashboard</a>
+            <a href="#">Track Record</a>
+            <a href="#">About</a>
+            <a href="#">Admin</a>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="hero-slideshow">
+            <div class="hero-slide"></div>
+            <div class="hero-slide"></div>
+            <div class="hero-slide"></div>
+            <div class="hero-slide"></div>
+        </div>
+        <div class="hero-overlay"></div>
+        <div class="hero-inner">
+            <div>
+                <h1>Professional race-card intelligence built for fast decision-making.</h1>
+                <p>RaceTrackStar surfaces live and upcoming cards, ranked contenders, strategy notes, and verified historical performance in a dense interface that keeps the most actionable information above the fold.</p>
+                <div style="display:flex;gap:12px;">
+                    <a class="btn-primary">View active cards</a>
+                    <a class="btn-outline">Open track record</a>
+                </div>
+            </div>
+            <div class="metric-strip">
+                <div class="metric-card"><div class="label">Live cards</div><div class="value">3</div></div>
+                <div class="metric-card"><div class="label">Upcoming</div><div class="value">2</div></div>
+                <div class="metric-card"><div class="label">30-day win rate</div><div class="value">27.7%</div></div>
+                <div class="metric-card"><div class="label">Avg score</div><div class="value">51.6</div></div>
+            </div>
+        </div>
+    </section>
+
+    <div class="skew-divider"></div>
+
+    <div class="dashboard">
+        <aside>
+            <div class="panel">
+                <div class="panel-nav">
+                    <a href="#" class="active">Active cards</a>
+                    <a href="#">Upcoming cards</a>
+                    <a href="#">Recent cards</a>
+                    <a href="#">Track record</a>
+                    <a href="#">About</a>
+                </div>
+            </div>
+            <div class="panel" style="margin-top:24px;">
+                <div class="panel-header">
+                    <div class="eyebrow">Quick access</div>
+                    <div class="panel-title" style="font-size:14px;font-weight:500;color:var(--neutral-gray);">Fresh cards will appear here as soon as the next cycle is published.</div>
+                </div>
+            </div>
+        </aside>
+
+        <main>
+            <div class="panel" style="margin-bottom:24px;">
+                <div class="panel-header">
+                    <div class="eyebrow">Live cards</div>
+                    <div class="panel-title">Cards currently in play</div>
+                </div>
+                <div class="market-row">
+                    <div class="market-cell"><strong>Santa Anita</strong><span>2025-04-24</span></div>
+                    <div class="market-action">Open Card →</div>
+                </div>
+                <div class="market-row">
+                    <div class="market-cell"><strong>Churchill Downs</strong><span>2025-04-24</span></div>
+                    <div class="market-action">Open Card →</div>
+                </div>
+            </div>
+
+            <div class="panel" style="margin-bottom:24px;">
+                <div class="panel-header">
+                    <div class="eyebrow">Upcoming cards</div>
+                    <div class="panel-title">Published boards scheduled ahead</div>
+                </div>
+                <div class="market-row">
+                    <div class="market-cell"><strong>Del Mar</strong><span>2025-04-25</span></div>
+                    <div class="market-action">Open Card →</div>
+                </div>
+            </div>
+
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="eyebrow">Recent cards</div>
+                    <div class="panel-title">Recent completed cards</div>
+                </div>
+                <div class="market-row">
+                    <div class="market-cell"><strong>Keeneland</strong><span>2025-04-22</span></div>
+                    <div class="market-action">Open Card →</div>
+                </div>
+                <div class="market-row">
+                    <div class="market-cell"><strong>Belmont Park</strong><span>2025-04-21</span></div>
+                    <div class="market-action">Open Card →</div>
+                </div>
+            </div>
+        </main>
+
+        <aside>
+            <div class="panel" style="margin-bottom:24px;">
+                <div class="panel-header">
+                    <div class="eyebrow">Verified results</div>
+                </div>
+                <div class="panel-body">
+                    <div class="rail-metrics">
+                        <div class="rail-metric"><span>Top-pick win</span><strong>27.7%</strong></div>
+                        <div class="rail-metric"><span>Exacta hit</span><strong>14.8%</strong></div>
+                        <div class="rail-metric"><span>Trifecta hit</span><strong>3.8%</strong></div>
+                        <div class="rail-metric"><span>Days recapped</span><strong>14</strong></div>
+                    </div>
+                    <a class="rail-btn">Review full track record</a>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <div class="eyebrow">Recent recaps</div>
+                </div>
+                <div class="panel-body">
+                    <div class="market-row" style="padding:12px 0;">
+                        <div class="market-cell"><strong>Keeneland</strong><span>2025-04-22 · Score 64</span></div>
+                    </div>
+                    <div class="market-row" style="padding:12px 0;">
+                        <div class="market-cell"><strong>Belmont Park</strong><span>2025-04-21 · Score 58</span></div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </div>
+</body>
+</html>
