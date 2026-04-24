@@ -31,7 +31,7 @@
                 <div class="sidebar-nav-links">
                     <a href="#live-cards">Active cards</a>
                     <a href="#upcoming-cards">Upcoming cards</a>
-                    <a href="#historical-data">Historical data</a>
+                    <a href="#historical-data">Recent cards</a>
                     <a href="/record">Track record</a>
                     <a href="/about">About</a>
                 </div>
@@ -68,7 +68,7 @@
         <div class="dashboard-main">
             <section class="dashboard-panel dashboard-hero-panel">
                 <div class="dashboard-hero-copy">
-                    <span class="badge-pill-glow mb-3"><i class="fas fa-chart-line"></i> Live analysis, verified review, rapid routing</span>
+
                     <h1 class="dashboard-hero-title">Professional race-card intelligence built for fast decision-making.</h1>
                     <p class="dashboard-hero-text">RaceTrackStar surfaces live and upcoming cards, ranked contenders, strategy notes, and verified historical performance in a dense interface that keeps the most actionable information above the fold.</p>
                     <div class="dashboard-hero-actions">
@@ -149,7 +149,7 @@
             <section class="dashboard-panel market-section" id="historical-data">
                 <div class="market-section-header">
                     <div>
-                        <div class="section-eyebrow">Historical data</div>
+                        <div class="section-eyebrow">Recent cards</div>
                         <h3>Recent completed cards</h3>
                     </div>
                     <span class="section-count section-count--completed">{{ past_cards|length }} archived</span>
@@ -166,7 +166,7 @@
         <aside class="dashboard-rail">
             <div class="dashboard-panel rail-panel">
                 <div class="section-eyebrow">Verified results</div>
-                <h3 class="rail-title">30-day performance snapshot</h3>
+
                 <div class="rail-metrics">
                     <div>
                         <span>Top-pick win rate</span>
@@ -186,15 +186,6 @@
                     </div>
                 </div>
                 <a href="/record" class="btn btn-outline-success w-100 mt-3">Review full track record</a>
-            </div>
-
-            <div class="dashboard-panel rail-panel">
-                <div class="section-eyebrow">Method</div>
-                <ul class="method-list mb-0">
-                    <li>Condensed full-card analysis designed for rapid scanning.</li>
-                    <li>Every public board keeps top pick, value, and longshot aligned in one row.</li>
-                    <li>Historical review stays accessible without disrupting live-card navigation.</li>
-                </ul>
             </div>
 
             {% if track_record_summary and track_record_summary.records %}
