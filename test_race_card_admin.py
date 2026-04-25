@@ -1,4 +1,6 @@
 import asyncio
+import json
+import os
 import sys
 import types
 import unittest
@@ -1442,6 +1444,50 @@ class OpenRouterClientDeepSeekTests(unittest.TestCase):
         self.assertIn("OpenRouter suggested retrying after 15 seconds", detail)
         self.assertIn("error body here", detail)
 
+    def test_rate_limit_failure_detail_with_provider_metadata(self):
+        detail = self.OpenRouterClient._rate_limit_failure_detail(
+            "deepseek/deepseek-v4-pro",
+            "some body",
+            retry_after=None,
+            provider_metadata={"provider_name": "Together", "is_byok": False},
+        )
+        self.assertIn("provider Together", detail)
+        self.assertIn("BYOK", detail)
+
+    def test_parse_provider_metadata_from_429_body(self):
+        body = json.dumps({
+            "error": {
+                "message": "Provider returned error",
+                "code": 429,
+                "metadata": {
+                    "raw": "deepseek/deepseek-v4-pro is temporarily rate-limited upstream.",
+                    "provider_name": "Together",
+                    "is_byok": False,
+                },
+            }
+        })
+        meta = self.OpenRouterClient._parse_provider_metadata_from_429_body(body)
+        self.assertEqual(meta["provider_name"], "Together")
+        self.assertEqual(meta["is_byok"], False)
+        self.assertEqual(meta["raw"], "deepseek/deepseek-v4-pro is temporarily rate-limited upstream.")
+
+    def test_parse_provider_metadata_from_429_body_invalid_json(self):
+        meta = self.OpenRouterClient._parse_provider_metadata_from_429_body("not json")
+        self.assertEqual(meta, {})
+
+    def test_get_provider_routing_for_model_non_deepseek(self):
+        self.assertIsNone(self.OpenRouterClient._get_provider_routing_for_model("x-ai/grok-4.20-beta"))
+
+    def test_get_provider_routing_for_model_deepseek_default(self):
+        # Default sort=throughput alone returns None (keeps payload lean)
+        self.assertIsNone(self.OpenRouterClient._get_provider_routing_for_model("deepseek/deepseek-v4-pro"))
+
+    @unittest.mock.patch.dict(os.environ, {"OPENROUTER_DEEPSEEK_PROVIDER_IGNORE": "together,fireworks"})
+    def test_get_provider_routing_for_model_deepseek_env_ignore(self):
+        provider = self.OpenRouterClient._get_provider_routing_for_model("deepseek/deepseek-v4-pro")
+        self.assertIsNotNone(provider)
+        self.assertEqual(provider.get("ignore"), ["together", "fireworks"])
+
     @unittest.mock.patch("services.openrouter_client.aiohttp.ClientSession")
     def test_deepseek_429_with_retry_after_retries_once_then_succeeds(self, mock_session_cls):
         """DeepSeek 429 with Retry-After=2 should wait 2s, retry, then succeed."""
@@ -1566,6 +1612,132 @@ class OpenRouterClientDeepSeekTests(unittest.TestCase):
         detail = result.get("failure_detail", "")
         self.assertIn("rate limited: quota exceeded", detail)
         self.assertIn("switch to Grok/GPT", detail)
+
+    @unittest.mock.patch("services.openrouter_client.aiohttp.ClientSession")
+    def test_deepseek_timeout_fails_fast_with_guidance(self, mock_session_cls):
+        """DeepSeek timeout should fail after deepseek_timeout_retries (0) without long retries."""
+        client = self._client()
+
+        class FakeResponse:
+            def __init__(self, status, body, headers=None):
+                self.status = status
+                self._body = body
+                self.headers = headers or {}
+
+            async def text(self):
+                return self._body
+
+            async def json(self):
+                import json as _json
+                return _json.loads(self._body)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        call_count = 0
+
+        def fake_post(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # Simulate a timeout by sleeping longer than the timeout_seconds
+            import asyncio
+            raise asyncio.TimeoutError()
+
+        mock_session = unittest.mock.MagicMock()
+        mock_session.post = fake_post
+        mock_session_cls.return_value = mock_session
+        client.session = mock_session
+
+        loop = asyncio.new_event_loop()
+        try:
+            result = loop.run_until_complete(
+                client.call_model(
+                    model="deepseek/deepseek-v4-pro",
+                    prompt="test",
+                    task_type="analysis",
+                    return_metadata=True,
+                    response_format={"type": "json_object"},
+                    max_tokens=8000,
+                    plugins=[{"id": "web"}],
+                )
+            )
+        finally:
+            loop.close()
+
+        # DeepSeek timeout retries = 0, so it fails immediately after first timeout
+        self.assertEqual(call_count, 1)
+        self.assertTrue(result.get("fallback"))
+        self.assertEqual(result.get("failure_reason"), "timeout")
+        detail = result.get("failure_detail", "")
+        self.assertIn("DeepSeek capped at", detail)
+        self.assertIn("Switch to Grok/GPT", detail)
+
+    @unittest.mock.patch("services.openrouter_client.aiohttp.ClientSession")
+    def test_grok_timeout_retries_normally(self, mock_session_cls):
+        """Non-DeepSeek timeout should retry up to max_retries."""
+        client = self._client()
+
+        call_count = 0
+
+        def fake_post(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            import asyncio
+            raise asyncio.TimeoutError()
+
+        mock_session = unittest.mock.MagicMock()
+        mock_session.post = fake_post
+        mock_session_cls.return_value = mock_session
+        client.session = mock_session
+
+        loop = asyncio.new_event_loop()
+        try:
+            result = loop.run_until_complete(
+                client.call_model(
+                    model="x-ai/grok-4.20-beta",
+                    prompt="test",
+                    task_type="analysis",
+                    return_metadata=True,
+                    response_format={"type": "json_object"},
+                    max_tokens=8000,
+                    plugins=[{"id": "web"}],
+                )
+            )
+        finally:
+            loop.close()
+
+        # Grok retries up to max_retries=3, so 4 total calls (initial + 3 retries)
+        self.assertEqual(call_count, 4)
+        self.assertTrue(result.get("fallback"))
+        self.assertEqual(result.get("failure_reason"), "timeout")
+        detail = result.get("failure_detail", "")
+        self.assertNotIn("DeepSeek capped at", detail)
+
+    def test_deepseek_timeout_caps_timeout_seconds(self):
+        client = self._client()
+        # DeepSeek timeout should be capped at 60s regardless of heavy payload
+        timeout = client._calculate_timeout_seconds(
+            model="deepseek/deepseek-v4-pro",
+            model_config=None,
+            max_tokens=16000,
+            plugins=[{"id": "web"}],
+            context_size_chars=10000,
+        )
+        self.assertLessEqual(timeout, client.deepseek_timeout_seconds)
+
+    def test_grok_timeout_not_capped_like_deepseek(self):
+        client = self._client()
+        timeout = client._calculate_timeout_seconds(
+            model="x-ai/grok-4.20-beta",
+            model_config=None,
+            max_tokens=16000,
+            plugins=[{"id": "web"}],
+            context_size_chars=10000,
+        )
+        self.assertGreater(timeout, client.deepseek_timeout_seconds)
 
 
 class AdminRaceCardRouteDeepSeekTests(unittest.TestCase):
@@ -1713,6 +1885,49 @@ class AdminRaceCardRouteDeepSeekTests(unittest.TestCase):
             call_kwargs["max_tokens"],
             app_module.ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS,
         )
+
+    def test_deepseek_preflight_passes_then_runs_card(self):
+        self.openrouter_client.deepseek_preflight_enabled = True
+        self.openrouter_client.preflight_check = AsyncMock(return_value={"ok": True})
+
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="deepseek/deepseek-v4-pro",
+            source_mode="web_search",
+        )
+
+        response = app_module.asyncio.run(
+            app_module.create_admin_race_card(request, self.admin_request)
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.openrouter_client.preflight_check.assert_awaited_once()
+
+    def test_deepseek_preflight_fails_returns_503(self):
+        self.openrouter_client.deepseek_preflight_enabled = True
+        self.openrouter_client.preflight_check = AsyncMock(return_value={
+            "ok": False,
+            "failure_detail": "OpenRouter rate limited deepseek/deepseek-v4-pro",
+        })
+
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="deepseek/deepseek-v4-pro",
+            source_mode="web_search",
+        )
+
+        response = app_module.asyncio.run(
+            app_module.create_admin_race_card(request, self.admin_request)
+        )
+
+        self.assertEqual(response.status_code, 503)
+        # JSONResponse body may not be accessible in the stub; verify via status only
+        # but log the detail if available for debugging.
+        detail = getattr(response, "detail", None)
+        if detail:
+            self.assertIn("DeepSeek route is unavailable", detail)
 
 
 if __name__ == "__main__":

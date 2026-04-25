@@ -1218,8 +1218,8 @@ DEFAULT_ADMIN_LLM_MODEL = "x-ai/grok-4.20-beta"
 CARD_RETENTION_DAYS = int(os.environ.get("CARD_RETENTION_DAYS", "28"))
 ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS = 16000
 ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS = 8000
-ADMIN_DEEPSEEK_WEB_SEARCH_INITIAL_MAX_TOKENS = 8000
-ADMIN_DEEPSEEK_WEB_SEARCH_RETRY_MAX_TOKENS = 6000
+ADMIN_DEEPSEEK_WEB_SEARCH_INITIAL_MAX_TOKENS = 6000
+ADMIN_DEEPSEEK_WEB_SEARCH_RETRY_MAX_TOKENS = 4000
 ADMIN_COMPACT_JSON_RETRY_MODEL_PREFIXES = ("minimax/", "deepseek/",)
 ADMIN_MANUAL_MAX_TOKENS = 2500
 ADMIN_DEEP_DIVE_MAX_TOKENS = 12000
@@ -1793,6 +1793,32 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
         # DeepSeek-specific shaping: lower max_tokens and compact prompts to
         # reduce routing / plugin overhead on OpenRouter.
         is_deepseek = _is_deepseek_model(request.llm_model)
+
+        # Optional preflight: probe DeepSeek routing health before burning
+        # a full race-card prompt on a blocked upstream provider.
+        if (
+            is_deepseek
+            and is_web_search_mode
+            and getattr(openrouter_client, "deepseek_preflight_enabled", False)
+        ):
+            preflight = await openrouter_client.preflight_check(request.llm_model)
+            if not preflight.get("ok"):
+                logger.error(
+                    "DeepSeek preflight failed for %s: %s",
+                    request.llm_model,
+                    preflight.get("failure_detail") or preflight.get("reason"),
+                )
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "detail": (
+                            f"DeepSeek route is unavailable via OpenRouter right now. "
+                            f"Preflight error: {preflight.get('failure_detail') or preflight.get('reason')}. "
+                            f"Switch to Grok/GPT or configure a BYOK provider key via OpenRouter Integrations."
+                        ),
+                    },
+                )
+
         initial_max_tokens = (
             ADMIN_DEEPSEEK_WEB_SEARCH_INITIAL_MAX_TOKENS
             if is_web_search_mode and is_deepseek

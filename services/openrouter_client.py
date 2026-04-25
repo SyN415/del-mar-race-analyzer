@@ -8,6 +8,7 @@ with improved error handling, model management, and API optimization
 import asyncio
 import json
 import logging
+import os
 import time
 from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass
@@ -97,6 +98,10 @@ class OpenRouterClient:
             "max_delay": 30.0,
             "backoff_factor": 2.0
         }
+        # DeepSeek-specific guardrails
+        self.deepseek_timeout_seconds = 60
+        self.deepseek_timeout_retries = 0
+        self.deepseek_preflight_enabled = os.getenv("OPENROUTER_DEEPSEEK_PREFLIGHT", "false").lower() in ("1", "true", "yes")
         self.allowed_models = self._resolve_allowed_models()
         self.default_model = self._resolve_default_model()
 
@@ -171,14 +176,26 @@ class OpenRouterClient:
         model: Optional[str],
         response_body: str,
         retry_after: Optional[float],
+        provider_metadata: Optional[Dict[str, Any]] = None,
     ) -> str:
         """Build a human-friendly failure_detail string for a 429 response."""
         parts: List[str] = []
+        provider_name = (provider_metadata or {}).get("provider_name")
+        is_byok = (provider_metadata or {}).get("is_byok")
+
         if cls._is_deepseek_model(model):
-            parts.append(
-                f"OpenRouter rate limited {model} for this request shape. "
-                "Try again later, reduce output size, or switch to Grok/GPT for this run."
-            )
+            if provider_name:
+                parts.append(
+                    f"OpenRouter rate limited {model} through provider {provider_name}. "
+                    "This route is using shared OpenRouter/provider capacity, not BYOK. "
+                    "Add your own provider key in OpenRouter Integrations if available for this model, "
+                    "choose another DeepSeek provider route, or switch to Grok/GPT for this run."
+                )
+            else:
+                parts.append(
+                    f"OpenRouter rate limited {model} for this request shape. "
+                    "Try again later, reduce output size, or switch to Grok/GPT for this run."
+                )
         else:
             parts.append("OpenRouter API rate limit was reached.")
 
@@ -197,6 +214,64 @@ class OpenRouterClient:
         response-healing for them to reduce routing overhead.
         """
         return not cls._is_deepseek_model(model)
+
+    @classmethod
+    def _get_provider_routing_for_model(cls, model: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Build optional OpenRouter provider-routing config for a model.
+
+        Supports env-driven overrides so operators can steer traffic away
+        from flaky upstream providers (e.g. Together for DeepSeek).
+        """
+        if not cls._is_deepseek_model(model):
+            return None
+
+        provider: Dict[str, Any] = {}
+        sort = os.getenv("OPENROUTER_DEEPSEEK_SORT", "throughput")
+        if sort:
+            provider["sort"] = sort
+
+        order_env = os.getenv("OPENROUTER_DEEPSEEK_PROVIDER_ORDER", "")
+        if order_env:
+            provider["order"] = [p.strip() for p in order_env.split(",") if p.strip()]
+
+        ignore_env = os.getenv("OPENROUTER_DEEPSEEK_PROVIDER_IGNORE", "")
+        if ignore_env:
+            provider["ignore"] = [p.strip() for p in ignore_env.split(",") if p.strip()]
+
+        allow_fallbacks = os.getenv("OPENROUTER_DEEPSEEK_ALLOW_FALLBACKS", "")
+        if allow_fallbacks:
+            provider["allow_fallbacks"] = allow_fallbacks.lower() in ("1", "true", "yes")
+
+        # If the operator has not configured anything beyond the default sort,
+        # return None so the payload stays lean and OpenRouter uses its own
+        # default routing.
+        if provider == {"sort": "throughput"}:
+            return None
+        return provider or None
+
+    @staticmethod
+    def _parse_provider_metadata_from_429_body(body_text: str) -> Dict[str, Any]:
+        """Try to extract provider_name / is_byok / raw from OpenRouter 429 JSON."""
+        try:
+            data = json.loads(body_text)
+        except json.JSONDecodeError:
+            return {}
+
+        metadata: Dict[str, Any] = {}
+        error = data.get("error") or {}
+        if isinstance(error, dict):
+            meta = error.get("metadata") or {}
+            if isinstance(meta, dict):
+                raw = meta.get("raw") or ""
+                if isinstance(raw, str):
+                    metadata["raw"] = raw
+                provider_name = meta.get("provider_name")
+                if isinstance(provider_name, str):
+                    metadata["provider_name"] = provider_name
+                is_byok = meta.get("is_byok")
+                if isinstance(is_byok, bool):
+                    metadata["is_byok"] = is_byok
+        return metadata
 
     def _get_ai_config(self):
         return getattr(self.config, 'ai', None)
@@ -222,7 +297,30 @@ class OpenRouterClient:
     def _is_model_allowed(self, model: Optional[str]) -> bool:
         base_model = (model or "").split(":", 1)[0]
         return any(base_model == allowed.split(":", 1)[0] for allowed in self.allowed_models)
-    
+
+    async def preflight_check(self, model: str) -> Dict[str, Any]:
+        """Send a tiny probe to verify a model route is reachable before a heavy call.
+
+        Returns {"ok": True} on success or {"ok": False, "reason": "..."}
+        with diagnostic metadata on failure.
+        """
+        try:
+            result = await self.call_model(
+                model=model,
+                prompt="Return a JSON object with one key: 'ok' = true.",
+                task_type="general",
+                max_tokens=50,
+                temperature=0.0,
+                plugins=None,
+                return_metadata=True,
+                response_format={"type": "json_object"},
+            )
+            if isinstance(result, dict) and result.get("fallback"):
+                return {"ok": False, **result}
+            return {"ok": True}
+        except Exception as exc:
+            return {"ok": False, "reason": f"preflight exception: {exc}"}
+
     async def __aenter__(self):
         """Async context manager entry"""
         self.session = aiohttp.ClientSession()
@@ -253,6 +351,7 @@ class OpenRouterClient:
     def _calculate_timeout_seconds(
         self,
         *,
+        model: Optional[str],
         model_config: Optional[ModelConfig],
         max_tokens: int,
         plugins: Optional[List[Dict[str, Any]]] = None,
@@ -272,14 +371,22 @@ class OpenRouterClient:
         if context_size_chars > 0:
             timeout_seconds += min(30, max(0, int(context_size_chars / 1500) * 5))
 
-        return min(180, max(45, timeout_seconds))
+        timeout_seconds = min(180, max(45, timeout_seconds))
+
+        # DeepSeek-specific: cap first-attempt timeout to avoid long hangs
+        # on upstream provider capacity issues.
+        if self._is_deepseek_model(model):
+            timeout_seconds = min(timeout_seconds, self.deepseek_timeout_seconds)
+
+        return timeout_seconds
 
     async def call_model(self, model: str = None, prompt: str = "", context: Dict = None,
                         max_tokens: int = None, temperature: float = 0.7,
                         task_type: str = "general", tier: ModelTier = None,
                         plugins: Optional[List[Dict[str, Any]]] = None,
                         return_metadata: bool = False,
-                        response_format: Optional[Dict[str, Any]] = None) -> Union[str, Dict[str, Any]]:
+                        response_format: Optional[Dict[str, Any]] = None,
+                        provider: Optional[Dict[str, Any]] = None) -> Union[str, Dict[str, Any]]:
         """
         Enhanced API call to OpenRouter model with intelligent model selection
 
@@ -294,6 +401,8 @@ class OpenRouterClient:
             plugins: Optional OpenRouter plugins, such as [{"id": "web"}]
             return_metadata: When True, return response content plus metadata
             response_format: Optional structured-output request payload for OpenRouter
+            provider: Optional OpenRouter provider routing config, such as
+                      {"sort": "throughput", "ignore": ["together"]}
 
         Returns:
             Model response text or response metadata
@@ -379,6 +488,11 @@ class OpenRouterClient:
                 if active_plugins:
                     payload["plugins"] = active_plugins
 
+                # Add provider routing if provided or configured for this model
+                active_provider = provider or self._get_provider_routing_for_model(model)
+                if active_provider:
+                    payload["provider"] = active_provider
+
                 # Add context if provided
                 if context_str:
                     payload["messages"][0]["content"] += f"\n\nContext data:\n{context_str}"
@@ -400,6 +514,7 @@ class OpenRouterClient:
                     self.session = aiohttp.ClientSession()
 
                 timeout_seconds = self._calculate_timeout_seconds(
+                    model=model,
                     model_config=model_config,
                     max_tokens=max_tokens,
                     plugins=active_plugins,
@@ -457,24 +572,27 @@ class OpenRouterClient:
                         body_text = await response.text()
                         retry_after_raw = response.headers.get("Retry-After")
                         retry_after = self._parse_retry_after(retry_after_raw)
+                        provider_meta = self._parse_provider_metadata_from_429_body(body_text)
 
                         logger.warning(
                             "OpenRouter 429 | model=%s | attempt=%d | "
                             "Retry-After=%s | max_tokens=%s | plugins=%s | "
-                            "response_format=%s | body_excerpt=%s",
+                            "response_format=%s | provider=%s | is_byok=%s | body_excerpt=%s",
                             model,
                             attempt + 1,
                             retry_after_raw,
                             max_tokens,
                             active_plugins,
                             active_response_format,
+                            provider_meta.get("provider_name"),
+                            provider_meta.get("is_byok"),
                             self._truncate_error_body(body_text, limit=300),
                         )
 
                         # Decide whether to fail fast without further retries.
                         if self._should_fail_fast_rate_limit(model, body_text, retry_after, attempt):
                             failure_detail = self._rate_limit_failure_detail(
-                                model, body_text, retry_after
+                                model, body_text, retry_after, provider_meta
                             )
                             self.usage_tracker.record_request(0, 0, response_time, False)
                             return self._build_fallback_result(
@@ -488,6 +606,7 @@ class OpenRouterClient:
                                 failure_detail=failure_detail,
                                 attempts=attempt + 1,
                                 status_code=response.status,
+                                provider_metadata=provider_meta,
                             )
 
                         # Determine effective retry budget.
@@ -522,7 +641,7 @@ class OpenRouterClient:
                             continue
 
                         failure_detail = self._rate_limit_failure_detail(
-                            model, body_text, retry_after
+                            model, body_text, retry_after, provider_meta
                         )
                         self.usage_tracker.record_request(0, 0, response_time, False)
                         return self._build_fallback_result(
@@ -536,6 +655,7 @@ class OpenRouterClient:
                             failure_detail=failure_detail,
                             attempts=attempt + 1,
                             status_code=response.status,
+                            provider_metadata=provider_meta,
                         )
 
                     else:
@@ -579,11 +699,24 @@ class OpenRouterClient:
 
             except asyncio.TimeoutError:
                 logger.error(f"OpenRouter API timeout on attempt {attempt + 1}")
-                if attempt < self.retry_config["max_retries"]:
+                is_ds = self._is_deepseek_model(model)
+                max_timeout_attempts = (
+                    self.deepseek_timeout_retries
+                    if is_ds
+                    else self.retry_config["max_retries"]
+                )
+                if attempt < max_timeout_attempts:
                     delay = self.retry_config["base_delay"] * (self.retry_config["backoff_factor"] ** attempt)
                     await asyncio.sleep(delay)
                     continue
                 self.usage_tracker.record_request(0, 0, 0, False)
+                detail = "OpenRouter API request timed out"
+                if is_ds:
+                    detail += (
+                        f". DeepSeek capped at {self.deepseek_timeout_seconds}s per attempt with "
+                        f"{self.deepseek_timeout_retries} timeout retries. "
+                        "Switch to Grok/GPT or configure a BYOK provider key via OpenRouter Integrations."
+                    )
                 return self._build_fallback_result(
                     prompt,
                     context,
@@ -592,7 +725,7 @@ class OpenRouterClient:
                     tier,
                     return_metadata,
                     failure_reason="timeout",
-                    failure_detail="OpenRouter API request timed out",
+                    failure_detail=detail,
                     attempts=attempt + 1,
                 )
 
@@ -702,6 +835,7 @@ class OpenRouterClient:
         failure_detail: Optional[str] = None,
         attempts: Optional[int] = None,
         status_code: Optional[int] = None,
+        provider_metadata: Optional[Dict[str, Any]] = None,
     ) -> Union[str, Dict[str, Any]]:
         fallback_response = self._generate_fallback_response(prompt, context, task_type)
         if not return_metadata:
@@ -719,6 +853,7 @@ class OpenRouterClient:
             "failure_detail": failure_detail,
             "attempts": attempts,
             "status_code": status_code,
+            **(provider_metadata or {}),
         }
 
     def _parse_chat_completion_response(self, result: Dict[str, Any], requested_model: str) -> Dict[str, Any]:
