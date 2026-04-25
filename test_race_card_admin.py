@@ -621,10 +621,6 @@ class AdminRaceCardRouteTests(unittest.TestCase):
     def setUp(self):
         self.original_session_manager = app_module.app_state.session_manager
         self.original_openrouter_client = app_module.app_state.openrouter_client
-        self.original_fetch_equibase_all_data = app_module.fetch_equibase_all_data
-        self.original_fetch_expected_horses_by_race = app_module.fetch_equibase_expected_horses_by_race
-        self.original_fetch_expected_race_numbers = app_module.fetch_equibase_expected_race_numbers
-        self.original_fetch_equibase_all_data_async = app_module.fetch_equibase_all_data_async
         self.original_admin_password = app_module.app_state.config.web.admin_password
         self.original_auth_secret = app_module.app_state.config.web.auth_secret
         self.original_cached_auth_secret = app_module._AUTH_SECRET
@@ -652,45 +648,13 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         self.admin_request = types.SimpleNamespace(
             cookies={app_module.AUTH_COOKIE_NAME: app_module._sign_value("admin")}
         )
-        app_module.fetch_equibase_all_data = lambda track_id, race_date, country="USA": (
-            app_module.fetch_equibase_expected_horses_by_race(track_id, race_date, country=country),
-            {},
-        )
-        app_module.fetch_equibase_expected_horses_by_race = lambda *args, **kwargs: {}
-        app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: []
-
-        # Default Equibase fetch stub: returns non-empty entry_details so the
-        # production guardrail (which refuses to publish an ungrounded card in
-        # web_search mode) does not fire.  Individual tests that exercise the
-        # guardrail should override this stub.
-        async def _default_equibase_all_data_async(*args, **kwargs):
-            entry_details = {
-                1: [
-                    {
-                        "name": "Alpha",
-                        "post_position": 1,
-                        "program_number": 1,
-                        "jockey": "A. Rider",
-                        "trainer": "T. One",
-                        "morning_line": "5/2",
-                        "scratched": False,
-                    }
-                ]
-            }
-            return {}, entry_details
-
-        app_module.fetch_equibase_all_data_async = _default_equibase_all_data_async
 
     def tearDown(self):
         app_module.app_state.session_manager = self.original_session_manager
         app_module.app_state.openrouter_client = self.original_openrouter_client
-        app_module.fetch_equibase_all_data = self.original_fetch_equibase_all_data
         app_module.app_state.config.web.admin_password = self.original_admin_password
         app_module.app_state.config.web.auth_secret = self.original_auth_secret
         app_module._AUTH_SECRET = self.original_cached_auth_secret
-        app_module.fetch_equibase_expected_horses_by_race = self.original_fetch_expected_horses_by_race
-        app_module.fetch_equibase_expected_race_numbers = self.original_fetch_expected_race_numbers
-        app_module.fetch_equibase_all_data_async = self.original_fetch_equibase_all_data_async
 
     def test_create_admin_race_card_uses_web_plugin_in_web_search_mode(self):
         request = app_module.AdminRaceCardRequest(
@@ -779,142 +743,6 @@ class AdminRaceCardRouteTests(unittest.TestCase):
         request = app_module.AdminRaceCardRequest(race_date="2026-03-13")
 
         self.assertEqual(request.llm_model, app_module.app_state.config.ai.default_model)
-
-    def test_create_admin_race_card_retries_missing_races_and_saves_merged_card(self):
-        app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: [1, 2]
-        self.openrouter_client.call_model = AsyncMock(side_effect=[
-            {
-                "content": '{"race_analyses":[{"race_number":1,"predictions":[{"horse_name":"Alpha","jockey":"A. Rider","trainer":"T. One","composite_rating":90}]}]}',
-                "annotations": [{"type": "url_citation", "url": "https://example.com/initial"}],
-            },
-            {
-                "content": '{"race_analyses":[{"race_number":2,"predictions":[{"horse_name":"Bravo","jockey":"B. Rider","trainer":"T. Two","composite_rating":88}]}]}',
-                "annotations": [{"type": "url_citation", "url": "https://example.com/retry"}],
-            },
-        ])
-
-        request = app_module.AdminRaceCardRequest(
-            race_date="2026-03-13",
-            track_id="SA",
-            llm_model="x-ai/grok-4.20-beta",
-            source_mode="web_search",
-        )
-
-        response = app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
-        saved_results = self.session_manager.save_session_results.await_args.args[1]
-        first_call_kwargs = self.openrouter_client.call_model.await_args_list[0].kwargs
-        second_call_kwargs = self.openrouter_client.call_model.await_args_list[1].kwargs
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.openrouter_client.call_model.await_count, 2)
-        self.assertEqual([race["race_number"] for race in saved_results["race_analyses"]], [1, 2])
-        self.assertEqual(
-            saved_results["source_urls"],
-            [
-                build_equibase_card_overview_url("SA", "2026-03-13"),
-                "https://example.com/initial",
-                "https://example.com/retry",
-            ],
-        )
-        self.assertEqual(first_call_kwargs["max_tokens"], app_module.ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS)
-        self.assertEqual(second_call_kwargs["max_tokens"], app_module.ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS)
-        self.assertIn("exactly these races: 1, 2", first_call_kwargs["prompt"])
-        self.assertIn("ONLY for these missing races: 2", second_call_kwargs["prompt"])
-        self.assertEqual(second_call_kwargs["context"]["missing_race_numbers"], [2])
-        self.assertTrue(any(args.args[3] == "admin_retry_incomplete_card" for args in self.session_manager.update_session_status.await_args_list))
-
-    def test_create_admin_race_card_retries_missing_horses_and_saves_merged_field(self):
-        app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: [1]
-        app_module.fetch_equibase_expected_horses_by_race = lambda *args, **kwargs: {
-            1: ["Alpha", "Bravo", "Charlie"]
-        }
-        self.openrouter_client.call_model = AsyncMock(side_effect=[
-            {
-                "content": '{"race_analyses":[{"race_number":1,"predictions":[{"horse_name":"Alpha","jockey":"A. Rider","trainer":"T. One","composite_rating":90}]}]}',
-                "annotations": [{"type": "url_citation", "url": "https://example.com/initial"}],
-            },
-            {
-                "content": '{"race_analyses":[{"race_number":1,"predictions":[{"horse_name":"Bravo","jockey":"B. Rider","trainer":"T. Two","composite_rating":84},{"horse_name":"Charlie","jockey":"C. Rider","trainer":"T. Three","composite_rating":82}]}]}',
-                "annotations": [{"type": "url_citation", "url": "https://example.com/retry"}],
-            },
-        ])
-
-        request = app_module.AdminRaceCardRequest(
-            race_date="2026-03-13",
-            track_id="SA",
-            llm_model="x-ai/grok-4.20-beta",
-            source_mode="web_search",
-        )
-
-        response = app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
-        saved_results = self.session_manager.save_session_results.await_args.args[1]
-        second_call_kwargs = self.openrouter_client.call_model.await_args_list[1].kwargs
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(self.openrouter_client.call_model.await_count, 2)
-        self.assertEqual(
-            {prediction["horse_name"] for prediction in saved_results["race_analyses"][0]["predictions"]},
-            {"Alpha", "Bravo", "Charlie"},
-        )
-        self.assertTrue(saved_results["race_analyses"][0]["field_complete"])
-        self.assertEqual(second_call_kwargs["max_tokens"], app_module.ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS)
-        self.assertEqual(second_call_kwargs["context"]["missing_horses_by_race"], {1: ["Bravo", "Charlie"]})
-        self.assertIn("Missing horses on retry: Race 1: Bravo, Charlie.", second_call_kwargs["prompt"])
-
-    def test_create_admin_race_card_accepts_partial_card_after_retry(self):
-        app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: [1, 2, 3]
-        self.openrouter_client.call_model = AsyncMock(side_effect=[
-            {
-                "content": '{"race_analyses":[{"race_number":1,"predictions":[{"horse_name":"Alpha","jockey":"A. Rider","trainer":"T. One","composite_rating":90}]}]}',
-                "annotations": [],
-            },
-            {
-                "content": '{"race_analyses":[{"race_number":2,"predictions":[{"horse_name":"Bravo","jockey":"B. Rider","trainer":"T. Two","composite_rating":88}]}]}',
-                "annotations": [],
-            },
-        ])
-
-        request = app_module.AdminRaceCardRequest(
-            race_date="2026-03-13",
-            track_id="SA",
-            llm_model="x-ai/grok-4.20-beta",
-            source_mode="web_search",
-        )
-
-        # Partial cards are now accepted with a warning instead of raising HTTPException
-        result = app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
-        self.assertEqual(result.status_code, 200)
-        self.assertEqual(self.openrouter_client.call_model.await_count, 2)
-        self.session_manager.save_session_results.assert_awaited_once()
-
-    def test_create_admin_race_card_accepts_partial_field_after_retry(self):
-        app_module.fetch_equibase_expected_race_numbers = lambda *args, **kwargs: [1]
-        app_module.fetch_equibase_expected_horses_by_race = lambda *args, **kwargs: {
-            1: ["Alpha", "Bravo"]
-        }
-        self.openrouter_client.call_model = AsyncMock(side_effect=[
-            {
-                "content": '{"race_analyses":[{"race_number":1,"predictions":[{"horse_name":"Alpha","jockey":"A. Rider","trainer":"T. One","composite_rating":90}]}]}',
-                "annotations": [],
-            },
-            {
-                "content": '{"race_analyses":[{"race_number":1,"predictions":[{"horse_name":"Alpha","jockey":"A. Rider","trainer":"T. One","composite_rating":90}]}]}',
-                "annotations": [],
-            },
-        ])
-
-        request = app_module.AdminRaceCardRequest(
-            race_date="2026-03-13",
-            track_id="SA",
-            llm_model="x-ai/grok-4.20-beta",
-            source_mode="web_search",
-        )
-
-        # Partial fields are now accepted with a warning instead of raising HTTPException
-        result = app_module.asyncio.run(app_module.create_admin_race_card(request, self.admin_request))
-        self.assertEqual(result.status_code, 200)
-        self.assertEqual(self.openrouter_client.call_model.await_count, 2)
-        self.session_manager.save_session_results.assert_awaited_once()
 
     def test_create_admin_race_card_surfaces_openrouter_timeout_as_503(self):
         self.openrouter_client.call_model = AsyncMock(return_value={
@@ -1013,44 +841,6 @@ class AdminRaceCardRouteTests(unittest.TestCase):
             args.args[3] == "admin_retry_malformed_json"
             for args in self.session_manager.update_session_status.await_args_list
         ))
-
-    def test_create_admin_race_card_proceeds_when_equibase_entry_details_unavailable(self):
-        # Override the default stub so entry_details is empty — simulates the
-        # urllib+Playwright double failure (e.g. Imperva WAF block on Render's
-        # datacenter IPs).  The endpoint must no longer 503 in this state; it
-        # must degrade to ungrounded web_search and publish whatever the LLM
-        # returns (flagging grounded=False in the session metadata).
-        async def _no_equibase_data(*args, **kwargs):
-            return {}, {}
-
-        app_module.fetch_equibase_all_data_async = _no_equibase_data
-
-        request = app_module.AdminRaceCardRequest(
-            race_date="2026-03-13",
-            track_id="SA",
-            llm_model="x-ai/grok-4.20-beta",
-            source_mode="web_search",
-        )
-
-        response = app_module.asyncio.run(
-            app_module.create_admin_race_card(request, self.admin_request)
-        )
-
-        self.assertEqual(response.status_code, 200)
-        # The LLM must have been dispatched despite the missing Equibase data.
-        self.openrouter_client.call_model.assert_awaited()
-        self.session_manager.save_session_results.assert_awaited()
-        # No equibase_unavailable failure status should have been emitted.
-        self.assertFalse(any(
-            args.args[3] == "equibase_unavailable"
-            for args in self.session_manager.update_session_status.await_args_list
-        ))
-        # The prompt must have contained the ungrounded multi-source guidance
-        # so the LLM knows to cross-reference alternative sources.
-        call_kwargs = self.openrouter_client.call_model.await_args.kwargs
-        prompt = call_kwargs["prompt"]
-        self.assertIn("horseracingnation.com", prompt)
-        self.assertIn("Cross-reference at least TWO", prompt)
 
     def test_admin_prompt_adds_fallback_sources_when_no_server_grounding(self):
         request = app_module.AdminRaceCardRequest(

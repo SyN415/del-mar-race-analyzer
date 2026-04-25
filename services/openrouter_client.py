@@ -371,10 +371,25 @@ class OpenRouterClient:
 
                     elif response.status == 429:  # Rate limit
                         if attempt < self.retry_config["max_retries"]:
-                            delay = min(
-                                self.retry_config["base_delay"] * (self.retry_config["backoff_factor"] ** attempt),
-                                self.retry_config["max_delay"]
-                            )
+                            # Prefer server-provided Retry-After when available
+                            retry_after = response.headers.get("Retry-After")
+                            if retry_after:
+                                try:
+                                    delay = float(retry_after)
+                                except ValueError:
+                                    delay = None
+                            else:
+                                delay = None
+
+                            if delay is None:
+                                # DeepSeek models are heavily throttled on OpenRouter;
+                                # use a much longer base delay to avoid hammering.
+                                base_delay = 30.0 if model and "deepseek" in model else 15.0
+                                delay = min(
+                                    base_delay * (self.retry_config["backoff_factor"] ** attempt),
+                                    120.0,
+                                )
+
                             logger.warning(f"Rate limited, retrying in {delay:.1f}s (attempt {attempt + 1})")
                             await asyncio.sleep(delay)
                             continue

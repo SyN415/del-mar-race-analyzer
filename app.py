@@ -53,11 +53,6 @@ try:
         build_equibase_card_overview_url,
         build_equibase_race_urls,
         extract_json_object,
-        fetch_equibase_all_data,
-        fetch_equibase_all_data_async,
-        fetch_equibase_entry_details_by_race,
-        fetch_equibase_expected_horses_by_race,
-        fetch_equibase_expected_race_numbers,
         find_missing_horses_by_race,
         find_missing_race_numbers,
         find_races_with_incomplete_fields,
@@ -76,11 +71,6 @@ except ImportError as e:
     build_equibase_card_overview_url = None
     build_equibase_race_urls = None
     extract_json_object = None
-    fetch_equibase_all_data = None
-    fetch_equibase_all_data_async = None
-    fetch_equibase_entry_details_by_race = None
-    fetch_equibase_expected_horses_by_race = None
-    fetch_equibase_expected_race_numbers = None
     find_missing_horses_by_race = None
     find_missing_race_numbers = None
     merge_source_urls = None
@@ -1687,8 +1677,6 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
     if (
         not build_equibase_card_overview_url
         or not extract_json_object
-        or not fetch_equibase_expected_horses_by_race
-        or not fetch_equibase_expected_race_numbers
         or not find_missing_horses_by_race
         or not find_missing_race_numbers
         or not merge_source_urls
@@ -1779,61 +1767,13 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
             if is_web_search_mode
             else None
         )
-        # Fetch expected horses AND entry details in a single workflow.
-        # Prefer the async helper (urllib → Playwright fallback on WAF block);
-        # fall back to the sync helper when the async variant isn't available
-        # (e.g. service initialization failure).
-        if is_web_search_mode and fetch_equibase_all_data_async:
-            expected_horses_by_race, equibase_entry_details = await fetch_equibase_all_data_async(
-                request.track_id, request.race_date, country=track_country
-            )
-        elif is_web_search_mode and fetch_equibase_all_data:
-            expected_horses_by_race, equibase_entry_details = fetch_equibase_all_data(
-                request.track_id, request.race_date, country=track_country
-            )
-        else:
-            expected_horses_by_race = {}
-            equibase_entry_details = {}
-        server_side_grounded = bool(equibase_entry_details)
-        if is_web_search_mode:
-            logger.info(
-                "📊 Equibase data: expected_horses=%d races | entry_details=%d races | details_entries=%d | grounded=%s",
-                len(expected_horses_by_race),
-                len(equibase_entry_details),
-                sum(len(v) for v in equibase_entry_details.values()),
-                "yes" if server_side_grounded else "no",
-            )
-            # When our direct Equibase scrape is blocked (Imperva WAF on the
-            # server egress), we no longer 503 — the LLM's own web_search
-            # infrastructure runs from a different network and can still reach
-            # Equibase and a long tail of other grounding sources
-            # (HorseRacingNation, BloodHorse, DRF, track-specific .com sites,
-            # Punters, RacingTV, ATG, Paulick Report, etc.).  The prompt below
-            # is widened to instruct the LLM to cross-reference those sources
-            # when no server-side grounding is available.  If the LLM output
-            # ends up incomplete, the existing retry logic further down
-            # tightens it; only then does the endpoint fail.
-            if not server_side_grounded:
-                logger.warning(
-                    "⚠️ No server-side Equibase grounding for %s on %s — "
-                    "delegating field discovery to the LLM's web_search with "
-                    "multi-source cross-reference guidance.",
-                    request.track_id, request.race_date,
-                )
-        # Derive race numbers from the data we already fetched — avoids another HTTP call
-        if expected_horses_by_race:
-            expected_race_numbers = sorted(expected_horses_by_race)
-        elif is_web_search_mode:
-            expected_race_numbers = fetch_equibase_expected_race_numbers(
-                request.track_id, request.race_date, country=track_country
-            )
-        else:
-            expected_race_numbers = []
-        per_race_urls = (
-            build_equibase_race_urls(request.track_id, request.race_date, expected_race_numbers, country=track_country)
-            if is_web_search_mode and expected_race_numbers and build_equibase_race_urls
-            else {}
-        )
+        # Server-side Equibase scraping has been removed — the LLM's own
+        # web_search infrastructure (running on OpenRouter's egress) gathers
+        # and cross-references all field data directly.
+        expected_horses_by_race = {}
+        equibase_entry_details = {}
+        expected_race_numbers = []
+        per_race_urls = {}
         status_message = (
             "Auto-gathering and structuring race card with OpenRouter web search"
             if is_web_search_mode
@@ -2106,7 +2046,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                 sum(race_sizes),
                 (sum(race_sizes) / len(race_sizes)) if race_sizes else 0.0,
                 len(short_fields),
-                "yes" if server_side_grounded else "no",
+                "no",
             )
 
         normalized_results = normalize_admin_results(
