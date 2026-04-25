@@ -1218,8 +1218,13 @@ DEFAULT_ADMIN_LLM_MODEL = "x-ai/grok-4.20-beta"
 CARD_RETENTION_DAYS = int(os.environ.get("CARD_RETENTION_DAYS", "28"))
 ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS = 16000
 ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS = 8000
-ADMIN_DEEPSEEK_WEB_SEARCH_INITIAL_MAX_TOKENS = 6000
-ADMIN_DEEPSEEK_WEB_SEARCH_RETRY_MAX_TOKENS = 4000
+ADMIN_DEEPSEEK_WEB_SEARCH_INITIAL_MAX_TOKENS = int(
+    os.environ.get("ADMIN_DEEPSEEK_WEB_SEARCH_INITIAL_MAX_TOKENS", "4000")
+)
+ADMIN_DEEPSEEK_WEB_SEARCH_RETRY_MAX_TOKENS = int(
+    os.environ.get("ADMIN_DEEPSEEK_WEB_SEARCH_RETRY_MAX_TOKENS", "2500")
+)
+ADMIN_DEEPSEEK_CHUNKED_CARD = os.environ.get("OPENROUTER_DEEPSEEK_CHUNKED_CARD", "false").lower() in ("1", "true", "yes")
 ADMIN_COMPACT_JSON_RETRY_MODEL_PREFIXES = ("minimax/", "deepseek/",)
 ADMIN_MANUAL_MAX_TOKENS = 2500
 ADMIN_DEEP_DIVE_MAX_TOKENS = 12000
@@ -1721,49 +1726,11 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
         *,
         phase_label: str,
     ) -> Dict[str, object]:
-        if not isinstance(openrouter_response, dict):
-            raise HTTPException(
-                status_code=502,
-                detail=f"OpenRouter returned an unexpected response format while {phase_label}.",
-            )
-
-        if openrouter_response.get("fallback"):
-            failure_reason = str(openrouter_response.get("failure_reason") or "fallback")
-            failure_detail = str(openrouter_response.get("failure_detail") or "").strip()
-            attempts = openrouter_response.get("attempts")
-
-            if failure_reason == "timeout":
-                attempts_suffix = f" after {attempts} attempts" if attempts else ""
-                detail = (
-                    f"OpenRouter timed out while {phase_label}{attempts_suffix}. "
-                    "Please try again in a moment."
-                )
-            elif failure_reason == "rate_limited":
-                if failure_detail:
-                    # The client may already include a specific message
-                    # (e.g. "switch to grok-4.20" for a blocked model).
-                    detail = f"OpenRouter rate limited the request while {phase_label}: {failure_detail}"
-                else:
-                    detail = f"OpenRouter rate limited the request while {phase_label}. Please retry shortly."
-            else:
-                detail = f"OpenRouter was unavailable while {phase_label}."
-
-            if failure_detail and failure_detail not in detail:
-                detail = f"{detail} {failure_detail}"
-
-            raise HTTPException(status_code=503, detail=detail)
-
-        try:
-            return extract_json_object(openrouter_response.get("content", ""))
-        except AdminRaceCardJSONError as exc:
-            model_name = str(openrouter_response.get("model") or request.llm_model)
-            logger.error(
-                "Admin race-card JSON parse failed while %s using %s: %s",
-                phase_label,
-                model_name,
-                exc.diagnostic_message,
-            )
-            raise
+        return _extract_admin_openrouter_payload(
+            request,
+            openrouter_response,
+            phase_label=phase_label,
+        )
 
     try:
         is_web_search_mode = request.source_mode == "web_search"
@@ -1801,11 +1768,16 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
             and is_web_search_mode
             and getattr(openrouter_client, "deepseek_preflight_enabled", False)
         ):
-            preflight = await openrouter_client.preflight_check(request.llm_model)
+            preflight_mode = getattr(openrouter_client, "deepseek_preflight_mode", "web_search")
+            preflight = await openrouter_client.preflight_check(
+                request.llm_model,
+                mode=preflight_mode,
+            )
             if not preflight.get("ok"):
                 logger.error(
-                    "DeepSeek preflight failed for %s: %s",
+                    "DeepSeek preflight failed for %s (mode=%s): %s",
                     request.llm_model,
+                    preflight_mode,
                     preflight.get("failure_detail") or preflight.get("reason"),
                 )
                 return JSONResponse(
@@ -1825,36 +1797,47 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
             else (ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS if is_web_search_mode else ADMIN_MANUAL_MAX_TOKENS)
         )
 
-        openrouter_response = await openrouter_client.call_model(
-            model=request.llm_model,
-            task_type="analysis",
-            prompt=_build_admin_structuring_prompt(
+        if is_deepseek and is_web_search_mode and ADMIN_DEEPSEEK_CHUNKED_CARD:
+            openrouter_response, merged_urls = await _build_deepseek_chunked_race_card(
                 request,
-                expected_race_numbers=expected_race_numbers,
-                expected_horses_by_race=expected_horses_by_race,
+                openrouter_client,
+                session_manager,
+                session_id,
                 official_card_url=official_card_url,
                 per_race_urls=per_race_urls,
-                equibase_entry_details=equibase_entry_details,
-                compact_response=is_deepseek,
-            ),
-            context=_build_admin_structuring_context(
-                request,
-                source_text,
-                expected_race_numbers=expected_race_numbers,
-                expected_horses_by_race=expected_horses_by_race,
-                official_card_url=official_card_url,
-                per_race_urls=per_race_urls,
-            ),
-            max_tokens=initial_max_tokens,
-            temperature=0.2,
-            plugins=[{"id": "web"}] if is_web_search_mode else None,
-            return_metadata=True,
-            response_format=admin_response_format,
-        )
-        merged_urls = merge_source_urls(
-            source_urls=request.source_urls + ([official_card_url] if official_card_url else []),
-            annotations=openrouter_response.get("annotations"),
-        )
+            )
+        else:
+            openrouter_response = await openrouter_client.call_model(
+                model=request.llm_model,
+                task_type="analysis",
+                prompt=_build_admin_structuring_prompt(
+                    request,
+                    expected_race_numbers=expected_race_numbers,
+                    expected_horses_by_race=expected_horses_by_race,
+                    official_card_url=official_card_url,
+                    per_race_urls=per_race_urls,
+                    equibase_entry_details=equibase_entry_details,
+                    compact_response=is_deepseek,
+                    ultra_compact_response=is_deepseek,
+                ),
+                context=_build_admin_structuring_context(
+                    request,
+                    source_text,
+                    expected_race_numbers=expected_race_numbers,
+                    expected_horses_by_race=expected_horses_by_race,
+                    official_card_url=official_card_url,
+                    per_race_urls=per_race_urls,
+                ),
+                max_tokens=initial_max_tokens,
+                temperature=0.2,
+                plugins=[{"id": "web"}] if is_web_search_mode else None,
+                return_metadata=True,
+                response_format=admin_response_format,
+            )
+            merged_urls = merge_source_urls(
+                source_urls=request.source_urls + ([official_card_url] if official_card_url else []),
+                annotations=openrouter_response.get("annotations"),
+            )
         try:
             structured_payload = extract_admin_openrouter_payload(
                 openrouter_response,
@@ -3946,6 +3929,144 @@ def _apply_speed_figure_adjustment(
     return predictions
 
 
+async def _build_deepseek_chunked_race_card(
+    request: AdminRaceCardRequest,
+    openrouter_client,
+    session_manager,
+    session_id: str,
+    *,
+    official_card_url: Optional[str],
+    per_race_urls: Optional[Dict[int, Dict[str, str]]],
+) -> tuple:
+    """Split DeepSeek admin card building into smaller sequential OpenRouter calls.
+
+    Pass 1: lightweight race-list call (ultra-compact, very small tokens).
+    Pass 2: per-race detail calls, sequential, stop on first failure.
+    Merge results with existing helpers.
+    """
+    import asyncio
+
+    # ── Pass 1: race list ──
+    overview_prompt = (
+        f"List every race number, type, distance, and surface for {request.track_id} "
+        f"on {request.race_date}. Use web search minimally. "
+        f"Return exactly this JSON: {{\"race_analyses\": ["
+        f"{{\"race_number\": 1, \"race_type\": \"Maiden\", \"distance\": \"6f\", \"surface\": \"Dirt\"}}"
+        f"]}}. No prose."
+    )
+
+    await session_manager.update_session_status(
+        session_id,
+        "running",
+        15,
+        "admin_chunked_race_list",
+        f"DeepSeek chunked: fetching race list for {request.track_id}",
+    )
+
+    race_list_response = await openrouter_client.call_model(
+        model=request.llm_model,
+        task_type="analysis",
+        prompt=overview_prompt,
+        context={},
+        max_tokens=1500,
+        temperature=0.2,
+        plugins=[{"id": "web"}],
+        return_metadata=True,
+        response_format={"type": "json_object"},
+    )
+
+    race_list_payload = _extract_admin_openrouter_payload(
+        request,
+        race_list_response,
+        phase_label="DeepSeek chunked race-list fetch",
+    )
+    race_analyses_overview = race_list_payload.get("race_analyses", [])
+    race_numbers = sorted({r.get("race_number") for r in race_analyses_overview if r.get("race_number")})
+
+    if not race_numbers:
+        raise HTTPException(
+            status_code=503,
+            detail="DeepSeek chunked mode: race-list call returned no races.",
+        )
+
+    merged_urls = merge_source_urls(
+        source_urls=([official_card_url] if official_card_url else []),
+        annotations=race_list_response.get("annotations"),
+    )
+
+    # ── Pass 2: per-race details ──
+    all_race_analyses: List[Dict] = []
+    for idx, race_number in enumerate(race_numbers):
+        await session_manager.update_session_status(
+            session_id,
+            "running",
+            20 + int(60 * (idx / max(len(race_numbers), 1))),
+            "admin_chunked_race_detail",
+            f"DeepSeek chunked: fetching race {race_number} ({idx+1}/{len(race_numbers)})",
+        )
+
+        detail_prompt = (
+            f"For {request.track_id} race {race_number} on {request.race_date}, "
+            f"return ONLY the full field as JSON: {{\"race_analyses\": ["
+            f"{{\"race_number\": {race_number}, \"race_type\": \"...\", \"distance\": \"...\", "
+            f"\"surface\": \"...\", \"predictions\": ["
+            f"{{\"horse_name\": \"...\", \"post_position\": 1, \"jockey\": \"...\", "
+            f"\"trainer\": \"...\", \"composite_rating\": 85}}]}}]}}. "
+            f"Use web search minimally. No prose, no notes, no factors."
+        )
+
+        detail_response = await openrouter_client.call_model(
+            model=request.llm_model,
+            task_type="analysis",
+            prompt=detail_prompt,
+            context={},
+            max_tokens=2000,
+            temperature=0.2,
+            plugins=[{"id": "web"}],
+            return_metadata=True,
+            response_format={"type": "json_object"},
+        )
+
+        if isinstance(detail_response, dict) and detail_response.get("fallback"):
+            raise _build_admin_json_http_exception(
+                request,
+                detail_response,
+                phase_label=f"DeepSeek chunked race {race_number} detail",
+                exc=AdminRaceCardJSONError(
+                    f"Chunked race {race_number} failed: {detail_response.get('failure_reason')}"
+                ),
+            )
+
+        detail_payload = _extract_admin_openrouter_payload(
+            request,
+            detail_response,
+            phase_label=f"DeepSeek chunked race {race_number} detail",
+        )
+        all_race_analyses.extend(detail_payload.get("race_analyses", []))
+        merged_urls = merge_source_urls(
+            source_urls=merged_urls,
+            annotations=detail_response.get("annotations"),
+        )
+
+        # Small delay between sequential DeepSeek calls to reduce rate-limit risk
+        if idx < len(race_numbers) - 1:
+            await asyncio.sleep(1.5)
+
+    combined_payload = {
+        "race_analyses": all_race_analyses,
+    }
+
+    # Build a synthetic openrouter_response dict so downstream code works
+    synthetic_response = {
+        "content": json.dumps(combined_payload),
+        "annotations": [],
+        "usage": {},
+        "model": request.llm_model,
+    }
+
+    return synthetic_response, merged_urls
+
+
 def _build_admin_structuring_prompt(
     request: AdminRaceCardRequest,
     *,
@@ -3957,6 +4078,7 @@ def _build_admin_structuring_prompt(
     per_race_urls: Optional[Dict[int, Dict[str, str]]] = None,
     equibase_entry_details: Optional[Dict[int, list]] = None,
     compact_response: bool = False,
+    ultra_compact_response: bool = False,
 ) -> str:
     track_country = get_track_country(request.track_id)
     intl = track_country != "USA"
@@ -4068,8 +4190,32 @@ def _build_admin_structuring_prompt(
         if compact_response
         else ""
     )
-    response_shape = (
-        """{
+    if ultra_compact_response:
+        response_shape = """{
+  "race_analyses": [
+    {
+      "race_number": 1,
+      "race_type": "Allowance",
+      "distance": "6f",
+      "surface": "Dirt",
+      "predictions": [
+        {
+          "horse_name": "Name",
+          "post_position": 1,
+          "jockey": "Jockey",
+          "trainer": "Trainer",
+          "composite_rating": 88.5
+        }
+      ]
+    }
+  ]
+}"""
+        compact_rules = (
+            "- Ultra-compact mode: no `card_overview`, no `factors`, no `exotic_suggestions`, no `notes`.\n"
+            "- Return ONLY the race list and each horse's name, post_position, jockey, trainer, composite_rating.\n"
+        )
+    elif compact_response:
+        response_shape = """{
   "card_overview": "short summary",
   "race_analyses": [
     {
@@ -4089,8 +4235,12 @@ def _build_admin_structuring_prompt(
     }
   ]
 }"""
-        if compact_response
-        else """{
+        compact_rules = (
+            "- Compact retry mode: omit `factors` and `exotic_suggestions`.\n"
+            "- Omit per-horse `notes` unless absolutely necessary.\n"
+        )
+    else:
+        response_shape = """{
   "card_overview": "short summary",
   "race_analyses": [
     {
@@ -4119,16 +4269,10 @@ def _build_admin_structuring_prompt(
     }
   ]
 }"""
-    )
-    compact_rules = (
-        "- Compact retry mode: omit `factors` and `exotic_suggestions`.\n"
-        "- Omit per-horse `notes` unless absolutely necessary.\n"
-        if compact_response
-        else (
+        compact_rules = (
             "- If evidence is limited, still rank the full field strongest to weakest and keep notes concise about uncertainty.\n"
             "- Keep notes concise — one sentence max per horse.\n"
         )
-    )
 
     # Data source rules differ for USA vs international, and tighten further
     # when no server-side Equibase grounding is available (the LLM must then
@@ -4209,6 +4353,69 @@ def _should_retry_admin_json_with_compact_prompt(
 
     base_model = str(model_name or request.llm_model or "").split(":", 1)[0].lower()
     return any(base_model.startswith(prefix) for prefix in ADMIN_COMPACT_JSON_RETRY_MODEL_PREFIXES)
+
+
+def _extract_admin_openrouter_payload(
+    request: AdminRaceCardRequest,
+    openrouter_response: object,
+    *,
+    phase_label: str,
+) -> Dict[str, object]:
+    if not isinstance(openrouter_response, dict):
+        raise HTTPException(
+            status_code=502,
+            detail=f"OpenRouter returned an unexpected response format while {phase_label}.",
+        )
+
+    if openrouter_response.get("fallback"):
+        failure_reason = str(openrouter_response.get("failure_reason") or "fallback")
+        failure_detail = str(openrouter_response.get("failure_detail") or "").strip()
+        attempts = openrouter_response.get("attempts")
+
+        if failure_reason == "timeout":
+            attempts_suffix = f" after {attempts} attempts" if attempts else ""
+            is_deepseek = _is_deepseek_model(
+                str(openrouter_response.get("model") or "")
+            )
+            if is_deepseek:
+                detail = (
+                    f"OpenRouter timed out while {phase_label}{attempts_suffix}. "
+                    f"DeepSeek did not complete the OpenRouter web-search + JSON request "
+                    f"within {ADMIN_DEEPSEEK_WEB_SEARCH_INITIAL_MAX_TOKENS} token budget. "
+                    "Switch to Grok/GPT, enable chunked mode (OPENROUTER_DEEPSEEK_CHUNKED_CARD), "
+                    "or configure a BYOK provider key via OpenRouter Integrations."
+                )
+            else:
+                detail = (
+                    f"OpenRouter timed out while {phase_label}{attempts_suffix}. "
+                    "Please try again in a moment."
+                )
+        elif failure_reason == "rate_limited":
+            if failure_detail:
+                # The client may already include a specific message
+                # (e.g. "switch to grok-4.20" for a blocked model).
+                detail = f"OpenRouter rate limited the request while {phase_label}: {failure_detail}"
+            else:
+                detail = f"OpenRouter rate limited the request while {phase_label}. Please retry shortly."
+        else:
+            detail = f"OpenRouter was unavailable while {phase_label}."
+
+        if failure_detail and failure_detail not in detail:
+            detail = f"{detail} {failure_detail}"
+
+        raise HTTPException(status_code=503, detail=detail)
+
+    try:
+        return extract_json_object(openrouter_response.get("content", ""))
+    except AdminRaceCardJSONError as exc:
+        model_name = str(openrouter_response.get("model") or request.llm_model)
+        logger.error(
+            "Admin race-card JSON parse failed while %s using %s: %s",
+            phase_label,
+            model_name,
+            exc.diagnostic_message,
+        )
+        raise
 
 
 def _build_admin_json_http_exception(

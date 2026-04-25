@@ -1739,6 +1739,116 @@ class OpenRouterClientDeepSeekTests(unittest.TestCase):
         )
         self.assertGreater(timeout, client.deepseek_timeout_seconds)
 
+    @unittest.mock.patch("services.openrouter_client.aiohttp.ClientSession")
+    def test_deepseek_preflight_web_search_includes_plugins_and_response_format(self, mock_session_cls):
+        """Preflight in web_search mode should test the actual failing route."""
+        client = self._client()
+
+        captured_calls = []
+
+        class FakeResponse:
+            def __init__(self, status, body, headers=None):
+                self.status = status
+                self._body = body
+                self.headers = headers or {}
+
+            async def text(self):
+                return self._body
+
+            async def json(self):
+                import json as _json
+                return _json.loads(self._body)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        def fake_post(*args, **kwargs):
+            captured_calls.append(kwargs)
+            return FakeResponse(
+                200,
+                json.dumps({
+                    "choices": [{"message": {"content": "ok"}}],
+                    "model": "deepseek/deepseek-v4-pro",
+                }),
+            )
+
+        mock_session = unittest.mock.MagicMock()
+        mock_session.post = fake_post
+        mock_session_cls.return_value = mock_session
+        client.session = mock_session
+
+        loop = asyncio.new_event_loop()
+        try:
+            result = loop.run_until_complete(
+                client.preflight_check(
+                    "deepseek/deepseek-v4-pro",
+                    mode="web_search",
+                )
+            )
+        finally:
+            loop.close()
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(len(captured_calls), 1)
+        payload = captured_calls[0].get("json", {})
+        self.assertEqual(payload.get("plugins"), [{"id": "web"}])
+        self.assertEqual(payload.get("response_format"), {"type": "json_object"})
+        self.assertEqual(payload.get("max_tokens"), 100)
+
+    def test_deepseek_preflight_basic_omits_plugins(self):
+        """Preflight in basic mode should NOT include web plugin."""
+        client = self._client()
+        # Cannot mock aiohttp here easily, so inspect the preflight call
+        # by patching call_model directly.
+        call_log = []
+        original_call_model = client.call_model
+
+        async def mock_call_model(**kwargs):
+            call_log.append(kwargs)
+            return {"content": "ok"}
+
+        client.call_model = mock_call_model
+        loop = asyncio.new_event_loop()
+        try:
+            result = loop.run_until_complete(
+                client.preflight_check("deepseek/deepseek-v4-pro", mode="basic")
+            )
+        finally:
+            loop.close()
+            client.call_model = original_call_model
+
+        self.assertTrue(result.get("ok"))
+        self.assertEqual(len(call_log), 1)
+        self.assertIsNone(call_log[0].get("plugins"))
+        self.assertEqual(call_log[0].get("max_tokens"), 50)
+
+    def test_timeout_detail_without_provider_metadata(self):
+        """Timeout message should NOT mention provider_name when no metadata exists."""
+        request = types.SimpleNamespace(
+            llm_model="deepseek/deepseek-v4-pro",
+            race_date="2026-03-13",
+            track_id="SA",
+        )
+        with self.assertRaises(Exception) as ctx:
+            app_module._extract_admin_openrouter_payload(
+                request,
+                {
+                    "content": "",
+                    "fallback": True,
+                    "failure_reason": "timeout",
+                    "failure_detail": "OpenRouter API request timed out",
+                    "attempts": 1,
+                    "model": "deepseek/deepseek-v4-pro",
+                },
+                phase_label="structuring the admin race card",
+            )
+        detail = str(ctx.exception.detail)
+        self.assertNotIn("Together", detail)
+        self.assertIn("DeepSeek did not complete", detail)
+
 
 class AdminRaceCardRouteDeepSeekTests(unittest.TestCase):
     """App-level tests for DeepSeek-specific admin workflow shaping."""
@@ -1865,7 +1975,10 @@ class AdminRaceCardRouteDeepSeekTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         call_kwargs = self.openrouter_client.call_model.await_args.kwargs
         prompt = call_kwargs["prompt"]
-        self.assertIn("Compact retry mode", prompt)
+        # DeepSeek initial calls use both compact_response=True and ultra_compact_response=True,
+        # so the prompt should contain ultra-compact directives.
+        self.assertIn("Ultra-compact mode", prompt)
+        self.assertIn("no `card_overview`", prompt)
 
     def test_non_deepseek_admin_uses_standard_max_tokens(self):
         request = app_module.AdminRaceCardRequest(
@@ -1928,6 +2041,67 @@ class AdminRaceCardRouteDeepSeekTests(unittest.TestCase):
         detail = getattr(response, "detail", None)
         if detail:
             self.assertIn("DeepSeek route is unavailable", detail)
+
+    def test_deepseek_token_budget_default_is_4000(self):
+        self.assertEqual(
+            app_module.ADMIN_DEEPSEEK_WEB_SEARCH_INITIAL_MAX_TOKENS,
+            4000,
+        )
+        self.assertEqual(
+            app_module.ADMIN_DEEPSEEK_WEB_SEARCH_RETRY_MAX_TOKENS,
+            2500,
+        )
+
+    def test_deepseek_admin_uses_ultra_compact_prompt(self):
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="deepseek/deepseek-v4-pro",
+            source_mode="web_search",
+        )
+
+        response = app_module.asyncio.run(
+            app_module.create_admin_race_card(request, self.admin_request)
+        )
+
+        self.assertEqual(response.status_code, 200)
+        call_kwargs = self.openrouter_client.call_model.await_args.kwargs
+        prompt = call_kwargs["prompt"]
+        self.assertIn("Ultra-compact mode", prompt)
+        self.assertIn("no `card_overview`", prompt)
+
+    @unittest.mock.patch.dict(os.environ, {"OPENROUTER_DEEPSEEK_CHUNKED_CARD": "true"})
+    def test_deepseek_chunked_mode_runs_multiple_calls(self):
+        self.openrouter_client.call_model = AsyncMock(side_effect=[
+            {
+                "content": '{"race_analyses":[{"race_number":1,"race_type":"Maiden","distance":"6f","surface":"Dirt"}]}',
+                "annotations": [],
+            },
+            {
+                "content": '{"race_analyses":[{"race_number":1,"predictions":[{"horse_name":"Alpha","post_position":1,"jockey":"A. Rider","trainer":"T. One","composite_rating":90}]}]}',
+                "annotations": [],
+            },
+        ])
+
+        # Enable chunked flag by patching the module constant
+        original_chunked = app_module.ADMIN_DEEPSEEK_CHUNKED_CARD
+        app_module.ADMIN_DEEPSEEK_CHUNKED_CARD = True
+        try:
+            request = app_module.AdminRaceCardRequest(
+                race_date="2026-03-13",
+                track_id="SA",
+                llm_model="deepseek/deepseek-v4-pro",
+                source_mode="web_search",
+            )
+
+            response = app_module.asyncio.run(
+                app_module.create_admin_race_card(request, self.admin_request)
+            )
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(self.openrouter_client.call_model.await_count, 2)
+        finally:
+            app_module.ADMIN_DEEPSEEK_CHUNKED_CARD = original_chunked
 
 
 if __name__ == "__main__":

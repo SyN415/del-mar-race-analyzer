@@ -102,6 +102,7 @@ class OpenRouterClient:
         self.deepseek_timeout_seconds = 60
         self.deepseek_timeout_retries = 0
         self.deepseek_preflight_enabled = os.getenv("OPENROUTER_DEEPSEEK_PREFLIGHT", "false").lower() in ("1", "true", "yes")
+        self.deepseek_preflight_mode = os.getenv("OPENROUTER_DEEPSEEK_PREFLIGHT_MODE", "web_search")
         self.allowed_models = self._resolve_allowed_models()
         self.default_model = self._resolve_default_model()
 
@@ -298,20 +299,37 @@ class OpenRouterClient:
         base_model = (model or "").split(":", 1)[0]
         return any(base_model == allowed.split(":", 1)[0] for allowed in self.allowed_models)
 
-    async def preflight_check(self, model: str) -> Dict[str, Any]:
+    async def preflight_check(
+        self,
+        model: str,
+        *,
+        mode: str = "basic",
+    ) -> Dict[str, Any]:
         """Send a tiny probe to verify a model route is reachable before a heavy call.
+
+        Args:
+            model: The model identifier to test.
+            mode: "basic" tests model reachability with no plugins.
+                  "web_search" tests the actual admin workflow route with
+                  plugins=[{"id": "web"}] and JSON mode — this is the path
+                  that typically fails for DeepSeek on OpenRouter.
 
         Returns {"ok": True} on success or {"ok": False, "reason": "..."}
         with diagnostic metadata on failure.
         """
+        is_web_search = mode == "web_search"
         try:
             result = await self.call_model(
                 model=model,
-                prompt="Return a JSON object with one key: 'ok' = true.",
+                prompt=(
+                    "Use web search minimally and return exactly JSON: {\"ok\": true, \"source_check\": \"short\"}."
+                    if is_web_search
+                    else "Return a JSON object with one key: 'ok' = true."
+                ),
                 task_type="general",
-                max_tokens=50,
+                max_tokens=100 if is_web_search else 50,
                 temperature=0.0,
-                plugins=None,
+                plugins=[{"id": "web"}] if is_web_search else None,
                 return_metadata=True,
                 response_format={"type": "json_object"},
             )

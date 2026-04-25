@@ -121,6 +121,13 @@
                                     </option>
                                     {% endfor %}
                                 </select>
+                                <div id="deepseekWarning" class="alert alert-warning mt-2 d-none" role="alert">
+                                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                                    <strong>DeepSeek via OpenRouter</strong> may timeout or rate-limit on
+                                    web-search race-card builds. For best reliability use Grok/GPT,
+                                    configure OpenRouter BYOK/provider routing, or enable DeepSeek
+                                    chunked mode (OPENROUTER_DEEPSEEK_CHUNKED_CARD).
+                                </div>
                             </div>
 
                             <div class="d-flex gap-3 flex-wrap align-items-center">
@@ -322,6 +329,21 @@ function updateAdminModeUI() {
     saveButton.innerHTML = getSubmitLabel();
 }
 document.querySelectorAll('input[name="sourceMode"]').forEach(i => i.addEventListener('change', updateAdminModeUI));
+
+// ── DeepSeek warning toggle ──
+function updateDeepSeekWarning() {
+    const model = document.getElementById('buildModel').value;
+    const warning = document.getElementById('deepseekWarning');
+    if (model && model.toLowerCase().includes('deepseek')) {
+        warning.classList.remove('d-none');
+    } else {
+        warning.classList.add('d-none');
+    }
+}
+document.getElementById('buildModel').addEventListener('change', updateDeepSeekWarning);
+
+// Run once on page load
+updateDeepSeekWarning();
 
 document.getElementById('adminCardForm').addEventListener('submit', async function(e) {
     e.preventDefault();
