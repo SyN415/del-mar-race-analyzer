@@ -1,3 +1,4 @@
+import asyncio
 import sys
 import types
 import unittest
@@ -164,12 +165,32 @@ def _install_app_import_stubs():
                     "google/gemini-3.1-flash-lite-preview",
                     "x-ai/grok-4.20-beta",
                     "openai/gpt-5.4",
+                    "deepseek/deepseek-v4-pro",
                 ],
             )
             return types.SimpleNamespace(openrouter_api_key="test-key", web=web, ai=ai)
 
     config_manager.ConfigManager = ConfigManager
     sys.modules["config.config_manager"] = config_manager
+
+    # Stub aiohttp so the real services.openrouter_client can be imported in tests.
+    aiohttp_stub = types.ModuleType("aiohttp")
+
+    class ClientSessionStub:
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, *args):
+            return False
+        def post(self, *args, **kwargs):
+            raise NotImplementedError
+
+    class ClientTimeoutStub:
+        def __init__(self, total=None):
+            self.total = total
+
+    aiohttp_stub.ClientSession = ClientSessionStub
+    aiohttp_stub.ClientTimeout = ClientTimeoutStub
+    sys.modules["aiohttp"] = aiohttp_stub
 
     for module_name, class_name in [
         ("scrapers.playwright_equibase_scraper", "PlaywrightEquibaseScraper"),
@@ -1300,6 +1321,398 @@ class ImpervaChallengeDetectionTests(unittest.TestCase):
     def test_empty_input_is_not_a_challenge(self):
         self.assertFalse(_is_imperva_challenge(""))
         self.assertFalse(_is_imperva_challenge(None))
+
+
+class OpenRouterClientDeepSeekTests(unittest.TestCase):
+    """Unit tests for DeepSeek-specific rate-limit handling and plugin shaping."""
+
+    @classmethod
+    def setUpClass(cls):
+        # Ensure the real services.openrouter_client module is available.
+        # (The test file stubs it during app import but restores it afterwards.)
+        import importlib
+        cls._openrouter_module = importlib.import_module("services.openrouter_client")
+        cls.OpenRouterClient = cls._openrouter_module.OpenRouterClient
+
+    def _client(self):
+        ai = types.SimpleNamespace(
+            default_model="x-ai/grok-4.20-beta",
+            available_models=[
+                "google/gemini-3.1-flash-lite-preview",
+                "x-ai/grok-4.20-beta",
+                "openai/gpt-5.4",
+                "deepseek/deepseek-v4-pro",
+            ],
+        )
+        config = types.SimpleNamespace(openrouter_api_key="test-key", ai=ai)
+        return self.OpenRouterClient(config)
+
+    def test_is_deepseek_model(self):
+        self.assertTrue(self.OpenRouterClient._is_deepseek_model("deepseek/deepseek-v4-pro"))
+        self.assertTrue(self.OpenRouterClient._is_deepseek_model("DeepSeek/Chat"))
+        self.assertFalse(self.OpenRouterClient._is_deepseek_model("x-ai/grok-4.20-beta"))
+        self.assertFalse(self.OpenRouterClient._is_deepseek_model(None))
+
+    def test_parse_retry_after(self):
+        self.assertEqual(self.OpenRouterClient._parse_retry_after("2"), 2.0)
+        self.assertEqual(self.OpenRouterClient._parse_retry_after("30"), 30.0)
+        self.assertIsNone(self.OpenRouterClient._parse_retry_after(None))
+        self.assertIsNone(self.OpenRouterClient._parse_retry_after(""))
+        self.assertIsNone(self.OpenRouterClient._parse_retry_after("invalid"))
+
+    def test_truncate_error_body(self):
+        self.assertEqual(self.OpenRouterClient._truncate_error_body("short"), "short")
+        long_text = "x" * 600
+        self.assertEqual(
+            self.OpenRouterClient._truncate_error_body(long_text, limit=500),
+            "x" * 500 + "...",
+        )
+        self.assertEqual(self.OpenRouterClient._truncate_error_body(""), "(empty body)")
+        self.assertEqual(self.OpenRouterClient._truncate_error_body(None), "(empty body)")
+
+    def test_should_use_response_healing(self):
+        self.assertFalse(self.OpenRouterClient._should_use_response_healing("deepseek/deepseek-v4-pro"))
+        self.assertTrue(self.OpenRouterClient._should_use_response_healing("x-ai/grok-4.20-beta"))
+        self.assertTrue(self.OpenRouterClient._should_use_response_healing(None))
+
+    def test_build_request_plugins_includes_healing_for_non_deepseek(self):
+        client = self._client()
+        plugins = client._build_request_plugins(
+            model="x-ai/grok-4.20-beta",
+            plugins=[{"id": "web"}],
+            response_format={"type": "json_object"},
+        )
+        self.assertIsNotNone(plugins)
+        ids = [p["id"] for p in plugins]
+        self.assertIn("web", ids)
+        self.assertIn("response-healing", ids)
+
+    def test_build_request_plugins_omits_healing_for_deepseek(self):
+        client = self._client()
+        plugins = client._build_request_plugins(
+            model="deepseek/deepseek-v4-pro",
+            plugins=[{"id": "web"}],
+            response_format={"type": "json_object"},
+        )
+        self.assertIsNotNone(plugins)
+        ids = [p["id"] for p in plugins]
+        self.assertIn("web", ids)
+        self.assertNotIn("response-healing", ids)
+
+    def test_should_fail_fast_rate_limit_for_deepseek(self):
+        # DeepSeek: attempt 0 (1st try), no Retry-After -> should NOT fail fast (allow retry)
+        self.assertFalse(
+            self.OpenRouterClient._should_fail_fast_rate_limit(
+                "deepseek/deepseek-v4-pro", "", None, attempt=0
+            )
+        )
+        # DeepSeek: attempt 1 (2nd try), no Retry-After -> should fail fast (exhausted budget)
+        self.assertTrue(
+            self.OpenRouterClient._should_fail_fast_rate_limit(
+                "deepseek/deepseek-v4-pro", "", None, attempt=1
+            )
+        )
+        # DeepSeek: attempt 0, Retry-After=60 -> fail fast (exceeds cap)
+        self.assertTrue(
+            self.OpenRouterClient._should_fail_fast_rate_limit(
+                "deepseek/deepseek-v4-pro", "", 60.0, attempt=0
+            )
+        )
+        # DeepSeek: attempt 0, Retry-After=10 -> do not fail fast
+        self.assertFalse(
+            self.OpenRouterClient._should_fail_fast_rate_limit(
+                "deepseek/deepseek-v4-pro", "", 10.0, attempt=0
+            )
+        )
+        # Non-DeepSeek: never fail fast
+        self.assertFalse(
+            self.OpenRouterClient._should_fail_fast_rate_limit(
+                "x-ai/grok-4.20-beta", "", None, attempt=5
+            )
+        )
+
+    def test_rate_limit_failure_detail_contains_guidance_and_body(self):
+        detail = self.OpenRouterClient._rate_limit_failure_detail(
+            "deepseek/deepseek-v4-pro",
+            "error body here",
+            retry_after=15.0,
+        )
+        self.assertIn("OpenRouter rate limited deepseek/deepseek-v4-pro", detail)
+        self.assertIn("switch to Grok/GPT", detail)
+        self.assertIn("OpenRouter suggested retrying after 15 seconds", detail)
+        self.assertIn("error body here", detail)
+
+    @unittest.mock.patch("services.openrouter_client.aiohttp.ClientSession")
+    def test_deepseek_429_with_retry_after_retries_once_then_succeeds(self, mock_session_cls):
+        """DeepSeek 429 with Retry-After=2 should wait 2s, retry, then succeed."""
+        client = self._client()
+
+        call_count = 0
+
+        class FakeResponse:
+            def __init__(self, status, body, headers=None):
+                self.status = status
+                self._body = body
+                self.headers = headers or {}
+
+            async def text(self):
+                return self._body
+
+            async def json(self):
+                import json as _json
+                return _json.loads(self._body)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        def fake_post(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return FakeResponse(429, "rate limited", {"Retry-After": "2"})
+            import json as _json
+            return FakeResponse(
+                200,
+                _json.dumps({
+                    "choices": [{"message": {"content": "ok"}}],
+                    "model": "deepseek/deepseek-v4-pro",
+                }),
+            )
+
+        mock_session = unittest.mock.MagicMock()
+        mock_session.post = fake_post
+        mock_session_cls.return_value = mock_session
+
+        # Need to set the session on the client
+        client.session = mock_session
+
+        loop = asyncio.new_event_loop()
+        try:
+            result = loop.run_until_complete(
+                client.call_model(
+                    model="deepseek/deepseek-v4-pro",
+                    prompt="test",
+                    task_type="analysis",
+                    return_metadata=True,
+                    response_format={"type": "json_object"},
+                    max_tokens=8000,
+                    plugins=[{"id": "web"}],
+                )
+            )
+        finally:
+            loop.close()
+
+        self.assertEqual(call_count, 2)
+        self.assertEqual(result.get("content"), "ok")
+        self.assertNotIn("fallback", result)
+
+    @unittest.mock.patch("services.openrouter_client.aiohttp.ClientSession")
+    def test_deepseek_429_without_retry_after_fails_fast_with_body(self, mock_session_cls):
+        """DeepSeek 429 with no Retry-After should return fallback immediately after exhausting retries."""
+        client = self._client()
+
+        call_count = 0
+
+        class FakeResponse:
+            def __init__(self, status, body, headers=None):
+                self.status = status
+                self._body = body
+                self.headers = headers or {}
+
+            async def text(self):
+                return self._body
+
+            async def json(self):
+                return json.loads(self._body)
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                return False
+
+        def fake_post(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return FakeResponse(429, "rate limited: quota exceeded", {})
+
+        mock_session = unittest.mock.MagicMock()
+        mock_session.post = fake_post
+        mock_session_cls.return_value = mock_session
+        client.session = mock_session
+
+        loop = asyncio.new_event_loop()
+        try:
+            result = loop.run_until_complete(
+                client.call_model(
+                    model="deepseek/deepseek-v4-pro",
+                    prompt="test",
+                    task_type="analysis",
+                    return_metadata=True,
+                    response_format={"type": "json_object"},
+                    max_tokens=8000,
+                    plugins=[{"id": "web"}],
+                )
+            )
+        finally:
+            loop.close()
+
+        self.assertEqual(call_count, 2)  # initial + 1 retry (DEEPSEEK_MAX_RATE_LIMIT_RETRIES=2)
+        self.assertTrue(result.get("fallback"))
+        self.assertEqual(result.get("failure_reason"), "rate_limited")
+        detail = result.get("failure_detail", "")
+        self.assertIn("rate limited: quota exceeded", detail)
+        self.assertIn("switch to Grok/GPT", detail)
+
+
+class AdminRaceCardRouteDeepSeekTests(unittest.TestCase):
+    """App-level tests for DeepSeek-specific admin workflow shaping."""
+
+    def setUp(self):
+        self.original_session_manager = app_module.app_state.session_manager
+        self.original_openrouter_client = app_module.app_state.openrouter_client
+        self.original_admin_password = app_module.app_state.config.web.admin_password
+        self.original_auth_secret = app_module.app_state.config.web.auth_secret
+        self.original_cached_auth_secret = app_module._AUTH_SECRET
+
+        self.session_manager = type("SessionManagerStub", (), {})()
+        self.session_manager.create_session = AsyncMock(return_value="session-123")
+        self.session_manager.update_session_status = AsyncMock()
+        self.session_manager.save_session_results = AsyncMock()
+        self.session_manager.delete_deep_dives_for_card = AsyncMock(return_value=0)
+
+        self.openrouter_client = type("OpenRouterClientStub", (), {})()
+        self.openrouter_client.api_key = "test-key"
+        self.openrouter_client.call_model = AsyncMock(return_value={
+            "content": '{"race_analyses":[{"race_number":1,"predictions":[{"horse_name":"Alpha","jockey":"A. Rider","trainer":"T. One","composite_rating":90}]}]}',
+            "annotations": [{"type": "url_citation", "url_citation": {"url": "https://example.com/search"}}],
+            "usage": {},
+            "model": "deepseek/deepseek-v4-pro",
+        })
+
+        app_module.app_state.session_manager = self.session_manager
+        app_module.app_state.openrouter_client = self.openrouter_client
+        app_module.app_state.config.web.admin_password = "super-secret"
+        app_module.app_state.config.web.auth_secret = "signing-secret"
+        app_module._AUTH_SECRET = None
+        self.admin_request = types.SimpleNamespace(
+            cookies={app_module.AUTH_COOKIE_NAME: app_module._sign_value("admin")}
+        )
+
+    def tearDown(self):
+        app_module.app_state.session_manager = self.original_session_manager
+        app_module.app_state.openrouter_client = self.original_openrouter_client
+        app_module.app_state.config.web.admin_password = self.original_admin_password
+        app_module.app_state.config.web.auth_secret = self.original_auth_secret
+        app_module._AUTH_SECRET = self.original_cached_auth_secret
+
+    def test_deepseek_admin_uses_lower_initial_max_tokens(self):
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="deepseek/deepseek-v4-pro",
+            source_mode="web_search",
+        )
+
+        response = app_module.asyncio.run(
+            app_module.create_admin_race_card(request, self.admin_request)
+        )
+
+        self.assertEqual(response.status_code, 200)
+        call_kwargs = self.openrouter_client.call_model.await_args.kwargs
+        self.assertEqual(
+            call_kwargs["max_tokens"],
+            app_module.ADMIN_DEEPSEEK_WEB_SEARCH_INITIAL_MAX_TOKENS,
+        )
+
+    def test_deepseek_admin_uses_lower_retry_max_tokens_for_gap_fill(self):
+        # First call returns a card with missing jockey/trainer to trigger the
+        # jockey/trainer gap-fill retry path.
+        self.openrouter_client.call_model = AsyncMock(side_effect=[
+            {
+                "content": '{"race_analyses":[{"race_number":1,"predictions":[{"horse_name":"Alpha","jockey":"","trainer":"","composite_rating":90}]}]}',
+                "annotations": [],
+            },
+            {
+                "content": '{"race_analyses":[{"race_number":1,"predictions":[{"horse_name":"Alpha","jockey":"A. Rider","trainer":"T. One","composite_rating":90}]}]}',
+                "annotations": [],
+            },
+        ])
+
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="deepseek/deepseek-v4-pro",
+            source_mode="web_search",
+        )
+
+        response = app_module.asyncio.run(
+            app_module.create_admin_race_card(request, self.admin_request)
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.openrouter_client.call_model.await_count, 2)
+        # Second call is the jockey/trainer gap-fill retry
+        second_call_kwargs = self.openrouter_client.call_model.await_args_list[1].kwargs
+        self.assertEqual(
+            second_call_kwargs["max_tokens"],
+            app_module.ADMIN_DEEPSEEK_WEB_SEARCH_RETRY_MAX_TOKENS,
+        )
+
+    def test_deepseek_admin_keeps_web_plugin(self):
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="deepseek/deepseek-v4-pro",
+            source_mode="web_search",
+        )
+
+        response = app_module.asyncio.run(
+            app_module.create_admin_race_card(request, self.admin_request)
+        )
+
+        self.assertEqual(response.status_code, 200)
+        call_kwargs = self.openrouter_client.call_model.await_args.kwargs
+        self.assertEqual(call_kwargs["plugins"], [{"id": "web"}])
+
+    def test_deepseek_admin_prompt_is_compact(self):
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="deepseek/deepseek-v4-pro",
+            source_mode="web_search",
+        )
+
+        response = app_module.asyncio.run(
+            app_module.create_admin_race_card(request, self.admin_request)
+        )
+
+        self.assertEqual(response.status_code, 200)
+        call_kwargs = self.openrouter_client.call_model.await_args.kwargs
+        prompt = call_kwargs["prompt"]
+        self.assertIn("Compact retry mode", prompt)
+
+    def test_non_deepseek_admin_uses_standard_max_tokens(self):
+        request = app_module.AdminRaceCardRequest(
+            race_date="2026-03-13",
+            track_id="SA",
+            llm_model="x-ai/grok-4.20-beta",
+            source_mode="web_search",
+        )
+
+        response = app_module.asyncio.run(
+            app_module.create_admin_race_card(request, self.admin_request)
+        )
+
+        self.assertEqual(response.status_code, 200)
+        call_kwargs = self.openrouter_client.call_model.await_args.kwargs
+        self.assertEqual(
+            call_kwargs["max_tokens"],
+            app_module.ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS,
+        )
 
 
 if __name__ == "__main__":

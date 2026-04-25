@@ -1218,7 +1218,9 @@ DEFAULT_ADMIN_LLM_MODEL = "x-ai/grok-4.20-beta"
 CARD_RETENTION_DAYS = int(os.environ.get("CARD_RETENTION_DAYS", "28"))
 ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS = 16000
 ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS = 8000
-ADMIN_COMPACT_JSON_RETRY_MODEL_PREFIXES = ("minimax/",)
+ADMIN_DEEPSEEK_WEB_SEARCH_INITIAL_MAX_TOKENS = 8000
+ADMIN_DEEPSEEK_WEB_SEARCH_RETRY_MAX_TOKENS = 6000
+ADMIN_COMPACT_JSON_RETRY_MODEL_PREFIXES = ("minimax/", "deepseek/",)
 ADMIN_MANUAL_MAX_TOKENS = 2500
 ADMIN_DEEP_DIVE_MAX_TOKENS = 12000
 STATUS_BADGE_CLASSES = {
@@ -1737,7 +1739,12 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                     "Please try again in a moment."
                 )
             elif failure_reason == "rate_limited":
-                detail = f"OpenRouter rate limited the request while {phase_label}. Please retry shortly."
+                if failure_detail:
+                    # The client may already include a specific message
+                    # (e.g. "switch to grok-4.20" for a blocked model).
+                    detail = f"OpenRouter rate limited the request while {phase_label}: {failure_detail}"
+                else:
+                    detail = f"OpenRouter rate limited the request while {phase_label}. Please retry shortly."
             else:
                 detail = f"OpenRouter was unavailable while {phase_label}."
 
@@ -1783,6 +1790,15 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
             session_id, "running", 25, "admin_structuring", status_message
         )
 
+        # DeepSeek-specific shaping: lower max_tokens and compact prompts to
+        # reduce routing / plugin overhead on OpenRouter.
+        is_deepseek = _is_deepseek_model(request.llm_model)
+        initial_max_tokens = (
+            ADMIN_DEEPSEEK_WEB_SEARCH_INITIAL_MAX_TOKENS
+            if is_web_search_mode and is_deepseek
+            else (ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS if is_web_search_mode else ADMIN_MANUAL_MAX_TOKENS)
+        )
+
         openrouter_response = await openrouter_client.call_model(
             model=request.llm_model,
             task_type="analysis",
@@ -1793,6 +1809,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                 official_card_url=official_card_url,
                 per_race_urls=per_race_urls,
                 equibase_entry_details=equibase_entry_details,
+                compact_response=is_deepseek,
             ),
             context=_build_admin_structuring_context(
                 request,
@@ -1802,11 +1819,7 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                 official_card_url=official_card_url,
                 per_race_urls=per_race_urls,
             ),
-            max_tokens=(
-                ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS
-                if is_web_search_mode
-                else ADMIN_MANUAL_MAX_TOKENS
-            ),
+            max_tokens=initial_max_tokens,
             temperature=0.2,
             plugins=[{"id": "web"}] if is_web_search_mode else None,
             return_metadata=True,
@@ -1862,7 +1875,11 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                     official_card_url=official_card_url,
                     per_race_urls=per_race_urls,
                 ),
-                max_tokens=ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS,
+                max_tokens=(
+                    ADMIN_DEEPSEEK_WEB_SEARCH_RETRY_MAX_TOKENS
+                    if _is_deepseek_model(request.llm_model)
+                    else ADMIN_WEB_SEARCH_INITIAL_MAX_TOKENS
+                ),
                 temperature=0.2,
                 plugins=[{"id": "web"}],
                 return_metadata=True,
@@ -1935,7 +1952,11 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                     official_card_url=official_card_url,
                     per_race_urls=per_race_urls,
                 ),
-                max_tokens=ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS,
+                max_tokens=(
+                    ADMIN_DEEPSEEK_WEB_SEARCH_RETRY_MAX_TOKENS
+                    if _is_deepseek_model(request.llm_model)
+                    else ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS
+                ),
                 temperature=0.2,
                 plugins=[{"id": "web"}],
                 return_metadata=True,
@@ -1996,7 +2017,11 @@ async def create_admin_race_card(request: AdminRaceCardRequest, http_request: Re
                     official_card_url=official_card_url,
                     per_race_urls=incomplete_per_race_urls,
                 ),
-                max_tokens=ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS,
+                max_tokens=(
+                    ADMIN_DEEPSEEK_WEB_SEARCH_RETRY_MAX_TOKENS
+                    if _is_deepseek_model(request.llm_model)
+                    else ADMIN_WEB_SEARCH_RETRY_MAX_TOKENS
+                ),
                 temperature=0.2,
                 plugins=[{"id": "web"}],
                 return_metadata=True,
@@ -4142,6 +4167,11 @@ Rules:
   * The top 3 horses must span at least 15 rating points.
   * Do NOT assign all horses ratings within 5 points of each other. Compress ratings only when the field is genuinely even — and in that case, keep the range between 50 and 70, not 80 to 90.
 {compact_rules}""".strip()
+
+
+def _is_deepseek_model(model: Optional[str]) -> bool:
+    """Return True if the model identifier belongs to the DeepSeek family."""
+    return bool(model and "deepseek" in model.lower())
 
 
 def _should_retry_admin_json_with_compact_prompt(

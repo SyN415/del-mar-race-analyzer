@@ -80,6 +80,11 @@ class OpenRouterClient:
         ),
     }
 
+    # DeepSeek-specific rate-limit policy constants
+    DEEPSEEK_MAX_RATE_LIMIT_RETRIES = 2
+    DEEPSEEK_RETRY_AFTER_CAP_SECONDS = 45.0
+    DEEPSEEK_MAX_DELAY_SECONDS = 60.0
+
     def __init__(self, config):
         self.config = config
         self.api_key = getattr(config, 'openrouter_api_key', None) or self._get_api_key_from_env()
@@ -115,6 +120,83 @@ class OpenRouterClient:
             or os.getenv('DELMAR_OPENROUTER_API_KEY')
             or os.getenv('OPENROUTER_API_KEY')
         )
+
+    @staticmethod
+    def _is_deepseek_model(model: Optional[str]) -> bool:
+        """Return True if the model identifier belongs to the DeepSeek family."""
+        return bool(model and "deepseek" in model.lower())
+
+    @staticmethod
+    def _parse_retry_after(value: Optional[str]) -> Optional[float]:
+        """Parse an HTTP Retry-After header value into seconds."""
+        if not value:
+            return None
+        try:
+            return float(value)
+        except ValueError:
+            return None
+
+    @staticmethod
+    def _truncate_error_body(text: str, limit: int = 500) -> str:
+        """Truncate a raw error body to a safe logging length."""
+        if not text:
+            return "(empty body)"
+        if len(text) <= limit:
+            return text
+        return text[:limit] + "..."
+
+    @classmethod
+    def _should_fail_fast_rate_limit(
+        cls,
+        model: Optional[str],
+        response_body: str,
+        retry_after: Optional[float],
+        attempt: int,
+    ) -> bool:
+        """Decide whether a 429 should fail immediately without further retries."""
+        if not cls._is_deepseek_model(model):
+            return False
+        # DeepSeek-specific: only allow up to DEEPSEEK_MAX_RATE_LIMIT_RETRIES attempts total.
+        # attempt is 0-based, so attempt + 1 >= DEEPSEEK_MAX_RATE_LIMIT_RETRIES means we're done.
+        if attempt + 1 >= cls.DEEPSEEK_MAX_RATE_LIMIT_RETRIES:
+            return True
+        # If Retry-After is present but unreasonably large, fail fast to avoid multi-minute hangs.
+        if retry_after is not None and retry_after > cls.DEEPSEEK_RETRY_AFTER_CAP_SECONDS:
+            return True
+        return False
+
+    @classmethod
+    def _rate_limit_failure_detail(
+        cls,
+        model: Optional[str],
+        response_body: str,
+        retry_after: Optional[float],
+    ) -> str:
+        """Build a human-friendly failure_detail string for a 429 response."""
+        parts: List[str] = []
+        if cls._is_deepseek_model(model):
+            parts.append(
+                f"OpenRouter rate limited {model} for this request shape. "
+                "Try again later, reduce output size, or switch to Grok/GPT for this run."
+            )
+        else:
+            parts.append("OpenRouter API rate limit was reached.")
+
+        if retry_after is not None:
+            parts.append(f"OpenRouter suggested retrying after {retry_after:.0f} seconds.")
+
+        excerpt = cls._truncate_error_body(response_body, limit=400)
+        parts.append(f"429 body excerpt: {excerpt}")
+        return " ".join(parts)
+
+    @classmethod
+    def _should_use_response_healing(cls, model: Optional[str]) -> bool:
+        """Return whether response-healing plugin should be used for the model.
+
+        DeepSeek models are prone to 429s under heavy plugin load; skip
+        response-healing for them to reduce routing overhead.
+        """
+        return not cls._is_deepseek_model(model)
 
     def _get_ai_config(self):
         return getattr(self.config, 'ai', None)
@@ -283,6 +365,7 @@ class OpenRouterClient:
 
                 active_response_format = None if response_format_disabled else response_format
                 active_plugins = self._build_request_plugins(
+                    model=model,
                     plugins=plugins,
                     response_format=active_response_format,
                 )
@@ -370,30 +453,77 @@ class OpenRouterClient:
                         return response_text
 
                     elif response.status == 429:  # Rate limit
-                        if attempt < self.retry_config["max_retries"]:
-                            # Prefer server-provided Retry-After when available
-                            retry_after = response.headers.get("Retry-After")
-                            if retry_after:
-                                try:
-                                    delay = float(retry_after)
-                                except ValueError:
-                                    delay = None
-                            else:
-                                delay = None
+                        # ── 429 DIAGNOSTICS ──
+                        body_text = await response.text()
+                        retry_after_raw = response.headers.get("Retry-After")
+                        retry_after = self._parse_retry_after(retry_after_raw)
 
-                            if delay is None:
-                                # DeepSeek models are heavily throttled on OpenRouter;
-                                # use a much longer base delay to avoid hammering.
-                                base_delay = 30.0 if model and "deepseek" in model else 15.0
-                                delay = min(
-                                    base_delay * (self.retry_config["backoff_factor"] ** attempt),
-                                    120.0,
+                        logger.warning(
+                            "OpenRouter 429 | model=%s | attempt=%d | "
+                            "Retry-After=%s | max_tokens=%s | plugins=%s | "
+                            "response_format=%s | body_excerpt=%s",
+                            model,
+                            attempt + 1,
+                            retry_after_raw,
+                            max_tokens,
+                            active_plugins,
+                            active_response_format,
+                            self._truncate_error_body(body_text, limit=300),
+                        )
+
+                        # Decide whether to fail fast without further retries.
+                        if self._should_fail_fast_rate_limit(model, body_text, retry_after, attempt):
+                            failure_detail = self._rate_limit_failure_detail(
+                                model, body_text, retry_after
+                            )
+                            self.usage_tracker.record_request(0, 0, response_time, False)
+                            return self._build_fallback_result(
+                                prompt,
+                                context,
+                                task_type,
+                                model,
+                                tier,
+                                return_metadata,
+                                failure_reason="rate_limited",
+                                failure_detail=failure_detail,
+                                attempts=attempt + 1,
+                                status_code=response.status,
+                            )
+
+                        # Determine effective retry budget.
+                        is_ds = self._is_deepseek_model(model)
+                        max_attempts = (
+                            self.DEEPSEEK_MAX_RATE_LIMIT_RETRIES
+                            if is_ds
+                            else self.retry_config["max_retries"] + 1
+                        )
+
+                        if attempt + 1 < max_attempts:
+                            if retry_after is not None:
+                                delay = retry_after
+                            else:
+                                delay = self.retry_config["base_delay"] * (
+                                    self.retry_config["backoff_factor"] ** attempt
                                 )
 
-                            logger.warning(f"Rate limited, retrying in {delay:.1f}s (attempt {attempt + 1})")
+                            # Cap delay to avoid multi-minute hangs.
+                            if is_ds:
+                                delay = min(delay, self.DEEPSEEK_MAX_DELAY_SECONDS)
+                            else:
+                                delay = min(delay, self.retry_config["max_delay"])
+
+                            logger.warning(
+                                "Rate limited, retrying in %.1fs (attempt %d/%d)",
+                                delay,
+                                attempt + 1,
+                                max_attempts,
+                            )
                             await asyncio.sleep(delay)
                             continue
 
+                        failure_detail = self._rate_limit_failure_detail(
+                            model, body_text, retry_after
+                        )
                         self.usage_tracker.record_request(0, 0, response_time, False)
                         return self._build_fallback_result(
                             prompt,
@@ -403,7 +533,7 @@ class OpenRouterClient:
                             tier,
                             return_metadata,
                             failure_reason="rate_limited",
-                            failure_detail="OpenRouter API rate limit was reached",
+                            failure_detail=failure_detail,
                             attempts=attempt + 1,
                             status_code=response.status,
                         )
@@ -501,6 +631,7 @@ class OpenRouterClient:
     def _build_request_plugins(
         self,
         *,
+        model: Optional[str],
         plugins: Optional[List[Dict[str, Any]]],
         response_format: Optional[Dict[str, Any]],
     ) -> Optional[List[Dict[str, Any]]]:
@@ -510,7 +641,11 @@ class OpenRouterClient:
             if isinstance(plugin, dict) and plugin.get("id")
         ]
 
-        if response_format and not any(plugin.get("id") == "response-healing" for plugin in active_plugins):
+        if (
+            response_format
+            and self._should_use_response_healing(model)
+            and not any(plugin.get("id") == "response-healing" for plugin in active_plugins)
+        ):
             active_plugins.append({"id": "response-healing"})
 
         return active_plugins or None
